@@ -273,3 +273,74 @@ fn component(value: glam::Vec3, axis: usize) -> f32 {
         _ => value.z,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::{LinearBvhNode, build_mesh_bvh, build_scene_bvh, intersect_bounds};
+    use crate::{mesh::Bounds, ray::Ray};
+
+    #[test]
+    fn build_mesh_bvh_returns_none_for_empty_input() {
+        assert!(build_mesh_bvh(&[]).is_none());
+    }
+
+    #[test]
+    fn build_scene_bvh_returns_none_for_empty_input() {
+        assert!(build_scene_bvh(&[]).is_none());
+    }
+
+    #[test]
+    fn build_mesh_bvh_creates_interior_node_for_separated_bounds() {
+        let bounds = [
+            Bounds {
+                min: Vec3::new(4.0, 0.0, 0.0),
+                max: Vec3::new(5.0, 1.0, 1.0),
+            },
+            Bounds {
+                min: Vec3::new(0.0, 0.0, 0.0),
+                max: Vec3::new(1.0, 1.0, 1.0),
+            },
+        ];
+
+        let bvh = build_mesh_bvh(&bounds).expect("expected BVH");
+
+        assert_eq!(bvh.nodes.len(), 3);
+        assert_eq!(bvh.triangle_indices, vec![1, 0]);
+        assert_eq!(
+            bvh.nodes[0],
+            LinearBvhNode::Interior {
+                bounds: Bounds {
+                    min: Vec3::new(0.0, 0.0, 0.0),
+                    max: Vec3::new(5.0, 1.0, 1.0),
+                },
+                right_child_offset: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn intersect_bounds_returns_hit_distance() {
+        let ray = Ray::new(Vec3::new(0.5, 0.5, 2.0), Vec3::NEG_Z);
+        let bounds = Bounds {
+            min: Vec3::ZERO,
+            max: Vec3::ONE,
+        };
+
+        let t = intersect_bounds(&ray, f32::INFINITY, bounds).expect("expected bounds hit");
+
+        assert!((t - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn intersect_bounds_returns_none_for_parallel_miss() {
+        let ray = Ray::new(Vec3::new(2.0, 0.5, 0.5), Vec3::Y);
+        let bounds = Bounds {
+            min: Vec3::ZERO,
+            max: Vec3::ONE,
+        };
+
+        assert!(intersect_bounds(&ray, f32::INFINITY, bounds).is_none());
+    }
+}

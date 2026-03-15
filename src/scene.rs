@@ -352,6 +352,38 @@ mod tests {
         )
     }
 
+    fn stacked_mesh() -> Mesh {
+        Mesh::new(
+            vec![
+                Vertex {
+                    position: Vec3::new(0.0, 0.0, 0.0),
+                    normal: Vec3::Z,
+                },
+                Vertex {
+                    position: Vec3::new(1.0, 0.0, 0.0),
+                    normal: Vec3::Z,
+                },
+                Vertex {
+                    position: Vec3::new(0.0, 1.0, 0.0),
+                    normal: Vec3::Z,
+                },
+                Vertex {
+                    position: Vec3::new(0.0, 0.0, -1.0),
+                    normal: Vec3::Z,
+                },
+                Vertex {
+                    position: Vec3::new(1.0, 0.0, -1.0),
+                    normal: Vec3::Z,
+                },
+                Vertex {
+                    position: Vec3::new(0.0, 1.0, -1.0),
+                    normal: Vec3::Z,
+                },
+            ],
+            vec![0, 1, 2, 3, 4, 5],
+        )
+    }
+
     #[test]
     fn add_instance_populates_triangle_refs() {
         let mut scene = Scene::new();
@@ -436,5 +468,76 @@ mod tests {
             .expect_err("expected missing BVH error");
 
         assert_eq!(error, ClosestHitError::BvhNotBuilt);
+    }
+
+    #[test]
+    fn build_bvh_populates_scene_and_mesh_bvhs() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(stacked_mesh());
+        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+
+        scene.build_bvh();
+
+        assert!(scene.bvh.is_some());
+        assert!(scene.meshes[mesh_index.0].bvh.is_some());
+    }
+
+    #[test]
+    fn closest_hit_returns_none_when_ray_misses_scene() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        scene.build_bvh();
+
+        let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
+        let hit = scene.closest_hit(&ray).expect("BVH should be built");
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn adding_instance_after_build_invalidates_scene_bvh() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        scene.build_bvh();
+
+        scene.add_instance(
+            mesh_index,
+            Vec3::new(1.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
+
+        assert!(scene.bvh.is_none());
+    }
+
+    #[test]
+    fn adding_mesh_after_build_invalidates_scene_bvh() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        scene.build_bvh();
+
+        scene.add_mesh(unit_mesh(-1.0));
+
+        assert!(scene.bvh.is_none());
+    }
+
+    #[test]
+    fn closest_hit_traverses_multi_triangle_mesh_bvh() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(stacked_mesh());
+        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        scene.build_bvh();
+
+        let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
+        let hit = scene
+            .closest_hit(&ray)
+            .expect("BVH should be built")
+            .expect("expected hit");
+
+        assert_eq!(hit.triangle.triangle_index, 0);
+        assert!((hit.t - 1.5).abs() < 1.0e-6);
     }
 }
