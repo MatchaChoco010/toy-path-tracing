@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Mat3, Mat4, Vec3};
 use std::{fmt, path::Path};
 
 use crate::bvh::{MeshBvh, build_mesh_bvh};
@@ -183,24 +183,62 @@ pub fn load_mesh(path: &Path) -> Result<Mesh, LoadMeshError> {
     let (document, buffers, _) = gltf::import(path)?;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
+    let mut appended_mesh = false;
 
-    for mesh in document.meshes() {
-        append_gltf_mesh(&buffers, mesh, &mut vertices, &mut indices)?;
+    if let Some(scene) = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+    {
+        for node in scene.nodes() {
+            appended_mesh |=
+                append_gltf_node(&buffers, node, Mat4::IDENTITY, &mut vertices, &mut indices)?;
+        }
+    } else {
+        for mesh in document.meshes() {
+            append_gltf_mesh(&buffers, mesh, Mat4::IDENTITY, &mut vertices, &mut indices)?;
+            appended_mesh = true;
+        }
     }
 
-    if vertices.is_empty() || indices.is_empty() {
+    if !appended_mesh || vertices.is_empty() || indices.is_empty() {
         return Err(LoadMeshError::EmptyMesh);
     }
 
     Ok(Mesh::new(vertices, indices))
 }
 
+fn append_gltf_node(
+    buffers: &[gltf::buffer::Data],
+    node: gltf::Node<'_>,
+    parent_transform: Mat4,
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+) -> Result<bool, LoadMeshError> {
+    let local_transform = Mat4::from_cols_array_2d(&node.transform().matrix());
+    let node_transform = parent_transform * local_transform;
+    let mut appended_mesh = false;
+
+    if let Some(mesh) = node.mesh() {
+        append_gltf_mesh(buffers, mesh, node_transform, vertices, indices)?;
+        appended_mesh = true;
+    }
+
+    for child in node.children() {
+        appended_mesh |= append_gltf_node(buffers, child, node_transform, vertices, indices)?;
+    }
+
+    Ok(appended_mesh)
+}
+
 fn append_gltf_mesh(
     buffers: &[gltf::buffer::Data],
     mesh: gltf::Mesh<'_>,
+    transform: Mat4,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
 ) -> Result<(), LoadMeshError> {
+    let normal_transform = Mat3::from_mat4(transform.inverse().transpose());
+
     for primitive in mesh.primitives() {
         if primitive.mode() != gltf::mesh::Mode::Triangles {
             return Err(LoadMeshError::UnsupportedPrimitiveMode {
@@ -218,6 +256,7 @@ fn append_gltf_mesh(
                 primitive_index: primitive.index(),
             })?
             .map(Vec3::from_array)
+            .map(|position| transform.transform_point3(position))
             .collect::<Vec<_>>();
 
         let local_indices = reader
@@ -238,7 +277,7 @@ fn append_gltf_mesh(
             .map(|normals| {
                 normals
                     .map(Vec3::from_array)
-                    .map(|normal| normal.normalize_or_zero())
+                    .map(|normal| normal_transform.mul_vec3(normal).normalize_or_zero())
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| generated_normals.clone());

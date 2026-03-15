@@ -1,6 +1,7 @@
 use clap::Parser;
-use glam::{UVec2, Vec3};
+use glam::{UVec2, Vec2, Vec3};
 use image::RgbImage;
+use rand::RngExt;
 use rayon::prelude::*;
 use std::{
     fs,
@@ -16,6 +17,9 @@ struct Args {
 
     #[arg(long = "scene", default_value_t = 0)]
     scene: u32,
+
+    #[arg(long = "spp", default_value_t = 32, value_parser = clap::value_parser!(u32).range(1..))]
+    spp: u32,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,22 +35,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pixels
         .par_chunks_mut(3)
         .enumerate()
-        .for_each(|(index, pixel)| {
+        .for_each_init(rand::rng, |rng, (index, pixel)| {
             let x = (index as u32) % resolution.x;
             let y = (index as u32) / resolution.x;
-            let ray = camera.generate_ray(resolution, UVec2::new(x, y));
+            let mut color = Vec3::ZERO;
 
-            let color = scene
-                .closest_hit(&ray)
-                .expect("scene.build_bvh() must be called before traversal")
-                .map(|hit| {
-                    let [n0, n1, n2] = scene.triangle_normals(hit.triangle);
-                    let normal =
-                        (hit.barycentric.x * n0 + hit.barycentric.y * n1 + hit.barycentric.z * n2)
+            for sample_index in 0..args.spp {
+                let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+                let ray = camera.generate_ray(resolution, UVec2::new(x, y), us);
+                let sample = scene
+                    .closest_hit(&ray)
+                    .expect("scene.build_bvh() must be called before traversal")
+                    .map(|hit| {
+                        let [n0, n1, n2] = scene.triangle_normals(hit.triangle);
+                        let normal = (hit.barycentric.x * n0
+                            + hit.barycentric.y * n1
+                            + hit.barycentric.z * n2)
                             .normalize_or_zero();
-                    0.5 * (normal + Vec3::ONE)
-                })
-                .unwrap_or(Vec3::ZERO);
+                        0.5 * (normal + Vec3::ONE)
+                    })
+                    .unwrap_or(Vec3::ZERO);
+                let sample_count = (sample_index + 1) as f32;
+                color += (sample - color) / sample_count;
+            }
 
             pixel[0] = float_to_u8(color.x);
             pixel[1] = float_to_u8(color.y);

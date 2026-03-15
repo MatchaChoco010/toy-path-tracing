@@ -94,6 +94,23 @@ impl Scene {
             * Mat4::from_quat(rotation)
             * Mat4::from_scale(scale)
             * Mat4::from_translation(-pivot);
+        self.add_instance_with_transform(mesh_index, local_to_world)
+    }
+
+    pub fn add_instance_raw(
+        &mut self,
+        mesh_index: MeshIndex,
+        local_to_world: Mat4,
+    ) -> InstanceIndex {
+        self.add_instance_with_transform(mesh_index, local_to_world)
+    }
+
+    fn add_instance_with_transform(
+        &mut self,
+        mesh_index: MeshIndex,
+        local_to_world: Mat4,
+    ) -> InstanceIndex {
+        let mesh = &self.meshes[mesh_index.0];
         let world_to_local = local_to_world.inverse();
         let normal_to_world = Mat3::from_mat4(world_to_local.transpose());
         let world_bounds = transform_bounds(mesh.bounds, local_to_world);

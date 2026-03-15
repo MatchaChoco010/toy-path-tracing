@@ -1,4 +1,4 @@
-use glam::{UVec2, Vec3};
+use glam::{UVec2, Vec2, Vec3};
 
 use crate::ray::Ray;
 
@@ -33,9 +33,9 @@ impl PinholeCamera {
         }
     }
 
-    pub fn generate_ray(&self, resolution: UVec2, pixel: UVec2) -> Ray {
+    pub fn generate_ray(&self, resolution: UVec2, pixel: UVec2, us: Vec2) -> Ray {
         let resolution = resolution.as_vec2();
-        let pixel = pixel.as_vec2() + 0.5;
+        let pixel = pixel.as_vec2() + 0.5 + 0.5 * sample_tent_2d(us);
         let aspect_ratio = resolution.x / resolution.y;
 
         let sensor_x = ((2.0 * pixel.x / resolution.x) - 1.0) * aspect_ratio * self.tan_half_fov_y;
@@ -48,9 +48,22 @@ impl PinholeCamera {
     }
 }
 
+fn sample_tent_2d(us: Vec2) -> Vec2 {
+    Vec2::new(sample_tent_1d(us.x), sample_tent_1d(us.y))
+}
+
+fn sample_tent_1d(u: f32) -> f32 {
+    let u = u.clamp(0.0, 1.0);
+    if u < 0.5 {
+        (2.0 * u).sqrt() - 1.0
+    } else {
+        1.0 - (2.0 - 2.0 * u).sqrt()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use glam::{UVec2, Vec3};
+    use glam::{UVec2, Vec2, Vec3};
 
     use super::PinholeCamera;
 
@@ -63,7 +76,7 @@ mod tests {
             60.0_f32.to_radians(),
         );
 
-        let ray = camera.generate_ray(UVec2::new(3, 3), UVec2::new(1, 1));
+        let ray = camera.generate_ray(UVec2::new(3, 3), UVec2::new(1, 1), Vec2::splat(0.5));
 
         assert!(ray.origin.abs_diff_eq(Vec3::new(0.0, 0.0, 5.0), 1.0e-6));
         assert!(ray.direction.abs_diff_eq(Vec3::NEG_Z, 1.0e-6));
@@ -78,7 +91,7 @@ mod tests {
             45.0_f32.to_radians(),
         );
 
-        let ray = camera.generate_ray(UVec2::new(512, 512), UVec2::new(0, 0));
+        let ray = camera.generate_ray(UVec2::new(512, 512), UVec2::new(0, 0), Vec2::splat(0.5));
 
         assert!((ray.direction.length() - 1.0).abs() < 1.0e-6);
     }
