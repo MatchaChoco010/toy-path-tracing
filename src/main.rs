@@ -85,8 +85,9 @@ fn trace_radiance(
     let mut radiance = Vec3::ZERO;
     let mut throughput = Vec3::ONE;
     let mut ray = initial_ray;
+    let rr_start_depth = 4;
 
-    for _ in 0..max_depth {
+    for depth in 0..max_depth {
         let Some(hit) = scene
             .closest_hit(&ray)
             .expect("scene.build_bvh() must be called before traversal")
@@ -129,6 +130,15 @@ fn trace_radiance(
                 let pdf = 1.0 / (2.0 * PI);
                 let bsdf = rho / PI;
                 throughput *= bsdf * (cos_theta / pdf);
+
+                if depth + 1 >= rr_start_depth {
+                    let survive_probability = russian_roulette_probability(throughput);
+                    if rng.random::<f32>() > survive_probability {
+                        break;
+                    }
+                    throughput /= survive_probability;
+                }
+
                 ray = Ray::new(hit_position + 1.0e-4 * normal, next_direction);
             }
         }
@@ -143,6 +153,10 @@ fn sample_uniform_hemisphere(us: Vec2) -> Vec3 {
     let phi = TAU * us.y;
 
     Vec3::new(r * phi.cos(), r * phi.sin(), z)
+}
+
+fn russian_roulette_probability(throughput: Vec3) -> f32 {
+    throughput.max_element().clamp(0.05, 0.95)
 }
 
 fn reinhard(color: Vec3) -> Vec3 {
