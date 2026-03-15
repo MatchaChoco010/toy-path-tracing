@@ -1,6 +1,8 @@
 use glam::Vec3;
 use std::{fmt, path::Path};
 
+use crate::bvh::{MeshBvh, build_mesh_bvh};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
     pub min: Vec3,
@@ -8,12 +10,22 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    pub const EMPTY: Self = Self {
+        min: Vec3::splat(f32::INFINITY),
+        max: Vec3::splat(f32::NEG_INFINITY),
+    };
+
     pub fn center(&self) -> Vec3 {
         0.5 * (self.min + self.max)
     }
 
     pub fn extent(&self) -> Vec3 {
         self.max - self.min
+    }
+
+    pub fn surface_area(&self) -> f32 {
+        let extent = self.extent().max(Vec3::ZERO);
+        2.0 * (extent.x * extent.y + extent.x * extent.z + extent.y * extent.z)
     }
 
     pub fn union(self, other: Self) -> Self {
@@ -35,6 +47,7 @@ pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub bounds: Bounds,
+    pub bvh: Option<MeshBvh>,
 }
 
 impl Mesh {
@@ -45,6 +58,7 @@ impl Mesh {
             vertices,
             indices,
             bounds,
+            bvh: None,
         }
     }
 
@@ -70,6 +84,22 @@ impl Mesh {
             self.vertices[i1 as usize].normal,
             self.vertices[i2 as usize].normal,
         ]
+    }
+
+    pub fn triangle_bounds(&self, triangle_index: usize) -> Bounds {
+        let [v0, v1, v2] = self.triangle_positions(triangle_index);
+
+        Bounds {
+            min: v0.min(v1).min(v2),
+            max: v0.max(v1).max(v2),
+        }
+    }
+
+    pub fn build_bvh(&mut self) {
+        let triangle_bounds = (0..self.triangle_count())
+            .map(|triangle_index| self.triangle_bounds(triangle_index))
+            .collect::<Vec<_>>();
+        self.bvh = build_mesh_bvh(&triangle_bounds);
     }
 
     fn triangle_indices(&self, triangle_index: usize) -> [u32; 3] {

@@ -1,6 +1,8 @@
 use glam::{Mat3, Mat4, Quat, Vec3};
+use std::fmt;
 
 use crate::{
+    bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
     mesh::{Bounds, Mesh},
     ray::{Ray, intersect_triangle},
 };
@@ -38,6 +40,29 @@ pub struct Scene {
     pub meshes: Vec<Mesh>,
     pub instances: Vec<Instance>,
     pub triangles: Vec<TriangleRef>,
+    pub bvh: Option<SceneBvh>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosestHitError {
+    BvhNotBuilt,
+}
+
+impl fmt::Display for ClosestHitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BvhNotBuilt => write!(f, "scene BVH has not been built yet"),
+        }
+    }
+}
+
+impl std::error::Error for ClosestHitError {}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MeshHit {
+    triangle_index: usize,
+    t: f32,
+    barycentric: Vec3,
 }
 
 impl Scene {
@@ -48,6 +73,7 @@ impl Scene {
     pub fn add_mesh(&mut self, mesh: Mesh) -> MeshIndex {
         let mesh_index = MeshIndex(self.meshes.len());
         self.meshes.push(mesh);
+        self.bvh = None;
         mesh_index
     }
 
@@ -86,46 +112,97 @@ impl Scene {
                 instance_index,
                 triangle_index,
             }));
+        self.bvh = None;
 
         instance_index
     }
 
-    pub fn closest_hit(&self, ray: &Ray) -> Option<SceneHit> {
+    pub fn build_bvh(&mut self) {
+        for mesh in &mut self.meshes {
+            mesh.build_bvh();
+        }
+
+        let instance_bounds = self
+            .instances
+            .iter()
+            .map(|instance| instance.world_bounds)
+            .collect::<Vec<_>>();
+        self.bvh = build_scene_bvh(&instance_bounds);
+    }
+
+    pub fn closest_hit(&self, ray: &Ray) -> Result<Option<SceneHit>, ClosestHitError> {
+        let bvh = self.bvh.as_ref().ok_or(ClosestHitError::BvhNotBuilt)?;
         let mut closest_world_t = f32::INFINITY;
         let mut closest_hit = None;
-        let mut current_instance_index = None;
-        let mut current_local_ray = *ray;
+        let mut stack = vec![0_usize];
 
-        for triangle in &self.triangles {
-            if current_instance_index != Some(triangle.instance_index) {
-                let instance = self.instances[triangle.instance_index.0];
-                current_local_ray = ray.transformed(instance.world_to_local);
-                current_instance_index = Some(triangle.instance_index);
+        while let Some(node_index) = stack.pop() {
+            let node = bvh.nodes[node_index];
+            if intersect_bounds(ray, closest_world_t, node.bounds()).is_none() {
+                continue;
             }
 
-            let instance = self.instances[triangle.instance_index.0];
-            let mesh = &self.meshes[instance.mesh_index.0];
-            let [v0, v1, v2] = mesh.triangle_positions(triangle.triangle_index);
+            match node {
+                LinearBvhNode::Leaf {
+                    primitive_offset,
+                    primitive_count,
+                    ..
+                } => {
+                    for ordered_index in primitive_offset..primitive_offset + primitive_count {
+                        let instance_index = InstanceIndex(bvh.instance_indices[ordered_index]);
+                        let instance = self.instances[instance_index.0];
+                        let local_ray = ray.transformed(instance.world_to_local);
+                        let mesh = &self.meshes[instance.mesh_index.0];
 
-            if let Some(hit) = intersect_triangle(&current_local_ray, f32::INFINITY, v0, v1, v2) {
-                let local_hit_position = current_local_ray.at(hit.t);
-                let world_hit_position =
-                    instance.local_to_world.transform_point3(local_hit_position);
-                let world_t = (world_hit_position - ray.origin).dot(ray.direction)
-                    / ray.direction.length_squared();
+                        if let Some(mesh_hit) = closest_mesh_hit(mesh, &local_ray, closest_world_t)
+                        {
+                            closest_world_t = mesh_hit.t;
+                            closest_hit = Some(SceneHit {
+                                triangle: TriangleRef {
+                                    instance_index,
+                                    triangle_index: mesh_hit.triangle_index,
+                                },
+                                t: mesh_hit.t,
+                                barycentric: mesh_hit.barycentric,
+                            });
+                        }
+                    }
+                }
+                LinearBvhNode::Interior {
+                    right_child_offset, ..
+                } => {
+                    let left_child_index = node_index + 1;
+                    let right_child_index = right_child_offset;
+                    let left_hit = intersect_bounds(
+                        ray,
+                        closest_world_t,
+                        bvh.nodes[left_child_index].bounds(),
+                    );
+                    let right_hit = intersect_bounds(
+                        ray,
+                        closest_world_t,
+                        bvh.nodes[right_child_index].bounds(),
+                    );
 
-                if world_t > 0.0 && world_t < closest_world_t {
-                    closest_world_t = world_t;
-                    closest_hit = Some(SceneHit {
-                        triangle: *triangle,
-                        t: world_t,
-                        barycentric: hit.barycentric,
-                    });
+                    match (left_hit, right_hit) {
+                        (Some(left_t), Some(right_t)) => {
+                            if left_t <= right_t {
+                                stack.push(right_child_index);
+                                stack.push(left_child_index);
+                            } else {
+                                stack.push(left_child_index);
+                                stack.push(right_child_index);
+                            }
+                        }
+                        (Some(_), None) => stack.push(left_child_index),
+                        (None, Some(_)) => stack.push(right_child_index),
+                        (None, None) => {}
+                    }
                 }
             }
         }
 
-        closest_hit
+        Ok(closest_hit)
     }
 
     pub fn triangle_normals(&self, triangle: TriangleRef) -> [Vec3; 3] {
@@ -151,6 +228,72 @@ impl Scene {
 
         Some(bounds)
     }
+}
+
+fn closest_mesh_hit(mesh: &Mesh, ray: &Ray, t_max: f32) -> Option<MeshHit> {
+    let bvh = mesh
+        .bvh
+        .as_ref()
+        .expect("mesh BVH must be built before traversal");
+    let mut closest_t = t_max;
+    let mut closest_hit = None;
+    let mut stack = vec![0_usize];
+
+    while let Some(node_index) = stack.pop() {
+        let node = bvh.nodes[node_index];
+        if intersect_bounds(ray, closest_t, node.bounds()).is_none() {
+            continue;
+        }
+
+        match node {
+            LinearBvhNode::Leaf {
+                primitive_offset,
+                primitive_count,
+                ..
+            } => {
+                for ordered_index in primitive_offset..primitive_offset + primitive_count {
+                    let triangle_index = bvh.triangle_indices[ordered_index];
+                    let [v0, v1, v2] = mesh.triangle_positions(triangle_index);
+
+                    if let Some(hit) = intersect_triangle(ray, closest_t, v0, v1, v2) {
+                        closest_t = hit.t;
+                        closest_hit = Some(MeshHit {
+                            triangle_index,
+                            t: hit.t,
+                            barycentric: hit.barycentric,
+                        });
+                    }
+                }
+            }
+            LinearBvhNode::Interior {
+                right_child_offset, ..
+            } => {
+                let left_child_index = node_index + 1;
+                let right_child_index = right_child_offset;
+                let left_hit =
+                    intersect_bounds(ray, closest_t, bvh.nodes[left_child_index].bounds());
+                let right_hit =
+                    intersect_bounds(ray, closest_t, bvh.nodes[right_child_index].bounds());
+
+                match (left_hit, right_hit) {
+                    (Some(left_t), Some(right_t)) => {
+                        if left_t <= right_t {
+                            stack.push(right_child_index);
+                            stack.push(left_child_index);
+                        } else {
+                            stack.push(left_child_index);
+                            stack.push(right_child_index);
+                        }
+                    }
+                    (Some(_), None) => stack.push(left_child_index),
+                    (None, Some(_)) => stack.push(right_child_index),
+                    (None, None) => {}
+                }
+            }
+        }
+    }
+
+    closest_hit
 }
 
 fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
@@ -183,7 +326,7 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 mod tests {
     use glam::{Quat, Vec3};
 
-    use super::{InstanceIndex, Scene, TriangleRef};
+    use super::{ClosestHitError, InstanceIndex, Scene, TriangleRef};
     use crate::{
         mesh::{Mesh, Vertex},
         ray::Ray,
@@ -247,9 +390,13 @@ mod tests {
             Quat::IDENTITY,
             Vec3::ONE,
         );
+        scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
-        let hit = scene.closest_hit(&ray).expect("expected hit");
+        let hit = scene
+            .closest_hit(&ray)
+            .expect("BVH should be built")
+            .expect("expected hit");
 
         assert_eq!(
             hit.triangle,
@@ -266,10 +413,28 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::splat(2.0));
+        scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 1.0), Vec3::NEG_Z);
-        let hit = scene.closest_hit(&ray).expect("expected hit");
+        let hit = scene
+            .closest_hit(&ray)
+            .expect("BVH should be built")
+            .expect("expected hit");
 
         assert!((hit.t - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn closest_hit_requires_bvh_build() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+
+        let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
+        let error = scene
+            .closest_hit(&ray)
+            .expect_err("expected missing BVH error");
+
+        assert_eq!(error, ClosestHitError::BvhNotBuilt);
     }
 }

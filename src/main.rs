@@ -21,7 +21,10 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let resolution = UVec2::new(512, 512);
-    let (scene, camera) = load_scene(args.scene)?;
+    let (mut scene, camera) = load_scene(args.scene)?;
+    let build_bvh_start = Instant::now();
+    scene.build_bvh();
+    println!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
 
     let mut pixels = vec![0_u8; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();
@@ -35,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let color = scene
                 .closest_hit(&ray)
+                .expect("scene.build_bvh() must be called before traversal")
                 .map(|hit| {
                     let [n0, n1, n2] = scene.triangle_normals(hit.triangle);
                     let normal =
