@@ -13,6 +13,9 @@ pub struct MeshIndex(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InstanceIndex(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MaterialIndex(pub usize);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TriangleRef {
     pub instance_index: InstanceIndex,
@@ -20,8 +23,15 @@ pub struct TriangleRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Material {
+    Diffuse { rho: Vec3 },
+    Emissive { color: Vec3, strength: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Instance {
     pub mesh_index: MeshIndex,
+    pub material_index: MaterialIndex,
     pub local_to_world: Mat4,
     pub world_to_local: Mat4,
     pub normal_to_world: Mat3,
@@ -38,6 +48,7 @@ pub struct SceneHit {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Scene {
     pub meshes: Vec<Mesh>,
+    pub materials: Vec<Material>,
     pub instances: Vec<Instance>,
     pub triangles: Vec<TriangleRef>,
     pub bvh: Option<SceneBvh>,
@@ -77,9 +88,16 @@ impl Scene {
         mesh_index
     }
 
+    pub fn add_material(&mut self, material: Material) -> MaterialIndex {
+        let material_index = MaterialIndex(self.materials.len());
+        self.materials.push(material);
+        material_index
+    }
+
     pub fn add_instance(
         &mut self,
         mesh_index: MeshIndex,
+        material_index: MaterialIndex,
         translation: Vec3,
         rotation: Quat,
         scale: Vec3,
@@ -94,20 +112,22 @@ impl Scene {
             * Mat4::from_quat(rotation)
             * Mat4::from_scale(scale)
             * Mat4::from_translation(-pivot);
-        self.add_instance_with_transform(mesh_index, local_to_world)
+        self.add_instance_with_transform(mesh_index, material_index, local_to_world)
     }
 
     pub fn add_instance_raw(
         &mut self,
         mesh_index: MeshIndex,
+        material_index: MaterialIndex,
         local_to_world: Mat4,
     ) -> InstanceIndex {
-        self.add_instance_with_transform(mesh_index, local_to_world)
+        self.add_instance_with_transform(mesh_index, material_index, local_to_world)
     }
 
     fn add_instance_with_transform(
         &mut self,
         mesh_index: MeshIndex,
+        material_index: MaterialIndex,
         local_to_world: Mat4,
     ) -> InstanceIndex {
         let mesh = &self.meshes[mesh_index.0];
@@ -119,6 +139,7 @@ impl Scene {
 
         self.instances.push(Instance {
             mesh_index,
+            material_index,
             local_to_world,
             world_to_local,
             normal_to_world,
@@ -234,6 +255,23 @@ impl Scene {
         })
     }
 
+    pub fn triangle_positions(&self, triangle: TriangleRef) -> [Vec3; 3] {
+        let instance = self.instances[triangle.instance_index.0];
+        let positions =
+            self.meshes[instance.mesh_index.0].triangle_positions(triangle.triangle_index);
+
+        positions.map(|position| instance.local_to_world.transform_point3(position))
+    }
+
+    pub fn material(&self, material_index: MaterialIndex) -> Material {
+        self.materials[material_index.0]
+    }
+
+    pub fn instance_material(&self, instance_index: InstanceIndex) -> Material {
+        let material_index = self.instances[instance_index.0].material_index;
+        self.material(material_index)
+    }
+
     pub fn bounds(&self) -> Option<Bounds> {
         let mut instances = self.instances.iter();
         let first = instances.next()?;
@@ -343,7 +381,7 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 mod tests {
     use glam::{Quat, Vec3};
 
-    use super::{ClosestHitError, InstanceIndex, Scene, TriangleRef};
+    use super::{ClosestHitError, InstanceIndex, Material, Scene, TriangleRef};
     use crate::{
         mesh::{Mesh, Vertex},
         ray::Ray,
@@ -401,13 +439,27 @@ mod tests {
         )
     }
 
+    fn default_material(scene: &mut Scene) -> super::MaterialIndex {
+        scene.add_material(Material::Diffuse {
+            rho: Vec3::splat(0.5),
+        })
+    }
+
     #[test]
     fn add_instance_populates_triangle_refs() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
         scene.add_instance(
             mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
+        scene.add_instance(
+            mesh_index,
+            material_index,
             Vec3::new(0.0, 0.0, 1.0),
             Quat::IDENTITY,
             Vec3::ONE,
@@ -432,9 +484,17 @@ mod tests {
     fn closest_hit_returns_the_nearest_triangle() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
         scene.add_instance(
             mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
+        scene.add_instance(
+            mesh_index,
+            material_index,
             Vec3::new(0.0, 0.0, -1.0),
             Quat::IDENTITY,
             Vec3::ONE,
@@ -461,7 +521,14 @@ mod tests {
     fn closest_hit_handles_scaled_instances() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::splat(2.0));
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::splat(2.0),
+        );
         scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 1.0), Vec3::NEG_Z);
@@ -477,7 +544,14 @@ mod tests {
     fn closest_hit_requires_bvh_build() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
         let error = scene
@@ -491,7 +565,14 @@ mod tests {
     fn build_bvh_populates_scene_and_mesh_bvhs() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(stacked_mesh());
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
 
         scene.build_bvh();
 
@@ -503,7 +584,14 @@ mod tests {
     fn closest_hit_returns_none_when_ray_misses_scene() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
         scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
@@ -516,11 +604,19 @@ mod tests {
     fn adding_instance_after_build_invalidates_scene_bvh() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
         scene.build_bvh();
 
         scene.add_instance(
             mesh_index,
+            material_index,
             Vec3::new(1.0, 0.0, 0.0),
             Quat::IDENTITY,
             Vec3::ONE,
@@ -533,7 +629,14 @@ mod tests {
     fn adding_mesh_after_build_invalidates_scene_bvh() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
         scene.build_bvh();
 
         scene.add_mesh(unit_mesh(-1.0));
@@ -545,7 +648,14 @@ mod tests {
     fn closest_hit_traverses_multi_triangle_mesh_bvh() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(stacked_mesh());
-        scene.add_instance(mesh_index, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let material_index = default_material(&mut scene);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
         scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
@@ -556,5 +666,30 @@ mod tests {
 
         assert_eq!(hit.triangle.triangle_index, 0);
         assert!((hit.t - 1.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn instance_material_returns_assigned_material() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index = scene.add_material(Material::Emissive {
+            color: Vec3::ONE,
+            strength: 12.0,
+        });
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
+
+        assert_eq!(
+            scene.instance_material(InstanceIndex(0)),
+            Material::Emissive {
+                color: Vec3::ONE,
+                strength: 12.0,
+            }
+        );
     }
 }
