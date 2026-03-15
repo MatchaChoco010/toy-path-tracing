@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 const MACHINE_EPSILON: f32 = f32::EPSILON * 0.5;
 
@@ -15,6 +15,13 @@ impl Ray {
 
     pub fn at(&self, t: f32) -> Vec3 {
         self.origin + t * self.direction
+    }
+
+    pub fn transformed(&self, transform: Mat4) -> Self {
+        Self {
+            origin: transform.transform_point3(self.origin),
+            direction: transform.transform_vector3(self.direction),
+        }
     }
 }
 

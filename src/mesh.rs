@@ -1,5 +1,28 @@
-use glam::{Mat3, Mat4, Vec3};
+use glam::Vec3;
 use std::{fmt, path::Path};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl Bounds {
+    pub fn center(&self) -> Vec3 {
+        0.5 * (self.min + self.max)
+    }
+
+    pub fn extent(&self) -> Vec3 {
+        self.max - self.min
+    }
+
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            min: self.min.min(other.min),
+            max: self.max.max(other.max),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
@@ -11,9 +34,20 @@ pub struct Vertex {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    pub bounds: Bounds,
 }
 
 impl Mesh {
+    pub fn new(vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
+        let bounds = compute_bounds(&vertices).expect("mesh must contain at least one vertex");
+
+        Self {
+            vertices,
+            indices,
+            bounds,
+        }
+    }
+
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
@@ -120,51 +154,20 @@ pub fn load_mesh(path: &Path) -> Result<Mesh, LoadMeshError> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
-    if let Some(scene) = document
-        .default_scene()
-        .or_else(|| document.scenes().next())
-    {
-        for node in scene.nodes() {
-            append_node_mesh(&buffers, node, Mat4::IDENTITY, &mut vertices, &mut indices)?;
-        }
-    } else {
-        for mesh in document.meshes() {
-            append_gltf_mesh(&buffers, mesh, Mat4::IDENTITY, &mut vertices, &mut indices)?;
-        }
+    for mesh in document.meshes() {
+        append_gltf_mesh(&buffers, mesh, &mut vertices, &mut indices)?;
     }
 
     if vertices.is_empty() || indices.is_empty() {
         return Err(LoadMeshError::EmptyMesh);
     }
 
-    Ok(Mesh { vertices, indices })
-}
-
-fn append_node_mesh(
-    buffers: &[gltf::buffer::Data],
-    node: gltf::Node<'_>,
-    parent_transform: Mat4,
-    vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<u32>,
-) -> Result<(), LoadMeshError> {
-    let local_transform = Mat4::from_cols_array_2d(&node.transform().matrix());
-    let world_transform = parent_transform * local_transform;
-
-    if let Some(mesh) = node.mesh() {
-        append_gltf_mesh(buffers, mesh, world_transform, vertices, indices)?;
-    }
-
-    for child in node.children() {
-        append_node_mesh(buffers, child, world_transform, vertices, indices)?;
-    }
-
-    Ok(())
+    Ok(Mesh::new(vertices, indices))
 }
 
 fn append_gltf_mesh(
     buffers: &[gltf::buffer::Data],
     mesh: gltf::Mesh<'_>,
-    transform: Mat4,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
 ) -> Result<(), LoadMeshError> {
@@ -199,19 +202,13 @@ fn append_gltf_mesh(
             });
         }
 
-        let transformed_positions = positions
-            .into_iter()
-            .map(|position| transform.transform_point3(position))
-            .collect::<Vec<_>>();
-
-        let generated_normals = generate_vertex_normals(&transformed_positions, &local_indices);
-        let normal_transform = Mat3::from_mat4(transform).inverse().transpose();
-        let transformed_normals = reader
+        let generated_normals = generate_vertex_normals(&positions, &local_indices);
+        let normals = reader
             .read_normals()
             .map(|normals| {
                 normals
                     .map(Vec3::from_array)
-                    .map(|normal| normal_transform.mul_vec3(normal).normalize_or_zero())
+                    .map(|normal| normal.normalize_or_zero())
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| generated_normals.clone());
@@ -219,8 +216,8 @@ fn append_gltf_mesh(
         let base_vertex =
             u32::try_from(vertices.len()).map_err(|_| LoadMeshError::VertexCountOverflow)?;
 
-        for (index, position) in transformed_positions.into_iter().enumerate() {
-            let normal = transformed_normals[index];
+        for (index, position) in positions.into_iter().enumerate() {
+            let normal = normals[index];
             vertices.push(Vertex {
                 position,
                 normal: if normal.length_squared() > 0.0 {
@@ -265,15 +262,29 @@ fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
         .collect()
 }
 
+fn compute_bounds(vertices: &[Vertex]) -> Option<Bounds> {
+    let mut vertices = vertices.iter();
+    let first = vertices.next()?;
+    let mut min = first.position;
+    let mut max = first.position;
+
+    for vertex in vertices {
+        min = min.min(vertex.position);
+        max = max.max(vertex.position);
+    }
+
+    Some(Bounds { min, max })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Mesh, Vertex};
+    use super::{Bounds, Mesh, Vertex};
     use glam::Vec3;
 
     #[test]
     fn triangle_accessors_follow_index_buffer() {
-        let mesh = Mesh {
-            vertices: vec![
+        let mesh = Mesh::new(
+            vec![
                 Vertex {
                     position: Vec3::new(0.0, 0.0, 0.0),
                     normal: Vec3::X,
@@ -287,8 +298,8 @@ mod tests {
                     normal: Vec3::Z,
                 },
             ],
-            indices: vec![0, 1, 2],
-        };
+            vec![0, 1, 2],
+        );
 
         assert_eq!(
             mesh.triangle_positions(0),
@@ -299,5 +310,30 @@ mod tests {
             ]
         );
         assert_eq!(mesh.triangle_normals(0), [Vec3::X, Vec3::Y, Vec3::Z]);
+    }
+
+    #[test]
+    fn mesh_computes_bounds() {
+        let mesh = Mesh::new(
+            vec![
+                Vertex {
+                    position: Vec3::new(-2.0, 1.0, 3.0),
+                    normal: Vec3::X,
+                },
+                Vertex {
+                    position: Vec3::new(4.0, -1.0, -5.0),
+                    normal: Vec3::Y,
+                },
+            ],
+            vec![0, 1, 1],
+        );
+
+        assert_eq!(
+            mesh.bounds,
+            Bounds {
+                min: Vec3::new(-2.0, -1.0, -5.0),
+                max: Vec3::new(4.0, 1.0, 3.0),
+            }
+        );
     }
 }
