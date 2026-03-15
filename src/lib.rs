@@ -1,5 +1,6 @@
 pub mod bvh;
 pub mod camera;
+pub mod math;
 pub mod mesh;
 pub mod ray;
 pub mod scene;

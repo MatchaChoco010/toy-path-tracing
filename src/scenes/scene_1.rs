@@ -1,13 +1,16 @@
-use glam::{Quat, Vec3};
+use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{camera::PinholeCamera, mesh::load_mesh, scene::Scene};
 
-use super::{add_identity_instance, game_rotation_degrees, uniform_scale_for_height};
+use super::{game_rotation_degrees, uniform_scale_for_height};
 
 pub fn create_scene_1() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
-    let gray = scene.add_material(crate::scene::Material::Diffuse {
+    let wall_gray = scene.add_material(crate::scene::Material::Diffuse {
+        rho: Vec3::splat(0.60),
+    });
+    let object_gray = scene.add_material(crate::scene::Material::Diffuse {
         rho: Vec3::splat(0.75),
     });
     let red = scene.add_material(crate::scene::Material::Diffuse {
@@ -21,39 +24,52 @@ pub fn create_scene_1() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn
         strength: 20.0,
     });
 
-    add_identity_instance(&mut scene, Path::new("assets/floor.glb"), gray)?;
-    add_identity_instance(&mut scene, Path::new("assets/ceiling.glb"), gray)?;
-    add_identity_instance(&mut scene, Path::new("assets/back-wall.glb"), gray)?;
-    add_identity_instance(&mut scene, Path::new("assets/left-wall.glb"), red)?;
-    add_identity_instance(&mut scene, Path::new("assets/right-wall.glb"), green)?;
-    add_identity_instance(&mut scene, Path::new("assets/light.glb"), light)?;
+    let floor_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/floor.glb"))?);
+    scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);
+    let ceiling_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/ceiling.glb"))?);
+    scene.add_instance(ceiling_mesh_index, wall_gray, Mat4::IDENTITY);
+    let back_wall_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/back-wall.glb"))?);
+    scene.add_instance(back_wall_mesh_index, wall_gray, Mat4::IDENTITY);
+    let left_wall_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/left-wall.glb"))?);
+    scene.add_instance(left_wall_mesh_index, red, Mat4::IDENTITY);
+    let right_wall_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/right-wall.glb"))?);
+    scene.add_instance(right_wall_mesh_index, green, Mat4::IDENTITY);
+    let light_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/light.glb"))?);
+    scene.add_instance(light_mesh_index, light, Mat4::IDENTITY);
 
-    let bunny_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/bunny.glb"))?);
-    let sphere_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/sphere.glb"))?);
-    let bunny_scale = uniform_scale_for_height(&scene.meshes[bunny_mesh_index.0], 1.38);
-    let sphere_scale = uniform_scale_for_height(&scene.meshes[sphere_mesh_index.0], 0.90);
+    let bunny = load_mesh(Path::new("assets/bunny.glb"))?;
+    let bunny_scale = uniform_scale_for_height(&bunny, 1.38);
+    let bunny_pivot = Vec3::new(
+        bunny.bounds.center().x,
+        bunny.bounds.min.y,
+        bunny.bounds.center().z,
+    );
+    let bunny_mesh_index = scene.add_mesh(bunny);
 
-    scene.add_instance(
-        bunny_mesh_index,
-        gray,
-        Vec3::new(-0.78, 0.0, -0.30),
-        game_rotation_degrees(0.0, 22.0, 0.0),
-        Vec3::splat(bunny_scale),
+    let sphere = load_mesh(Path::new("assets/sphere.glb"))?;
+    let sphere_scale = uniform_scale_for_height(&sphere, 0.90);
+    let sphere_pivot = Vec3::new(
+        sphere.bounds.center().x,
+        sphere.bounds.min.y,
+        sphere.bounds.center().z,
     );
-    scene.add_instance(
-        sphere_mesh_index,
-        gray,
-        Vec3::new(0.92, 0.0, -0.78),
-        Quat::IDENTITY,
-        Vec3::splat(sphere_scale * 1.10),
-    );
-    scene.add_instance(
-        sphere_mesh_index,
-        gray,
-        Vec3::new(0.35, 0.0, 0.98),
-        Quat::IDENTITY,
-        Vec3::splat(sphere_scale * 0.78),
-    );
+    let sphere_mesh_index = scene.add_mesh(sphere);
+
+    let bunny_transform = Mat4::from_translation(Vec3::new(-0.78, 0.0, -0.30))
+        * Mat4::from_quat(game_rotation_degrees(0.0, 22.0, 0.0))
+        * Mat4::from_scale(Vec3::splat(bunny_scale))
+        * Mat4::from_translation(-bunny_pivot);
+    scene.add_instance(bunny_mesh_index, object_gray, bunny_transform);
+
+    let sphere_0_transform = Mat4::from_translation(Vec3::new(0.92, 0.0, -0.78))
+        * Mat4::from_scale(Vec3::splat(sphere_scale * 1.10))
+        * Mat4::from_translation(-sphere_pivot);
+    scene.add_instance(sphere_mesh_index, object_gray, sphere_0_transform);
+
+    let sphere_1_transform = Mat4::from_translation(Vec3::new(0.35, 0.0, 0.98))
+        * Mat4::from_scale(Vec3::splat(sphere_scale * 0.78))
+        * Mat4::from_translation(-sphere_pivot);
+    scene.add_instance(sphere_mesh_index, object_gray, sphere_1_transform);
 
     let camera = PinholeCamera::new(
         Vec3::new(0.0, 2.10, 7.0),

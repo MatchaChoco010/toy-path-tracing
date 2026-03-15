@@ -3,11 +3,14 @@ use std::{error::Error, path::Path};
 
 use crate::{camera::PinholeCamera, mesh::load_mesh, scene::Scene};
 
-use super::{add_identity_instance, game_rotation_degrees};
+use super::game_rotation_degrees;
 
 pub fn create_scene_0() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
-    let gray = scene.add_material(crate::scene::Material::Diffuse {
+    let wall_gray = scene.add_material(crate::scene::Material::Diffuse {
+        rho: Vec3::splat(0.60),
+    });
+    let object_gray = scene.add_material(crate::scene::Material::Diffuse {
         rho: Vec3::splat(0.75),
     });
     let red = scene.add_material(crate::scene::Material::Diffuse {
@@ -21,24 +24,34 @@ pub fn create_scene_0() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn
         strength: 20.0,
     });
 
-    add_identity_instance(&mut scene, Path::new("assets/floor.glb"), gray)?;
-    add_identity_instance(&mut scene, Path::new("assets/ceiling.glb"), gray)?;
-    add_identity_instance(&mut scene, Path::new("assets/back-wall.glb"), gray)?;
-    add_identity_instance(&mut scene, Path::new("assets/left-wall.glb"), red)?;
-    add_identity_instance(&mut scene, Path::new("assets/right-wall.glb"), green)?;
-    add_identity_instance(&mut scene, Path::new("assets/light.glb"), light)?;
+    let floor_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/floor.glb"))?);
+    scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);
+    let ceiling_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/ceiling.glb"))?);
+    scene.add_instance(ceiling_mesh_index, wall_gray, Mat4::IDENTITY);
+    let back_wall_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/back-wall.glb"))?);
+    scene.add_instance(back_wall_mesh_index, wall_gray, Mat4::IDENTITY);
+    let left_wall_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/left-wall.glb"))?);
+    scene.add_instance(left_wall_mesh_index, red, Mat4::IDENTITY);
+    let right_wall_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/right-wall.glb"))?);
+    scene.add_instance(right_wall_mesh_index, green, Mat4::IDENTITY);
+    let light_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/light.glb"))?);
+    scene.add_instance(light_mesh_index, light, Mat4::IDENTITY);
 
-    let bunny_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/bunny.glb"))?);
+    let bunny = load_mesh(Path::new("assets/bunny.glb"))?;
+    let bunny_pivot = Vec3::new(
+        bunny.bounds.center().x,
+        bunny.bounds.min.y,
+        bunny.bounds.center().z,
+    );
+    let bunny_mesh_index = scene.add_mesh(bunny);
     let box_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/box.glb"))?);
 
-    scene.add_instance(
-        bunny_mesh_index,
-        gray,
-        Vec3::new(0.72, 0.0, 0.65),
-        game_rotation_degrees(0.0, -28.0, 0.0),
-        Vec3::splat(0.90),
-    );
-    scene.add_instance_raw(box_mesh_index, gray, Mat4::IDENTITY);
+    let bunny_transform = Mat4::from_translation(Vec3::new(0.72, 0.0, 0.65))
+        * Mat4::from_quat(game_rotation_degrees(0.0, -28.0, 0.0))
+        * Mat4::from_scale(Vec3::splat(0.90))
+        * Mat4::from_translation(-bunny_pivot);
+    scene.add_instance(bunny_mesh_index, object_gray, bunny_transform);
+    scene.add_instance(box_mesh_index, object_gray, Mat4::IDENTITY);
 
     let camera = PinholeCamera::new(
         Vec3::new(0.0, 2.15, 7.1),

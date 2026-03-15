@@ -1,4 +1,4 @@
-use glam::{Mat3, Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use std::fmt;
 
 use crate::{
@@ -95,36 +95,6 @@ impl Scene {
     }
 
     pub fn add_instance(
-        &mut self,
-        mesh_index: MeshIndex,
-        material_index: MaterialIndex,
-        translation: Vec3,
-        rotation: Quat,
-        scale: Vec3,
-    ) -> InstanceIndex {
-        let mesh = &self.meshes[mesh_index.0];
-        let pivot = Vec3::new(
-            mesh.bounds.center().x,
-            mesh.bounds.min.y,
-            mesh.bounds.center().z,
-        );
-        let local_to_world = Mat4::from_translation(translation)
-            * Mat4::from_quat(rotation)
-            * Mat4::from_scale(scale)
-            * Mat4::from_translation(-pivot);
-        self.add_instance_with_transform(mesh_index, material_index, local_to_world)
-    }
-
-    pub fn add_instance_raw(
-        &mut self,
-        mesh_index: MeshIndex,
-        material_index: MaterialIndex,
-        local_to_world: Mat4,
-    ) -> InstanceIndex {
-        self.add_instance_with_transform(mesh_index, material_index, local_to_world)
-    }
-
-    fn add_instance_with_transform(
         &mut self,
         mesh_index: MeshIndex,
         material_index: MaterialIndex,
@@ -379,7 +349,7 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 
 #[cfg(test)]
 mod tests {
-    use glam::{Quat, Vec3};
+    use glam::{Mat4, Vec3};
 
     use super::{ClosestHitError, InstanceIndex, Material, Scene, TriangleRef};
     use crate::{
@@ -450,19 +420,11 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.add_instance(
             mesh_index,
             material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::new(0.0, 0.0, 1.0),
-            Quat::IDENTITY,
-            Vec3::ONE,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 1.0)),
         );
 
         assert_eq!(
@@ -485,19 +447,11 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.add_instance(
             mesh_index,
             material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::new(0.0, 0.0, -1.0),
-            Quat::IDENTITY,
-            Vec3::ONE,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0)),
         );
         scene.build_bvh();
 
@@ -525,9 +479,7 @@ mod tests {
         scene.add_instance(
             mesh_index,
             material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::splat(2.0),
+            Mat4::from_scale(Vec3::splat(2.0)),
         );
         scene.build_bvh();
 
@@ -545,13 +497,7 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
         let error = scene
@@ -566,13 +512,7 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(stacked_mesh());
         let material_index = default_material(&mut scene);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
         scene.build_bvh();
 
@@ -585,13 +525,7 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
@@ -605,21 +539,13 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_bvh();
 
         scene.add_instance(
             mesh_index,
             material_index,
-            Vec3::new(1.0, 0.0, 0.0),
-            Quat::IDENTITY,
-            Vec3::ONE,
+            Mat4::from_translation(Vec3::new(1.0, 0.0, 0.0)),
         );
 
         assert!(scene.bvh.is_none());
@@ -630,13 +556,7 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_bvh();
 
         scene.add_mesh(unit_mesh(-1.0));
@@ -649,13 +569,7 @@ mod tests {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(stacked_mesh());
         let material_index = default_material(&mut scene);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
@@ -665,7 +579,7 @@ mod tests {
             .expect("expected hit");
 
         assert_eq!(hit.triangle.triangle_index, 0);
-        assert!((hit.t - 1.5).abs() < 1.0e-6);
+        assert!((hit.t - 2.0).abs() < 1.0e-6);
     }
 
     #[test]
@@ -676,13 +590,7 @@ mod tests {
             color: Vec3::ONE,
             strength: 12.0,
         });
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Vec3::ZERO,
-            Quat::IDENTITY,
-            Vec3::ONE,
-        );
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
         assert_eq!(
             scene.instance_material(InstanceIndex(0)),

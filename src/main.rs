@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 use toy_path_tracing::{
+    math::OrthonormalBasis,
     ray::Ray,
     scene::{Material, Scene},
     scenes::load_scene,
@@ -118,8 +119,9 @@ fn trace_radiance(
             Material::Diffuse { rho } => {
                 let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
                 let local_direction = sample_uniform_hemisphere(us);
-                let next_direction = local_to_world(local_direction, normal);
-                let cos_theta = next_direction.dot(normal).max(0.0);
+                let basis = OrthonormalBasis::from_normal(normal);
+                let next_direction = basis.local_to_world(local_direction);
+                let cos_theta = basis.world_to_local(next_direction).z.max(0.0);
                 if cos_theta <= 0.0 {
                     break;
                 }
@@ -141,23 +143,6 @@ fn sample_uniform_hemisphere(us: Vec2) -> Vec3 {
     let phi = TAU * us.y;
 
     Vec3::new(r * phi.cos(), r * phi.sin(), z)
-}
-
-fn local_to_world(local_direction: Vec3, normal: Vec3) -> Vec3 {
-    let tangent = build_tangent(normal);
-    let bitangent = normal.cross(tangent);
-
-    (local_direction.x * tangent + local_direction.y * bitangent + local_direction.z * normal)
-        .normalize()
-}
-
-fn build_tangent(normal: Vec3) -> Vec3 {
-    let axis = if normal.z.abs() < 0.999 {
-        Vec3::Z
-    } else {
-        Vec3::X
-    };
-    normal.cross(axis).normalize()
 }
 
 fn reinhard(color: Vec3) -> Vec3 {
