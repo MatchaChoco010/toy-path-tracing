@@ -1,0 +1,4 @@
+web_search = "live"
+
+[features]
+shell_snapshot = true
