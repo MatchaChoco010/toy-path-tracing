@@ -1,6 +1,7 @@
 pub mod bsdf;
 pub mod bvh;
 pub mod camera;
+pub mod integrator;
 pub mod material;
 pub mod math;
 pub mod mesh;

@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use toy_path_tracing::{math::reinhard, ray::Ray, scene::Scene, scenes::load_scene};
+use toy_path_tracing::{integrator::IntegratorKind, math::reinhard, scenes::load_scene};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -29,6 +29,9 @@ struct Args {
 
     #[arg(long = "depth", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..))]
     depth: u32,
+
+    #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Pt)]
+    integrator: IntegratorKind,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for sample_index in 0..args.spp {
                 let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
                 let ray = camera.generate_ray(resolution, UVec2::new(x, y), us);
-                let sample = trace_radiance(&scene, ray, rng, args.depth);
+                let sample = args.integrator.trace_radiance(&scene, ray, rng, args.depth);
                 let sample_count = (sample_index + 1) as f32;
                 color += (sample - color) / sample_count;
             }
@@ -74,57 +77,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn float_to_u8(value: f32) -> u8 {
     (255.0 * value.clamp(0.0, 1.0)) as u8
-}
-
-fn trace_radiance(
-    scene: &Scene,
-    initial_ray: Ray,
-    rng: &mut rand::rngs::ThreadRng,
-    max_depth: u32,
-) -> Vec3 {
-    let mut radiance = Vec3::ZERO;
-    let mut throughput = Vec3::ONE;
-    let mut ray = initial_ray;
-    let rr_start_depth = 4;
-
-    for depth in 0..max_depth {
-        let Some(hit) = scene
-            .closest_hit(&ray)
-            .expect("scene.build_bvh() must be called before traversal")
-        else {
-            break;
-        };
-
-        let shading_vertex = scene.shading_vertex(hit, ray.direction);
-        let material = scene.instance_material(hit.triangle.instance_index);
-
-        if let Some(le) = material.le(&shading_vertex) {
-            radiance += throughput * le;
-        }
-
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let Some(sample) = material.sample(&shading_vertex, us, -ray.direction) else {
-            break;
-        };
-
-        throughput *= sample.weight;
-
-        if depth + 1 >= rr_start_depth {
-            let survive_probability = russian_roulette_probability(throughput);
-            if rng.random::<f32>() > survive_probability {
-                break;
-            }
-            throughput /= survive_probability;
-        }
-
-        ray = Ray::new(shading_vertex.p + 1.0e-4 * shading_vertex.ng, sample.wi);
-    }
-
-    radiance
-}
-
-fn russian_roulette_probability(throughput: Vec3) -> f32 {
-    throughput.max_element().clamp(0.05, 0.95)
 }
 
 fn create_output_directory(output_path: &Path) -> std::io::Result<()> {
