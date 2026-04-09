@@ -13,13 +13,12 @@ impl EmissiveMaterial {
         Self { color, strength }
     }
 
-    pub fn sample(
-        &self,
-        _shading_vertex: &ShadingVertex,
-        _us: Vec2,
-        _wo: Vec3,
-    ) -> Option<MaterialSample> {
+    pub fn sample(&self, _shading_vertex: &ShadingVertex, _us: Vec2) -> Option<MaterialSample> {
         None
+    }
+
+    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3) -> Vec3 {
+        Vec3::ZERO
     }
 
     pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {

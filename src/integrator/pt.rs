@@ -30,7 +30,7 @@ pub fn trace_radiance(
         }
 
         let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let Some(sample) = material.sample(&shading_vertex, us, -ray.direction) else {
+        let Some(sample) = material.sample(&shading_vertex, us) else {
             break;
         };
 

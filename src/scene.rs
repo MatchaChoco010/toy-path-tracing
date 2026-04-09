@@ -322,6 +322,7 @@ impl Scene {
             uv,
             ng,
             ns,
+            wo: (-incident_direction).normalize_or_zero(),
             dpdu,
             dpdv,
             frame,
@@ -843,6 +844,7 @@ mod tests {
         assert!(shading_vertex.uv.abs_diff_eq(Vec2::new(0.25, 0.25), 1.0e-6));
         assert!(shading_vertex.ng.abs_diff_eq(Vec3::Z, 1.0e-6));
         assert!(shading_vertex.ns.abs_diff_eq(Vec3::Z, 1.0e-6));
+        assert!(shading_vertex.wo.abs_diff_eq(Vec3::Z, 1.0e-6));
         assert!(shading_vertex.frame.normal().abs_diff_eq(Vec3::Z, 1.0e-6));
         assert!(shading_vertex.front_face);
         assert!(shading_vertex.dpdu.length_squared() > 0.0);

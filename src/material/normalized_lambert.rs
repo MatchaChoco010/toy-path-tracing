@@ -14,13 +14,11 @@ impl NormalizedLambertMaterial {
         Self { rho }
     }
 
-    pub fn sample(
-        &self,
-        shading_vertex: &ShadingVertex,
-        us: Vec2,
-        wo: Vec3,
-    ) -> Option<MaterialSample> {
-        let wo_local = shading_vertex.frame.world_to_local(wo).normalize_or_zero();
+    pub fn sample(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+        let wo_local = shading_vertex
+            .frame
+            .world_to_local(shading_vertex.wo)
+            .normalize_or_zero();
         let bsdf = NormalizedLambertBsdf::new(self.rho);
         let sample = bsdf.sample(wo_local, us)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
@@ -30,6 +28,16 @@ impl NormalizedLambertMaterial {
             wi,
             pdf: sample.pdf,
         })
+    }
+
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+        let wo_local = shading_vertex
+            .frame
+            .world_to_local(shading_vertex.wo)
+            .normalize_or_zero();
+        let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
+        let bsdf = NormalizedLambertBsdf::new(self.rho);
+        bsdf.eval(wo_local, wi_local)
     }
 
     pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {

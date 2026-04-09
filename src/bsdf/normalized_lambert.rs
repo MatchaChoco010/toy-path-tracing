@@ -16,30 +16,56 @@ impl NormalizedLambertBsdf {
         Self { rho }
     }
 
+    pub fn eval(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+        if wo.z <= 0.0 || wi.z <= 0.0 {
+            return Vec3::ZERO;
+        }
+
+        self.rho / PI
+    }
+
     pub fn sample(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
         if wo.z <= 0.0 {
             return None;
         }
 
         let wi = sample_cosine_weighted_hemisphere(us);
-        let cos_theta = wi.z.max(0.0);
-        let pdf = cosine_weighted_hemisphere_pdf(cos_theta);
+        let pdf = cosine_weighted_hemisphere_pdf(wi.z);
 
         if pdf <= 0.0 {
             return None;
         }
 
-        let f = self.rho / PI;
-        let weight = f * (cos_theta / pdf);
+        // For cosine-weighted Lambert sampling, f * cos(theta) / pdf simplifies to rho.
+        let weight = self.rho;
 
         Some(BsdfSample { weight, wi, pdf })
     }
 }
 #[cfg(test)]
 mod tests {
+    use std::f32::consts::PI;
+
     use glam::{Vec2, Vec3};
 
     use super::NormalizedLambertBsdf;
+
+    #[test]
+    fn eval_returns_rho_over_pi_for_upper_hemisphere_directions() {
+        let bsdf = NormalizedLambertBsdf::new(Vec3::new(0.3, 0.5, 0.7));
+
+        let f = bsdf.eval(Vec3::Z, Vec3::new(0.2, 0.3, 0.9327379).normalize());
+
+        assert!(f.abs_diff_eq(Vec3::new(0.3, 0.5, 0.7) / PI, 1.0e-6));
+    }
+
+    #[test]
+    fn eval_returns_zero_for_lower_hemisphere_directions() {
+        let bsdf = NormalizedLambertBsdf::new(Vec3::ONE);
+
+        assert_eq!(bsdf.eval(Vec3::Z, -Vec3::Z), Vec3::ZERO);
+        assert_eq!(bsdf.eval(-Vec3::Z, Vec3::Z), Vec3::ZERO);
+    }
 
     #[test]
     fn cosine_weighted_sample_returns_rho_as_weight() {
