@@ -20,10 +20,14 @@ cargo run --release -- [OPTIONS]
 cargo run --release -- --spp 64 --scene 0 -o result/scene-0.png
 ```
 
-integrator を明示して実行したい場合は `--integrator` または `-i` を使います。現状は `pt` を選べます。
+integrator を明示して実行したい場合は `--integrator` または `-i` を使います。現状は `pt` と `nee` を選べます。
 
 ```bash
 cargo run --release -- --scene 1 --spp 128 --depth 24 -i pt -o result/scene-1-pt.png
+```
+
+```bash
+cargo run --release -- --scene 1 --spp 128 --depth 24 -i nee -o result/scene-1-nee.png
 ```
 
 解像度も含めて指定したい場合は `--width` と `--height` を使います。
@@ -44,7 +48,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `--scene <SCENE>` | `0` | 読み込むシーン番号です。 |
 | `--spp <SPP>` | `32` | Samples Per Pixel。各ピクセルで何本のパスを積分するかを指定します。`1` 以上のみ指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上のみ指定できます。 |
-| `-i, --integrator <INTEGRATOR>` | `pt` | 使用する integrator を指定します。現在は `pt` を選べます。存在しない名前を指定するとエラーになります。 |
+| `-i, --integrator <INTEGRATOR>` | `pt` | 使用する integrator を指定します。現在は `pt` と `nee` を選べます。存在しない名前を指定するとエラーになります。 |
 | `-h, --help` | なし | ヘルプを表示します。 |
 
 ## 現在のシーン番号
@@ -63,5 +67,6 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 
 - `--width` と `--height` を省略した場合は、既定値として `512 x 512` の画像を出力します。
 - `--integrator` を省略した場合は `pt` が選択されます。
+- `-i nee` を指定すると、エリアライトの明示サンプリングを使う next event estimation integrator が選択されます。
 - 生成画像は `result/` 以下に保存する運用を想定しています。
 - 初回の `cargo run` では依存クレートのビルドに時間がかかることがあります。

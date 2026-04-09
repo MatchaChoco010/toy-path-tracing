@@ -3,6 +3,8 @@ use rand::RngExt;
 
 use crate::{ray::Ray, scene::Scene};
 
+use super::russian_roulette_probability;
+
 pub fn trace_radiance(
     scene: &Scene,
     initial_ray: Ray,
@@ -48,8 +50,4 @@ pub fn trace_radiance(
     }
 
     radiance
-}
-
-fn russian_roulette_probability(throughput: Vec3) -> f32 {
-    throughput.max_element().clamp(0.05, 0.95)
 }
