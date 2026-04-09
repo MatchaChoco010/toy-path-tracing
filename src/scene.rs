@@ -361,6 +361,30 @@ impl Scene {
         Some(triangle_selection_probability / area_light.area)
     }
 
+    pub fn area_light_pdf_solid_angle(
+        &self,
+        vtx: &ShadingVertex,
+        lvtx: &ShadingVertex,
+    ) -> Option<f32> {
+        let pdf_area = self.area_light_pdf_area(lvtx.triangle)?;
+        let to_light = lvtx.p - vtx.p;
+        let distance_squared = to_light.length_squared();
+
+        if distance_squared <= 0.0 {
+            return None;
+        }
+
+        let distance = distance_squared.sqrt();
+        let wi = to_light / distance;
+        let cos_light = lvtx.ng.dot(-wi).max(0.0);
+
+        if cos_light <= 0.0 {
+            return None;
+        }
+
+        Some(pdf_area * distance_squared / cos_light)
+    }
+
     pub fn sample_triangle_point(&self, triangle: TriangleRef, us: Vec2) -> TrianglePointSample {
         let [p0, p1, p2] = self.triangle_positions(triangle);
         let su0 = us.x.clamp(0.0, 1.0).sqrt();
@@ -937,5 +961,72 @@ mod tests {
         assert!((second_sample.triangle_selection_probability - 0.8).abs() < 1.0e-6);
         assert!((first_sample.pdf_area - 0.4).abs() < 1.0e-6);
         assert!((second_sample.pdf_area - 0.4).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn area_light_pdf_solid_angle_converts_area_density_with_jacobian() {
+        let mut scene = Scene::new();
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let light_mesh = scene.add_mesh(unit_mesh(2.0));
+        let floor_material = default_material(&mut scene);
+        let light_material =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let lvtx = scene.shading_vertex_from_triangle_sample(
+            TriangleRef {
+                instance_index: InstanceIndex(1),
+                triangle_index: 0,
+            },
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::Z,
+        );
+
+        let pdf = scene
+            .area_light_pdf_solid_angle(&vtx, &lvtx)
+            .expect("expected valid area light pdf");
+
+        assert!((pdf - 8.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn area_light_pdf_solid_angle_returns_none_for_non_emissive_triangle() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+        );
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let lvtx = scene.shading_vertex_from_triangle_sample(
+            TriangleRef {
+                instance_index: InstanceIndex(1),
+                triangle_index: 0,
+            },
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::Z,
+        );
+
+        assert_eq!(scene.area_light_pdf_solid_angle(&vtx, &lvtx), None);
     }
 }
