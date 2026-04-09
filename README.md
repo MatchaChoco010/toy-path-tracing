@@ -10,7 +10,7 @@ Rust で学習用のパストレーサーを実装していくためのプロジ
 cargo run --release -- [OPTIONS]
 ```
 
-現在の CLI では、出力先、シーン番号、1 ピクセルあたりのサンプル数、最大パストレース深度を指定できます。
+現在の CLI では、出力先、出力画像サイズ、シーン番号、1 ピクセルあたりのサンプル数、最大パストレース深度を指定できます。
 
 ### 実行例
 
@@ -20,10 +20,10 @@ cargo run --release -- [OPTIONS]
 cargo run --release -- --spp 64 --scene 0 -o result/scene-0.png
 ```
 
-深いバウンスまで試したい場合は `--depth` も指定できます。
+解像度も含めて指定したい場合は `--width` と `--height` を使います。
 
 ```bash
-cargo run --release -- --scene 1 --spp 128 --depth 24 -o result/scene-1.png
+cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 -o result/scene-1.png
 ```
 
 ## CLI 引数
@@ -33,6 +33,8 @@ cargo run --release -- --scene 1 --spp 128 --depth 24 -o result/scene-1.png
 | 引数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `-o, --output <OUTPUT>` | `result/output.png` | 出力画像の保存先です。親ディレクトリが存在しなければ自動で作成されます。 |
+| `--width <WIDTH>` | `512` | 出力画像の横幅です。`1` 以上のみ指定できます。 |
+| `--height <HEIGHT>` | `512` | 出力画像の高さです。`1` 以上のみ指定できます。 |
 | `--scene <SCENE>` | `0` | 読み込むシーン番号です。 |
 | `--spp <SPP>` | `32` | Samples Per Pixel。各ピクセルで何本のパスを積分するかを指定します。`1` 以上のみ指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上のみ指定できます。 |
@@ -52,6 +54,6 @@ cargo run --release -- --scene 1 --spp 128 --depth 24 -o result/scene-1.png
 
 ## 現在の実装上の注意
 
-- 出力画像の解像度は現在 `512 x 512` 固定です。CLI からはまだ変更できません。
+- `--width` と `--height` を省略した場合は、既定値として `512 x 512` の画像を出力します。
 - 生成画像は `result/` 以下に保存する運用を想定しています。
 - 初回の `cargo run` では依存クレートのビルドに時間がかかることがあります。

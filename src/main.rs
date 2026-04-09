@@ -21,6 +21,12 @@ struct Args {
     #[arg(short = 'o', long = "output", default_value = "result/output.png")]
     output: PathBuf,
 
+    #[arg(long = "width", default_value_t = 512, value_parser = clap::value_parser!(u32).range(1..))]
+    width: u32,
+
+    #[arg(long = "height", default_value_t = 512, value_parser = clap::value_parser!(u32).range(1..))]
+    height: u32,
+
     #[arg(long = "scene", default_value_t = 0)]
     scene: u32,
 
@@ -33,7 +39,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let resolution = UVec2::new(512, 512);
+    let resolution = UVec2::new(args.width, args.height);
     let (mut scene, camera) = load_scene(args.scene)?;
     let build_bvh_start = Instant::now();
     scene.build_bvh();
