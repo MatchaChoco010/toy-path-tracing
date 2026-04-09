@@ -25,4 +25,12 @@ impl EmissiveMaterial {
     pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {
         Some(self.color * self.strength)
     }
+
+    pub fn may_emit(&self) -> bool {
+        true
+    }
+
+    pub fn max_emission(&self) -> f32 {
+        (self.color * self.strength).max_element().max(0.0)
+    }
 }

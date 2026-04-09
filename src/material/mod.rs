@@ -3,7 +3,7 @@ mod normalized_lambert;
 
 use glam::{Vec2, Vec3};
 
-use crate::math::OrthonormalBasis;
+use crate::{math::OrthonormalBasis, scene::TriangleRef};
 
 pub use emissive::EmissiveMaterial;
 pub use normalized_lambert::NormalizedLambertMaterial;
@@ -16,6 +16,7 @@ pub enum Material {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadingVertex {
+    pub triangle: TriangleRef,
     pub p: Vec3,
     pub uv: Vec2,
     pub ng: Vec3,
@@ -51,5 +52,42 @@ impl Material {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
+    }
+
+    pub fn may_emit(&self) -> bool {
+        match self {
+            Self::NormalizedLambert(material) => material.may_emit(),
+            Self::Emissive(material) => material.may_emit(),
+        }
+    }
+
+    pub fn max_emission(&self) -> f32 {
+        match self {
+            Self::NormalizedLambert(material) => material.max_emission(),
+            Self::Emissive(material) => material.max_emission(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::{EmissiveMaterial, Material, NormalizedLambertMaterial};
+
+    #[test]
+    fn emissive_material_reports_emission_capability() {
+        let material = Material::Emissive(EmissiveMaterial::new(Vec3::new(0.25, 2.0, 1.0), 3.0));
+
+        assert!(material.may_emit());
+        assert_eq!(material.max_emission(), 6.0);
+    }
+
+    #[test]
+    fn lambert_material_reports_no_emission_capability() {
+        let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
+
+        assert!(!material.may_emit());
+        assert_eq!(material.max_emission(), 0.0);
     }
 }

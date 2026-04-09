@@ -35,4 +35,12 @@ impl NormalizedLambertMaterial {
     pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {
         None
     }
+
+    pub fn may_emit(&self) -> bool {
+        false
+    }
+
+    pub fn max_emission(&self) -> f32 {
+        0.0
+    }
 }

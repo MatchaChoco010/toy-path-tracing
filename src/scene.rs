@@ -28,6 +28,31 @@ pub struct TriangleRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AreaLightTriangle {
+    pub triangle: TriangleRef,
+    pub area: f32,
+    pub weight: f32,
+    pub prefix_weight: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrianglePointSample {
+    pub triangle: TriangleRef,
+    pub barycentric: Vec3,
+    pub p: Vec3,
+    pub pdf_area: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AreaLightPointSample {
+    pub triangle: TriangleRef,
+    pub barycentric: Vec3,
+    pub p: Vec3,
+    pub triangle_selection_probability: f32,
+    pub pdf_area: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Instance {
     pub mesh_index: MeshIndex,
     pub material_index: MaterialIndex,
@@ -50,6 +75,8 @@ pub struct Scene {
     pub materials: Vec<Material>,
     pub instances: Vec<Instance>,
     pub triangles: Vec<TriangleRef>,
+    pub area_light_triangles: Vec<AreaLightTriangle>,
+    pub area_light_weight_sum: f32,
     pub bvh: Option<SceneBvh>,
 }
 
@@ -119,6 +146,7 @@ impl Scene {
                 instance_index,
                 triangle_index,
             }));
+        self.register_area_light_triangles(instance_index);
         self.bvh = None;
 
         instance_index
@@ -237,6 +265,11 @@ impl Scene {
         positions.map(|position| instance.local_to_world.transform_point3(position))
     }
 
+    pub fn triangle_area(&self, triangle: TriangleRef) -> f32 {
+        let [p0, p1, p2] = self.triangle_positions(triangle);
+        0.5 * (p1 - p0).cross(p2 - p0).length()
+    }
+
     pub fn material(&self, material_index: MaterialIndex) -> &Material {
         &self.materials[material_index.0]
     }
@@ -246,14 +279,19 @@ impl Scene {
         self.material(material_index)
     }
 
-    pub fn shading_vertex(&self, hit: SceneHit, incident_direction: Vec3) -> ShadingVertex {
-        let [p0, p1, p2] = self.triangle_positions(hit.triangle);
-        let [n0, n1, n2] = self.triangle_normals(hit.triangle);
-        let [uv0, uv1, uv2] = self.triangle_uvs(hit.triangle);
-        let p = interpolate_vec3(hit.barycentric, p0, p1, p2);
-        let uv = interpolate_vec2(hit.barycentric, uv0, uv1, uv2);
+    pub fn shading_vertex_from_triangle_sample(
+        &self,
+        triangle: TriangleRef,
+        barycentric: Vec3,
+        incident_direction: Vec3,
+    ) -> ShadingVertex {
+        let [p0, p1, p2] = self.triangle_positions(triangle);
+        let [n0, n1, n2] = self.triangle_normals(triangle);
+        let [uv0, uv1, uv2] = self.triangle_uvs(triangle);
+        let p = interpolate_vec3(barycentric, p0, p1, p2);
+        let uv = interpolate_vec2(barycentric, uv0, uv1, uv2);
         let geometric_normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
-        let shading_normal = interpolate_vec3(hit.barycentric, n0, n1, n2).normalize_or_zero();
+        let shading_normal = interpolate_vec3(barycentric, n0, n1, n2).normalize_or_zero();
         let front_face = geometric_normal.dot(-incident_direction) >= 0.0;
         let ng = face_forward(geometric_normal, -incident_direction);
         let ns = face_forward(
@@ -279,6 +317,7 @@ impl Scene {
         }
 
         ShadingVertex {
+            triangle,
             p,
             uv,
             ng,
@@ -288,6 +327,72 @@ impl Scene {
             frame,
             front_face,
         }
+    }
+
+    pub fn shading_vertex(&self, hit: SceneHit, incident_direction: Vec3) -> ShadingVertex {
+        self.shading_vertex_from_triangle_sample(hit.triangle, hit.barycentric, incident_direction)
+    }
+
+    pub fn area_light_triangle_probability(&self, triangle: TriangleRef) -> Option<f32> {
+        let area_light = self
+            .area_light_triangles
+            .iter()
+            .find(|area_light| area_light.triangle == triangle)?;
+
+        if self.area_light_weight_sum <= 0.0 {
+            return None;
+        }
+
+        Some(area_light.weight / self.area_light_weight_sum)
+    }
+
+    pub fn area_light_pdf_area(&self, triangle: TriangleRef) -> Option<f32> {
+        let area_light = self
+            .area_light_triangles
+            .iter()
+            .find(|area_light| area_light.triangle == triangle)?;
+        let triangle_selection_probability = self.area_light_triangle_probability(triangle)?;
+
+        if area_light.area <= 0.0 {
+            return None;
+        }
+
+        Some(triangle_selection_probability / area_light.area)
+    }
+
+    pub fn sample_triangle_point(&self, triangle: TriangleRef, us: Vec2) -> TrianglePointSample {
+        let [p0, p1, p2] = self.triangle_positions(triangle);
+        let su0 = us.x.clamp(0.0, 1.0).sqrt();
+        let u1 = us.y.clamp(0.0, 1.0);
+        let barycentric = Vec3::new(1.0 - su0, u1 * su0, (1.0 - u1) * su0);
+        let p = interpolate_vec3(barycentric, p0, p1, p2);
+        let area = self.triangle_area(triangle);
+        let pdf_area = if area > 0.0 { 1.0 / area } else { 0.0 };
+
+        TrianglePointSample {
+            triangle,
+            barycentric,
+            p,
+            pdf_area,
+        }
+    }
+
+    pub fn sample_area_light_point(
+        &self,
+        u_triangle: f32,
+        us: Vec2,
+    ) -> Option<AreaLightPointSample> {
+        let area_light = self.sample_area_light_triangle(u_triangle)?;
+        let triangle_selection_probability = area_light.weight / self.area_light_weight_sum;
+        let triangle_sample = self.sample_triangle_point(area_light.triangle, us);
+
+        Some(AreaLightPointSample {
+            triangle: triangle_sample.triangle,
+            barycentric: triangle_sample.barycentric,
+            p: triangle_sample.p,
+            triangle_selection_probability,
+            pdf_area: triangle_selection_probability / area_light.area,
+        })
     }
 
     pub fn bounds(&self) -> Option<Bounds> {
@@ -300,6 +405,56 @@ impl Scene {
         }
 
         Some(bounds)
+    }
+
+    fn register_area_light_triangles(&mut self, instance_index: InstanceIndex) {
+        let material = self.instance_material(instance_index);
+        if !material.may_emit() {
+            return;
+        }
+
+        let max_emission = material.max_emission();
+        if max_emission <= 0.0 {
+            return;
+        }
+
+        let mesh_index = self.instances[instance_index.0].mesh_index;
+        let triangle_count = self.meshes[mesh_index.0].triangle_count();
+
+        for triangle_index in 0..triangle_count {
+            let triangle = TriangleRef {
+                instance_index,
+                triangle_index,
+            };
+            let area = self.triangle_area(triangle);
+            let weight = area * max_emission;
+
+            if weight <= 0.0 {
+                continue;
+            }
+
+            self.area_light_weight_sum += weight;
+            self.area_light_triangles.push(AreaLightTriangle {
+                triangle,
+                area,
+                weight,
+                prefix_weight: self.area_light_weight_sum,
+            });
+        }
+    }
+
+    fn sample_area_light_triangle(&self, u_triangle: f32) -> Option<&AreaLightTriangle> {
+        if self.area_light_weight_sum <= 0.0 {
+            return None;
+        }
+
+        let target_weight = u_triangle.clamp(0.0, 1.0) * self.area_light_weight_sum;
+        let index = self
+            .area_light_triangles
+            .partition_point(|area_light| area_light.prefix_weight < target_weight)
+            .min(self.area_light_triangles.len().checked_sub(1)?);
+
+        self.area_light_triangles.get(index)
     }
 }
 
@@ -398,7 +553,10 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 mod tests {
     use glam::{Mat4, Vec2, Vec3};
 
-    use super::{ClosestHitError, InstanceIndex, MaterialIndex, Scene, SceneHit, TriangleRef};
+    use super::{
+        AreaLightTriangle, ClosestHitError, InstanceIndex, MaterialIndex, Scene, SceneHit,
+        TriangleRef,
+    };
     use crate::{
         material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
@@ -675,6 +833,13 @@ mod tests {
                 .p
                 .abs_diff_eq(Vec3::new(0.25, 0.25, 0.0), 1.0e-6)
         );
+        assert_eq!(
+            shading_vertex.triangle,
+            TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            }
+        );
         assert!(shading_vertex.uv.abs_diff_eq(Vec2::new(0.25, 0.25), 1.0e-6));
         assert!(shading_vertex.ng.abs_diff_eq(Vec3::Z, 1.0e-6));
         assert!(shading_vertex.ns.abs_diff_eq(Vec3::Z, 1.0e-6));
@@ -682,5 +847,93 @@ mod tests {
         assert!(shading_vertex.front_face);
         assert!(shading_vertex.dpdu.length_squared() > 0.0);
         assert!(shading_vertex.dpdv.length_squared() > 0.0);
+    }
+
+    #[test]
+    fn emissive_instance_populates_area_light_distribution() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 12.0)));
+
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+
+        assert_eq!(
+            scene.area_light_triangles,
+            vec![AreaLightTriangle {
+                triangle: TriangleRef {
+                    instance_index: InstanceIndex(0),
+                    triangle_index: 0,
+                },
+                area: 0.5,
+                weight: 6.0,
+                prefix_weight: 6.0,
+            }]
+        );
+        assert_eq!(scene.area_light_weight_sum, 6.0);
+    }
+
+    #[test]
+    fn sample_triangle_point_returns_barycentric_point_and_area_pdf() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+
+        let sample = scene.sample_triangle_point(
+            TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            Vec2::new(1.0, 0.25),
+        );
+
+        assert!(
+            sample
+                .barycentric
+                .abs_diff_eq(Vec3::new(0.0, 0.25, 0.75), 1.0e-6)
+        );
+        assert!(sample.p.abs_diff_eq(Vec3::new(0.25, 0.75, 0.0), 1.0e-6));
+        assert!((sample.pdf_area - 2.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn sample_area_light_point_uses_triangle_weight_distribution() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        scene.add_instance(
+            mesh_index,
+            material_index,
+            Mat4::from_scale(Vec3::splat(2.0)),
+        );
+
+        let first_sample = scene
+            .sample_area_light_point(0.1, Vec2::new(0.0, 0.0))
+            .expect("expected area light sample");
+        let second_sample = scene
+            .sample_area_light_point(0.9, Vec2::new(0.0, 0.0))
+            .expect("expected area light sample");
+
+        assert_eq!(
+            first_sample.triangle,
+            TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            }
+        );
+        assert_eq!(
+            second_sample.triangle,
+            TriangleRef {
+                instance_index: InstanceIndex(1),
+                triangle_index: 0,
+            }
+        );
+        assert!((first_sample.triangle_selection_probability - 0.2).abs() < 1.0e-6);
+        assert!((second_sample.triangle_selection_probability - 0.8).abs() < 1.0e-6);
+        assert!((first_sample.pdf_area - 0.4).abs() < 1.0e-6);
+        assert!((second_sample.pdf_area - 0.4).abs() < 1.0e-6);
     }
 }
