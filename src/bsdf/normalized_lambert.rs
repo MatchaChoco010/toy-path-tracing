@@ -1,6 +1,8 @@
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::PI;
 
 use glam::{Vec2, Vec3};
+
+use crate::math::{cosine_weighted_hemisphere_pdf, sample_cosine_weighted_hemisphere};
 
 use super::BsdfSample;
 
@@ -33,21 +35,6 @@ impl NormalizedLambertBsdf {
         Some(BsdfSample { weight, wi, pdf })
     }
 }
-
-fn sample_cosine_weighted_hemisphere(us: Vec2) -> Vec3 {
-    let r = us.x.sqrt();
-    let phi = TAU * us.y;
-    let x = r * phi.cos();
-    let y = r * phi.sin();
-    let z = (1.0 - us.x).max(0.0).sqrt();
-
-    Vec3::new(x, y, z)
-}
-
-fn cosine_weighted_hemisphere_pdf(cos_theta: f32) -> f32 {
-    cos_theta.max(0.0) / PI
-}
-
 #[cfg(test)]
 mod tests {
     use glam::{Vec2, Vec3};

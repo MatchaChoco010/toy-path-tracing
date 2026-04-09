@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec3};
 
-const MACHINE_EPSILON: f32 = f32::EPSILON * 0.5;
+use crate::math::{difference_of_products, gamma, max_component_index, permute_vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ray {
@@ -65,14 +65,14 @@ pub fn intersect_triangle(
         ky = 0;
     }
 
-    let d = permute(ray.direction, kx, ky, kz);
+    let d = permute_vec3(ray.direction, kx, ky, kz);
     if d.z == 0.0 {
         return None;
     }
 
-    p0t = permute(p0t, kx, ky, kz);
-    p1t = permute(p1t, kx, ky, kz);
-    p2t = permute(p2t, kx, ky, kz);
+    p0t = permute_vec3(p0t, kx, ky, kz);
+    p1t = permute_vec3(p1t, kx, ky, kz);
+    p2t = permute_vec3(p2t, kx, ky, kz);
 
     let sx = -d.x / d.z;
     let sy = -d.y / d.z;
@@ -151,33 +151,6 @@ pub fn intersect_triangle_unbounded(
     v2: Vec3,
 ) -> Option<TriangleIntersection> {
     intersect_triangle(ray, f32::INFINITY, v0, v1, v2)
-}
-
-fn gamma(n: i32) -> f32 {
-    let n = n as f32;
-    (n * MACHINE_EPSILON) / (1.0 - n * MACHINE_EPSILON)
-}
-
-fn difference_of_products(a: f32, b: f32, c: f32, d: f32) -> f32 {
-    let cd = c * d;
-    let difference_of_products = a.mul_add(b, -cd);
-    let error = (-c).mul_add(d, cd);
-    difference_of_products + error
-}
-
-fn max_component_index(v: Vec3) -> usize {
-    if v.x > v.y {
-        if v.x > v.z { 0 } else { 2 }
-    } else if v.y > v.z {
-        1
-    } else {
-        2
-    }
-}
-
-fn permute(v: Vec3, x: usize, y: usize, z: usize) -> Vec3 {
-    let a = v.to_array();
-    Vec3::new(a[x], a[y], a[z])
 }
 
 #[cfg(test)]

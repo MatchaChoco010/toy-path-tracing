@@ -1,6 +1,6 @@
 use glam::{UVec2, Vec2, Vec3};
 
-use crate::ray::Ray;
+use crate::{math::sample_tent_2d, ray::Ray};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PinholeCamera {
@@ -45,19 +45,6 @@ impl PinholeCamera {
             (self.forward + sensor_x * self.right + sensor_y * self.image_up).normalize();
 
         Ray::new(self.eye, direction)
-    }
-}
-
-fn sample_tent_2d(us: Vec2) -> Vec2 {
-    Vec2::new(sample_tent_1d(us.x), sample_tent_1d(us.y))
-}
-
-fn sample_tent_1d(u: f32) -> f32 {
-    let u = u.clamp(0.0, 1.0);
-    if u < 0.5 {
-        (2.0 * u).sqrt() - 1.0
-    } else {
-        1.0 - (2.0 - 2.0 * u).sqrt()
     }
 }
 

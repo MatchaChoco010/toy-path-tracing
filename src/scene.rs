@@ -4,7 +4,10 @@ use std::fmt;
 use crate::{
     bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
     material::{Material, ShadingVertex},
-    math::OrthonormalBasis,
+    math::{
+        OrthonormalBasis, compute_surface_partials, face_forward, interpolate_vec2,
+        interpolate_vec3,
+    },
     mesh::{Bounds, Mesh},
     ray::{Ray, intersect_triangle},
 };
@@ -391,47 +394,6 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 
     Bounds { min, max }
 }
-
-fn face_forward(normal: Vec3, reference: Vec3) -> Vec3 {
-    if normal.dot(reference) < 0.0 {
-        -normal
-    } else {
-        normal
-    }
-}
-
-fn interpolate_vec2(barycentric: Vec3, v0: Vec2, v1: Vec2, v2: Vec2) -> Vec2 {
-    barycentric.x * v0 + barycentric.y * v1 + barycentric.z * v2
-}
-
-fn interpolate_vec3(barycentric: Vec3, v0: Vec3, v1: Vec3, v2: Vec3) -> Vec3 {
-    barycentric.x * v0 + barycentric.y * v1 + barycentric.z * v2
-}
-
-fn compute_surface_partials(positions: [Vec3; 3], uvs: [Vec2; 3]) -> Option<(Vec3, Vec3)> {
-    let [p0, p1, p2] = positions;
-    let [uv0, uv1, uv2] = uvs;
-    let dp1 = p1 - p0;
-    let dp2 = p2 - p0;
-    let duv1 = uv1 - uv0;
-    let duv2 = uv2 - uv0;
-    let determinant = duv1.x * duv2.y - duv1.y * duv2.x;
-
-    if determinant.abs() <= 1.0e-8 {
-        return None;
-    }
-
-    let inv_determinant = 1.0 / determinant;
-    let dpdu = (duv2.y * dp1 - duv1.y * dp2) * inv_determinant;
-    let dpdv = (-duv2.x * dp1 + duv1.x * dp2) * inv_determinant;
-
-    if dpdu.length_squared() == 0.0 || dpdv.length_squared() == 0.0 {
-        return None;
-    }
-
-    Some((dpdu, dpdv))
-}
-
 #[cfg(test)]
 mod tests {
     use glam::{Mat4, Vec2, Vec3};

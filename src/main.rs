@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use toy_path_tracing::{ray::Ray, scene::Scene, scenes::load_scene};
+use toy_path_tracing::{math::reinhard, ray::Ray, scene::Scene, scenes::load_scene};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -125,10 +125,6 @@ fn trace_radiance(
 
 fn russian_roulette_probability(throughput: Vec3) -> f32 {
     throughput.max_element().clamp(0.05, 0.95)
-}
-
-fn reinhard(color: Vec3) -> Vec3 {
-    color / (Vec3::ONE + color)
 }
 
 fn create_output_directory(output_path: &Path) -> std::io::Result<()> {
