@@ -40,6 +40,16 @@ impl NormalizedLambertMaterial {
         bsdf.eval(wo_local, wi_local)
     }
 
+    pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
+        let wo_local = shading_vertex
+            .frame
+            .world_to_local(shading_vertex.wo)
+            .normalize_or_zero();
+        let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
+        let bsdf = NormalizedLambertBsdf::new(self.rho);
+        bsdf.pdf(wo_local, wi_local)
+    }
+
     pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {
         None
     }

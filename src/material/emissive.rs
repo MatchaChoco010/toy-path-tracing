@@ -21,6 +21,10 @@ impl EmissiveMaterial {
         Vec3::ZERO
     }
 
+    pub fn pdf(&self, _shading_vertex: &ShadingVertex, _wi: Vec3) -> f32 {
+        0.0
+    }
+
     pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {
         Some(self.color * self.strength)
     }

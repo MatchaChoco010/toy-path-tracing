@@ -57,6 +57,13 @@ impl Material {
         }
     }
 
+    pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
+        match self {
+            Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
+            Self::Emissive(material) => material.pdf(shading_vertex, wi),
+        }
+    }
+
     pub fn may_emit(&self) -> bool {
         match self {
             Self::NormalizedLambert(material) => material.may_emit(),
@@ -74,6 +81,8 @@ impl Material {
 
 #[cfg(test)]
 mod tests {
+    use std::f32::consts::PI;
+
     use glam::Vec3;
 
     use crate::{
@@ -133,5 +142,25 @@ mod tests {
         let f = material.eval(&shading_vertex, Vec3::Z);
 
         assert!(f.abs_diff_eq(Vec3::new(0.3, 0.5, 0.7) / std::f32::consts::PI, 1.0e-6));
+    }
+
+    #[test]
+    fn lambert_material_pdf_delegates_to_bsdf() {
+        let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
+        let shading_vertex = test_shading_vertex(Vec3::Z);
+        let wi = Vec3::new(0.2, 0.3, 0.9327379).normalize();
+
+        let pdf = material.pdf(&shading_vertex, wi);
+
+        assert!((pdf - wi.z / PI).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn emissive_material_pdf_is_always_zero_for_mis() {
+        let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
+        let shading_vertex = test_shading_vertex(Vec3::Z);
+
+        assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
+        assert_eq!(material.pdf(&shading_vertex, -Vec3::Z), 0.0);
     }
 }

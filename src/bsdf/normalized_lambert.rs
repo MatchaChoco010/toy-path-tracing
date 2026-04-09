@@ -24,13 +24,21 @@ impl NormalizedLambertBsdf {
         self.rho / PI
     }
 
+    pub fn pdf(&self, wo: Vec3, wi: Vec3) -> f32 {
+        if wo.z <= 0.0 || wi.z <= 0.0 {
+            return 0.0;
+        }
+
+        cosine_weighted_hemisphere_pdf(wi.z)
+    }
+
     pub fn sample(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
         if wo.z <= 0.0 {
             return None;
         }
 
         let wi = sample_cosine_weighted_hemisphere(us);
-        let pdf = cosine_weighted_hemisphere_pdf(wi.z);
+        let pdf = self.pdf(wo, wi);
 
         if pdf <= 0.0 {
             return None;
@@ -65,6 +73,24 @@ mod tests {
 
         assert_eq!(bsdf.eval(Vec3::Z, -Vec3::Z), Vec3::ZERO);
         assert_eq!(bsdf.eval(-Vec3::Z, Vec3::Z), Vec3::ZERO);
+    }
+
+    #[test]
+    fn pdf_matches_cosine_weighted_hemisphere_density() {
+        let bsdf = NormalizedLambertBsdf::new(Vec3::ONE);
+        let wi = Vec3::new(0.2, 0.3, 0.9327379).normalize();
+
+        let pdf = bsdf.pdf(Vec3::Z, wi);
+
+        assert!((pdf - wi.z / PI).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn pdf_returns_zero_for_lower_hemisphere_directions() {
+        let bsdf = NormalizedLambertBsdf::new(Vec3::ONE);
+
+        assert_eq!(bsdf.pdf(Vec3::Z, -Vec3::Z), 0.0);
+        assert_eq!(bsdf.pdf(-Vec3::Z, Vec3::Z), 0.0);
     }
 
     #[test]
