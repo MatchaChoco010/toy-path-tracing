@@ -3,7 +3,7 @@ use rand::RngExt;
 
 use crate::{
     material::{Material, ShadingVertex},
-    math::russian_roulette_probability,
+    math::{balance_heuristic, russian_roulette_probability},
     ray::Ray,
     scene::Scene,
 };
@@ -60,15 +60,26 @@ pub fn trace_radiance(
         }
 
         let next_ray = Ray::new(vtx.p + RAY_EPSILON * vtx.ng, sample.wi);
-        let Some(light_hit) = scene
+        let Some(next_hit) = scene
             .closest_hit(&next_ray)
             .expect("scene.build_bvh() must be called before traversal")
         else {
             break;
         };
 
-        vtx = scene.shading_vertex(light_hit, next_ray.direction);
-        material = scene.instance_material(light_hit.triangle.instance_index);
+        let next_vtx = scene.shading_vertex(next_hit, next_ray.direction);
+        let next_material = scene.instance_material(next_hit.triangle.instance_index);
+        radiance += emitted_radiance_from_bsdf_sample(
+            scene,
+            throughput,
+            sample.pdf,
+            &vtx,
+            &next_vtx,
+            next_material,
+        );
+
+        vtx = next_vtx;
+        material = next_material;
         is_primary_hit = false;
     }
 
@@ -86,10 +97,6 @@ fn sample_direct_area_light_radiance(
         return Vec3::ZERO;
     };
 
-    if light_sample.pdf_area <= 0.0 {
-        return Vec3::ZERO;
-    }
-
     let to_light = light_sample.p - vtx.p;
     let distance_squared = to_light.length_squared();
     if distance_squared <= 0.0 {
@@ -97,8 +104,6 @@ fn sample_direct_area_light_radiance(
     }
 
     let distance = distance_squared.sqrt();
-    // We need the actual distance for the geometry term anyway, so build the
-    // unit direction from the same scalar instead of normalizing separately.
     let wi = to_light / distance;
     let f = material.eval(vtx, wi);
     if f.length_squared() == 0.0 {
@@ -128,21 +133,37 @@ fn sample_direct_area_light_radiance(
         shadow_ray.direction,
     );
     let light_material = scene.instance_material(light_sample.triangle.instance_index);
-    if !light_material.may_emit() {
-        return Vec3::ZERO;
-    }
-
     let Some(le) = light_material.le(&lvtx) else {
         return Vec3::ZERO;
     };
 
-    let cos_light = lvtx.ng.dot(-wi).max(0.0);
-    if cos_light <= 0.0 {
+    let light_pdf = scene.area_light_pdf_solid_angle(vtx, &lvtx).unwrap_or(0.0);
+    if light_pdf <= 0.0 {
         return Vec3::ZERO;
     }
 
-    let geometry = (cos_surface * cos_light) / distance_squared;
-    le * f * (geometry / light_sample.pdf_area)
+    let bsdf_pdf = material.pdf(vtx, wi);
+    let mis_weight = balance_heuristic(light_pdf, bsdf_pdf);
+
+    le * f * (cos_surface * mis_weight / light_pdf)
+}
+
+fn emitted_radiance_from_bsdf_sample(
+    scene: &Scene,
+    throughput: Vec3,
+    bsdf_pdf: f32,
+    vtx: &ShadingVertex,
+    lvtx: &ShadingVertex,
+    light_material: &Material,
+) -> Vec3 {
+    let Some(le) = light_material.le(lvtx) else {
+        return Vec3::ZERO;
+    };
+
+    let light_pdf = scene.area_light_pdf_solid_angle(vtx, lvtx).unwrap_or(0.0);
+    let mis_weight = balance_heuristic(bsdf_pdf, light_pdf);
+
+    throughput * le * mis_weight
 }
 
 #[cfg(test)]
@@ -151,12 +172,13 @@ mod tests {
 
     use glam::{Mat4, Vec2, Vec3};
 
-    use super::sample_direct_area_light_radiance;
     use crate::{
         material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
         scene::{InstanceIndex, Scene, TriangleRef},
     };
+
+    use super::{emitted_radiance_from_bsdf_sample, sample_direct_area_light_radiance};
 
     fn unit_mesh(z: f32) -> Mesh {
         Mesh::new(
@@ -189,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_radiance_matches_area_light_estimator_for_unoccluded_light() {
+    fn direct_radiance_applies_balance_heuristic_for_light_sampling() {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
@@ -210,26 +232,22 @@ mod tests {
         let material = scene.instance_material(InstanceIndex(0));
         let radiance =
             sample_direct_area_light_radiance(&scene, material, &vtx, 0.5, Vec2::new(0.25, 0.5));
+        let expected = (4.0 / PI) * (2.0 / (2.0 + 1.0 / PI));
 
-        assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-5));
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
 
     #[test]
-    fn direct_radiance_returns_zero_when_light_is_occluded() {
+    fn emitted_radiance_applies_balance_heuristic_for_bsdf_sampling() {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let blocker_mesh = scene.add_mesh(unit_mesh(0.5));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
             NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
-        let blocker_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.5)),
-        ));
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_instance(blocker_mesh, blocker_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
         scene.build_bvh();
 
@@ -238,10 +256,25 @@ mod tests {
             Vec3::new(0.5, 0.25, 0.25),
             Vec3::NEG_Z,
         );
+        let lvtx = scene.shading_vertex_from_triangle_sample(
+            triangle_ref(1),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::Z,
+        );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance =
-            sample_direct_area_light_radiance(&scene, material, &vtx, 0.5, Vec2::new(0.25, 0.5));
+        let light_material = scene.instance_material(InstanceIndex(1));
+        let bsdf_pdf = material.pdf(&vtx, Vec3::Z);
+        let throughput = Vec3::splat(0.8);
+        let radiance = emitted_radiance_from_bsdf_sample(
+            &scene,
+            throughput,
+            bsdf_pdf,
+            &vtx,
+            &lvtx,
+            light_material,
+        );
+        let expected = 8.0 * ((1.0 / PI) / (2.0 + 1.0 / PI));
 
-        assert_eq!(radiance, Vec3::ZERO);
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
 }

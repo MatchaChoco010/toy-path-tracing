@@ -1,9 +1,7 @@
 use glam::{Vec2, Vec3};
 use rand::RngExt;
 
-use crate::{ray::Ray, scene::Scene};
-
-use super::russian_roulette_probability;
+use crate::{math::russian_roulette_probability, ray::Ray, scene::Scene};
 
 pub fn trace_radiance(
     scene: &Scene,

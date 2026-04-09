@@ -187,15 +187,29 @@ pub fn reinhard(color: Vec3) -> Vec3 {
     color / (Vec3::ONE + color)
 }
 
+pub fn balance_heuristic(pdf_a: f32, pdf_b: f32) -> f32 {
+    let pdf_sum = pdf_a + pdf_b;
+
+    if pdf_a <= 0.0 || pdf_sum <= 0.0 {
+        return 0.0;
+    }
+
+    pdf_a / pdf_sum
+}
+
+pub fn russian_roulette_probability(throughput: Vec3) -> f32 {
+    throughput.max_element().clamp(0.05, 0.95)
+}
+
 #[cfg(test)]
 mod tests {
     use glam::{Vec2, Vec3};
 
     use super::{
-        OrthonormalBasis, compute_surface_partials, cosine_weighted_hemisphere_pdf,
-        difference_of_products, face_forward, gamma, interpolate_vec2, interpolate_vec3,
-        max_component_index, permute_vec3, reinhard, sample_cosine_weighted_hemisphere,
-        sample_tent_1d,
+        OrthonormalBasis, balance_heuristic, compute_surface_partials,
+        cosine_weighted_hemisphere_pdf, difference_of_products, face_forward, gamma,
+        interpolate_vec2, interpolate_vec3, max_component_index, permute_vec3, reinhard,
+        russian_roulette_probability, sample_cosine_weighted_hemisphere, sample_tent_1d,
     };
 
     #[test]
@@ -290,5 +304,18 @@ mod tests {
     #[test]
     fn reinhard_maps_white_to_half_gray() {
         assert!(reinhard(Vec3::ONE).abs_diff_eq(Vec3::splat(0.5), 1.0e-6));
+    }
+
+    #[test]
+    fn balance_heuristic_returns_normalized_weight() {
+        assert!((balance_heuristic(2.0, 3.0) - 0.4).abs() < 1.0e-6);
+        assert_eq!(balance_heuristic(0.0, 3.0), 0.0);
+    }
+
+    #[test]
+    fn russian_roulette_probability_clamps_to_safe_range() {
+        assert!((russian_roulette_probability(Vec3::splat(0.01)) - 0.05).abs() < 1.0e-6);
+        assert!((russian_roulette_probability(Vec3::splat(0.5)) - 0.5).abs() < 1.0e-6);
+        assert!((russian_roulette_probability(Vec3::splat(10.0)) - 0.95).abs() < 1.0e-6);
     }
 }

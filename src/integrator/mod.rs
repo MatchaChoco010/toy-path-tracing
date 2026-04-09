@@ -4,11 +4,13 @@ use rand::rngs::ThreadRng;
 
 use crate::{ray::Ray, scene::Scene};
 
+pub mod mis;
 pub mod nee;
 pub mod pt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum IntegratorKind {
+    Mis,
     Pt,
     Nee,
 }
@@ -22,12 +24,9 @@ impl IntegratorKind {
         max_depth: u32,
     ) -> Vec3 {
         match self {
+            Self::Mis => mis::trace_radiance(scene, initial_ray, rng, max_depth),
             Self::Pt => pt::trace_radiance(scene, initial_ray, rng, max_depth),
             Self::Nee => nee::trace_radiance(scene, initial_ray, rng, max_depth),
         }
     }
-}
-
-pub(crate) fn russian_roulette_probability(throughput: Vec3) -> f32 {
-    throughput.max_element().clamp(0.05, 0.95)
 }

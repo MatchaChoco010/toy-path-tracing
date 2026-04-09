@@ -30,7 +30,7 @@ struct Args {
     #[arg(long = "depth", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..))]
     depth: u32,
 
-    #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Pt)]
+    #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
 }
 
@@ -97,4 +97,27 @@ fn format_duration(duration: Duration) -> String {
     let millis = total_millis % 1_000;
 
     format!("{minutes:02}m:{seconds:02}s:{millis:03}ms")
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Args;
+    use toy_path_tracing::integrator::IntegratorKind;
+
+    #[test]
+    fn integrator_defaults_to_mis() {
+        let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
+
+        assert_eq!(args.integrator, IntegratorKind::Mis);
+    }
+
+    #[test]
+    fn integrator_accepts_mis_from_cli() {
+        let args = Args::try_parse_from(["toy-path-tracing", "-i", "mis"])
+            .expect("expected valid mis integrator");
+
+        assert_eq!(args.integrator, IntegratorKind::Mis);
+    }
 }

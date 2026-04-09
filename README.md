@@ -10,7 +10,7 @@ Rust で学習用のパストレーサーを実装していくためのプロジ
 cargo run --release -- [OPTIONS]
 ```
 
-現在の CLI では、出力先、出力画像サイズ、シーン番号、1 ピクセルあたりのサンプル数、最大パストレース深度、使用する integrator を指定できます。
+現在の CLI では、出力先、出力画像サイズ、シーン番号、1 ピクセルあたりのサンプル数、最大パストレース深度、使用する integrator を指定できます。integrator を省略した場合は、MIS を使う `mis` が既定で選ばれます。
 
 ### 実行例
 
@@ -20,7 +20,11 @@ cargo run --release -- [OPTIONS]
 cargo run --release -- --spp 64 --scene 0 -o result/scene-0.png
 ```
 
-integrator を明示して実行したい場合は `--integrator` または `-i` を使います。現状は `pt` と `nee` を選べます。
+integrator を明示して実行したい場合は `--integrator` または `-i` を使います。現状は `mis`、`pt`、`nee` を選べます。
+
+```bash
+cargo run --release -- --scene 1 --spp 128 --depth 24 -i mis -o result/scene-1-mis.png
+```
 
 ```bash
 cargo run --release -- --scene 1 --spp 128 --depth 24 -i pt -o result/scene-1-pt.png
@@ -48,7 +52,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `--scene <SCENE>` | `0` | 読み込むシーン番号です。 |
 | `--spp <SPP>` | `32` | Samples Per Pixel。各ピクセルで何本のパスを積分するかを指定します。`1` 以上のみ指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上のみ指定できます。 |
-| `-i, --integrator <INTEGRATOR>` | `pt` | 使用する integrator を指定します。現在は `pt` と `nee` を選べます。存在しない名前を指定するとエラーになります。 |
+| `-i, --integrator <INTEGRATOR>` | `mis` | 使用する integrator を指定します。現在は `mis`、`pt`、`nee` を選べます。存在しない名前を指定するとエラーになります。 |
 | `-h, --help` | なし | ヘルプを表示します。 |
 
 ## 現在のシーン番号
@@ -66,7 +70,8 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 ## 現在の実装上の注意
 
 - `--width` と `--height` を省略した場合は、既定値として `512 x 512` の画像を出力します。
-- `--integrator` を省略した場合は `pt` が選択されます。
+- `--integrator` を省略した場合は `mis` が選択されます。
+- `-i mis` を指定すると、BSDF サンプリングとエリアライトの明示サンプリングを MIS で合成する integrator が選択されます。
 - `-i nee` を指定すると、エリアライトの明示サンプリングを使う next event estimation integrator が選択されます。
 - 生成画像は `result/` 以下に保存する運用を想定しています。
 - 初回の `cargo run` では依存クレートのビルドに時間がかかることがあります。
