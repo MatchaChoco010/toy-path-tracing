@@ -4,17 +4,11 @@ use image::RgbImage;
 use rand::RngExt;
 use rayon::prelude::*;
 use std::{
-    f32::consts::{PI, TAU},
     fs,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use toy_path_tracing::{
-    math::OrthonormalBasis,
-    ray::Ray,
-    scene::{Material, Scene},
-    scenes::load_scene,
-};
+use toy_path_tracing::{ray::Ray, scene::Scene, scenes::load_scene};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -101,64 +95,32 @@ fn trace_radiance(
             break;
         };
 
-        let [p0, p1, p2] = scene.triangle_positions(hit.triangle);
-        let [n0, n1, n2] = scene.triangle_normals(hit.triangle);
-        let hit_position = hit.barycentric.x * p0 + hit.barycentric.y * p1 + hit.barycentric.z * p2;
-        let geometric_normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
-        let shading_normal =
-            (hit.barycentric.x * n0 + hit.barycentric.y * n1 + hit.barycentric.z * n2)
-                .normalize_or_zero();
-        let mut normal = if shading_normal.length_squared() > 0.0 {
-            shading_normal
-        } else {
-            geometric_normal
+        let shading_vertex = scene.shading_vertex(hit, ray.direction);
+        let material = scene.instance_material(hit.triangle.instance_index);
+
+        if let Some(le) = material.le(&shading_vertex) {
+            radiance += throughput * le;
+        }
+
+        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let Some(sample) = material.sample(&shading_vertex, us, -ray.direction) else {
+            break;
         };
 
-        if normal.dot(-ray.direction) < 0.0 {
-            normal = -normal;
-        }
+        throughput *= sample.weight;
 
-        match scene.instance_material(hit.triangle.instance_index) {
-            Material::Emissive { color, strength } => {
-                radiance += throughput * (color * strength);
+        if depth + 1 >= rr_start_depth {
+            let survive_probability = russian_roulette_probability(throughput);
+            if rng.random::<f32>() > survive_probability {
                 break;
             }
-            Material::Diffuse { rho } => {
-                let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-                let local_direction = sample_uniform_hemisphere(us);
-                let basis = OrthonormalBasis::from_normal(normal);
-                let next_direction = basis.local_to_world(local_direction);
-                let cos_theta = basis.world_to_local(next_direction).z.max(0.0);
-                if cos_theta <= 0.0 {
-                    break;
-                }
-
-                let pdf = 1.0 / (2.0 * PI);
-                let bsdf = rho / PI;
-                throughput *= bsdf * (cos_theta / pdf);
-
-                if depth + 1 >= rr_start_depth {
-                    let survive_probability = russian_roulette_probability(throughput);
-                    if rng.random::<f32>() > survive_probability {
-                        break;
-                    }
-                    throughput /= survive_probability;
-                }
-
-                ray = Ray::new(hit_position + 1.0e-4 * normal, next_direction);
-            }
+            throughput /= survive_probability;
         }
+
+        ray = Ray::new(shading_vertex.p + 1.0e-4 * shading_vertex.ng, sample.wi);
     }
 
     radiance
-}
-
-fn sample_uniform_hemisphere(us: Vec2) -> Vec3 {
-    let z = us.x;
-    let r = (1.0 - z * z).sqrt();
-    let phi = TAU * us.y;
-
-    Vec3::new(r * phi.cos(), r * phi.sin(), z)
 }
 
 fn russian_roulette_probability(throughput: Vec3) -> f32 {

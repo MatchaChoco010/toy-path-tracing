@@ -1,4 +1,4 @@
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::{fmt, path::Path};
 
 use crate::bvh::{MeshBvh, build_mesh_bvh};
@@ -40,6 +40,7 @@ impl Bounds {
 pub struct Vertex {
     pub position: Vec3,
     pub normal: Vec3,
+    pub uv: Vec2,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +84,16 @@ impl Mesh {
             self.vertices[i0 as usize].normal,
             self.vertices[i1 as usize].normal,
             self.vertices[i2 as usize].normal,
+        ]
+    }
+
+    pub fn triangle_uvs(&self, triangle_index: usize) -> [Vec2; 3] {
+        let [i0, i1, i2] = self.triangle_indices(triangle_index);
+
+        [
+            self.vertices[i0 as usize].uv,
+            self.vertices[i1 as usize].uv,
+            self.vertices[i2 as usize].uv,
         ]
     }
 
@@ -263,6 +274,10 @@ fn append_gltf_mesh(
             .read_indices()
             .map(|indices| indices.into_u32().collect::<Vec<_>>())
             .unwrap_or_else(|| (0..positions.len() as u32).collect());
+        let uvs = reader
+            .read_tex_coords(0)
+            .map(|uvs| uvs.into_f32().map(Vec2::from_array).collect::<Vec<_>>())
+            .unwrap_or_else(|| vec![Vec2::ZERO; positions.len()]);
 
         if local_indices.len() % 3 != 0 {
             return Err(LoadMeshError::InvalidTriangleIndexCount {
@@ -294,6 +309,7 @@ fn append_gltf_mesh(
                 } else {
                     generated_normals[index]
                 },
+                uv: uvs[index],
             });
         }
 
@@ -348,7 +364,7 @@ fn compute_bounds(vertices: &[Vertex]) -> Option<Bounds> {
 #[cfg(test)]
 mod tests {
     use super::{Bounds, Mesh, Vertex};
-    use glam::Vec3;
+    use glam::{Vec2, Vec3};
 
     #[test]
     fn triangle_accessors_follow_index_buffer() {
@@ -357,14 +373,17 @@ mod tests {
                 Vertex {
                     position: Vec3::new(0.0, 0.0, 0.0),
                     normal: Vec3::X,
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(1.0, 0.0, 0.0),
                     normal: Vec3::Y,
+                    uv: Vec2::X,
                 },
                 Vertex {
                     position: Vec3::new(0.0, 1.0, 0.0),
                     normal: Vec3::Z,
+                    uv: Vec2::Y,
                 },
             ],
             vec![0, 1, 2],
@@ -379,6 +398,7 @@ mod tests {
             ]
         );
         assert_eq!(mesh.triangle_normals(0), [Vec3::X, Vec3::Y, Vec3::Z]);
+        assert_eq!(mesh.triangle_uvs(0), [Vec2::ZERO, Vec2::X, Vec2::Y]);
     }
 
     #[test]
@@ -388,10 +408,12 @@ mod tests {
                 Vertex {
                     position: Vec3::new(-2.0, 1.0, 3.0),
                     normal: Vec3::X,
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(4.0, -1.0, -5.0),
                     normal: Vec3::Y,
+                    uv: Vec2::ONE,
                 },
             ],
             vec![0, 1, 1],

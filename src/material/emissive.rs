@@ -1,0 +1,28 @@
+use glam::{Vec2, Vec3};
+
+use super::{MaterialSample, ShadingVertex};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmissiveMaterial {
+    pub color: Vec3,
+    pub strength: f32,
+}
+
+impl EmissiveMaterial {
+    pub fn new(color: Vec3, strength: f32) -> Self {
+        Self { color, strength }
+    }
+
+    pub fn sample(
+        &self,
+        _shading_vertex: &ShadingVertex,
+        _us: Vec2,
+        _wo: Vec3,
+    ) -> Option<MaterialSample> {
+        None
+    }
+
+    pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {
+        Some(self.color * self.strength)
+    }
+}

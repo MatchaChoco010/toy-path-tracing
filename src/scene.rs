@@ -1,8 +1,10 @@
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::fmt;
 
 use crate::{
     bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
+    material::{Material, ShadingVertex},
+    math::OrthonormalBasis,
     mesh::{Bounds, Mesh},
     ray::{Ray, intersect_triangle},
 };
@@ -20,12 +22,6 @@ pub struct MaterialIndex(pub usize);
 pub struct TriangleRef {
     pub instance_index: InstanceIndex,
     pub triangle_index: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Material {
-    Diffuse { rho: Vec3 },
-    Emissive { color: Vec3, strength: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -225,6 +221,11 @@ impl Scene {
         })
     }
 
+    pub fn triangle_uvs(&self, triangle: TriangleRef) -> [Vec2; 3] {
+        let instance = self.instances[triangle.instance_index.0];
+        self.meshes[instance.mesh_index.0].triangle_uvs(triangle.triangle_index)
+    }
+
     pub fn triangle_positions(&self, triangle: TriangleRef) -> [Vec3; 3] {
         let instance = self.instances[triangle.instance_index.0];
         let positions =
@@ -233,13 +234,57 @@ impl Scene {
         positions.map(|position| instance.local_to_world.transform_point3(position))
     }
 
-    pub fn material(&self, material_index: MaterialIndex) -> Material {
-        self.materials[material_index.0]
+    pub fn material(&self, material_index: MaterialIndex) -> &Material {
+        &self.materials[material_index.0]
     }
 
-    pub fn instance_material(&self, instance_index: InstanceIndex) -> Material {
+    pub fn instance_material(&self, instance_index: InstanceIndex) -> &Material {
         let material_index = self.instances[instance_index.0].material_index;
         self.material(material_index)
+    }
+
+    pub fn shading_vertex(&self, hit: SceneHit, incident_direction: Vec3) -> ShadingVertex {
+        let [p0, p1, p2] = self.triangle_positions(hit.triangle);
+        let [n0, n1, n2] = self.triangle_normals(hit.triangle);
+        let [uv0, uv1, uv2] = self.triangle_uvs(hit.triangle);
+        let p = interpolate_vec3(hit.barycentric, p0, p1, p2);
+        let uv = interpolate_vec2(hit.barycentric, uv0, uv1, uv2);
+        let geometric_normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
+        let shading_normal = interpolate_vec3(hit.barycentric, n0, n1, n2).normalize_or_zero();
+        let front_face = geometric_normal.dot(-incident_direction) >= 0.0;
+        let ng = face_forward(geometric_normal, -incident_direction);
+        let ns = face_forward(
+            if shading_normal.length_squared() > 0.0 {
+                shading_normal
+            } else {
+                ng
+            },
+            ng,
+        );
+        let (mut dpdu, mut dpdv) = compute_surface_partials([p0, p1, p2], [uv0, uv1, uv2])
+            .unwrap_or_else(|| {
+                let frame = OrthonormalBasis::from_normal(ns);
+                (frame.tangent(), frame.bitangent())
+            });
+        let frame = OrthonormalBasis::from_normal_and_tangent(ns, dpdu);
+
+        if dpdu.length_squared() == 0.0 {
+            dpdu = frame.tangent();
+        }
+        if dpdv.length_squared() == 0.0 {
+            dpdv = frame.bitangent();
+        }
+
+        ShadingVertex {
+            p,
+            uv,
+            ng,
+            ns,
+            dpdu,
+            dpdv,
+            frame,
+            front_face,
+        }
     }
 
     pub fn bounds(&self) -> Option<Bounds> {
@@ -347,12 +392,53 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
     Bounds { min, max }
 }
 
+fn face_forward(normal: Vec3, reference: Vec3) -> Vec3 {
+    if normal.dot(reference) < 0.0 {
+        -normal
+    } else {
+        normal
+    }
+}
+
+fn interpolate_vec2(barycentric: Vec3, v0: Vec2, v1: Vec2, v2: Vec2) -> Vec2 {
+    barycentric.x * v0 + barycentric.y * v1 + barycentric.z * v2
+}
+
+fn interpolate_vec3(barycentric: Vec3, v0: Vec3, v1: Vec3, v2: Vec3) -> Vec3 {
+    barycentric.x * v0 + barycentric.y * v1 + barycentric.z * v2
+}
+
+fn compute_surface_partials(positions: [Vec3; 3], uvs: [Vec2; 3]) -> Option<(Vec3, Vec3)> {
+    let [p0, p1, p2] = positions;
+    let [uv0, uv1, uv2] = uvs;
+    let dp1 = p1 - p0;
+    let dp2 = p2 - p0;
+    let duv1 = uv1 - uv0;
+    let duv2 = uv2 - uv0;
+    let determinant = duv1.x * duv2.y - duv1.y * duv2.x;
+
+    if determinant.abs() <= 1.0e-8 {
+        return None;
+    }
+
+    let inv_determinant = 1.0 / determinant;
+    let dpdu = (duv2.y * dp1 - duv1.y * dp2) * inv_determinant;
+    let dpdv = (-duv2.x * dp1 + duv1.x * dp2) * inv_determinant;
+
+    if dpdu.length_squared() == 0.0 || dpdv.length_squared() == 0.0 {
+        return None;
+    }
+
+    Some((dpdu, dpdv))
+}
+
 #[cfg(test)]
 mod tests {
-    use glam::{Mat4, Vec3};
+    use glam::{Mat4, Vec2, Vec3};
 
-    use super::{ClosestHitError, InstanceIndex, Material, Scene, TriangleRef};
+    use super::{ClosestHitError, InstanceIndex, MaterialIndex, Scene, SceneHit, TriangleRef};
     use crate::{
+        material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
         ray::Ray,
     };
@@ -363,14 +449,17 @@ mod tests {
                 Vertex {
                     position: Vec3::new(0.0, 0.0, z),
                     normal: Vec3::Z,
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(1.0, 0.0, z),
                     normal: Vec3::Z,
+                    uv: Vec2::X,
                 },
                 Vertex {
                     position: Vec3::new(0.0, 1.0, z),
                     normal: Vec3::Z,
+                    uv: Vec2::Y,
                 },
             ],
             vec![0, 1, 2],
@@ -383,36 +472,42 @@ mod tests {
                 Vertex {
                     position: Vec3::new(0.0, 0.0, 0.0),
                     normal: Vec3::Z,
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(1.0, 0.0, 0.0),
                     normal: Vec3::Z,
+                    uv: Vec2::X,
                 },
                 Vertex {
                     position: Vec3::new(0.0, 1.0, 0.0),
                     normal: Vec3::Z,
+                    uv: Vec2::Y,
                 },
                 Vertex {
                     position: Vec3::new(0.0, 0.0, -1.0),
                     normal: Vec3::Z,
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(1.0, 0.0, -1.0),
                     normal: Vec3::Z,
+                    uv: Vec2::X,
                 },
                 Vertex {
                     position: Vec3::new(0.0, 1.0, -1.0),
                     normal: Vec3::Z,
+                    uv: Vec2::Y,
                 },
             ],
             vec![0, 1, 2, 3, 4, 5],
         )
     }
 
-    fn default_material(scene: &mut Scene) -> super::MaterialIndex {
-        scene.add_material(Material::Diffuse {
-            rho: Vec3::splat(0.5),
-        })
+    fn default_material(scene: &mut Scene) -> MaterialIndex {
+        scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial::new(
+            Vec3::splat(0.5),
+        )))
     }
 
     #[test]
@@ -586,18 +681,44 @@ mod tests {
     fn instance_material_returns_assigned_material() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        let material_index = scene.add_material(Material::Emissive {
-            color: Vec3::ONE,
-            strength: 12.0,
-        });
+        let material_index =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 12.0)));
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
         assert_eq!(
             scene.instance_material(InstanceIndex(0)),
-            Material::Emissive {
-                color: Vec3::ONE,
-                strength: 12.0,
-            }
+            &Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 12.0))
         );
+    }
+
+    #[test]
+    fn shading_vertex_interpolates_surface_data() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        let hit = SceneHit {
+            triangle: TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            t: 1.0,
+            barycentric: Vec3::new(0.5, 0.25, 0.25),
+        };
+
+        let shading_vertex = scene.shading_vertex(hit, Vec3::NEG_Z);
+
+        assert!(
+            shading_vertex
+                .p
+                .abs_diff_eq(Vec3::new(0.25, 0.25, 0.0), 1.0e-6)
+        );
+        assert!(shading_vertex.uv.abs_diff_eq(Vec2::new(0.25, 0.25), 1.0e-6));
+        assert!(shading_vertex.ng.abs_diff_eq(Vec3::Z, 1.0e-6));
+        assert!(shading_vertex.ns.abs_diff_eq(Vec3::Z, 1.0e-6));
+        assert!(shading_vertex.frame.normal().abs_diff_eq(Vec3::Z, 1.0e-6));
+        assert!(shading_vertex.front_face);
+        assert!(shading_vertex.dpdu.length_squared() > 0.0);
+        assert!(shading_vertex.dpdv.length_squared() > 0.0);
     }
 }

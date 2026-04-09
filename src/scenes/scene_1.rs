@@ -1,28 +1,30 @@
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
-use crate::{camera::PinholeCamera, mesh::load_mesh, scene::Scene};
+use crate::{
+    camera::PinholeCamera,
+    material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
+    mesh::load_mesh,
+    scene::Scene,
+};
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
 pub fn create_scene_1() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
-    let wall_gray = scene.add_material(crate::scene::Material::Diffuse {
-        rho: Vec3::splat(0.60),
-    });
-    let object_gray = scene.add_material(crate::scene::Material::Diffuse {
-        rho: Vec3::splat(0.75),
-    });
-    let red = scene.add_material(crate::scene::Material::Diffuse {
-        rho: Vec3::new(0.63, 0.08, 0.05),
-    });
-    let green = scene.add_material(crate::scene::Material::Diffuse {
-        rho: Vec3::new(0.14, 0.45, 0.091),
-    });
-    let light = scene.add_material(crate::scene::Material::Emissive {
-        color: Vec3::ONE,
-        strength: 20.0,
-    });
+    let wall_gray = scene.add_material(Material::NormalizedLambert(
+        NormalizedLambertMaterial::new(Vec3::splat(0.60)),
+    ));
+    let object_gray = scene.add_material(Material::NormalizedLambert(
+        NormalizedLambertMaterial::new(Vec3::splat(0.75)),
+    ));
+    let red = scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial::new(
+        Vec3::new(0.63, 0.08, 0.05),
+    )));
+    let green = scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial::new(
+        Vec3::new(0.14, 0.45, 0.091),
+    )));
+    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 20.0)));
 
     let floor_mesh_index = scene.add_mesh(load_mesh(Path::new("assets/floor.glb"))?);
     scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);
