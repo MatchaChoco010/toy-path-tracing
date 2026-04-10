@@ -49,3 +49,19 @@ pub fn trace_radiance(
 
     radiance
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_helpers::mirror_to_light_scene;
+    use super::trace_radiance;
+
+    #[test]
+    fn trace_radiance_counts_light_after_delta_bounce() {
+        let (scene, ray, expected) = mirror_to_light_scene();
+        let mut rng = rand::rng();
+
+        let radiance = trace_radiance(&scene, ray, &mut rng, 2);
+
+        assert!(radiance.abs_diff_eq(expected, 1.0e-5));
+    }
+}

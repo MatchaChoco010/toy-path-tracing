@@ -2,6 +2,7 @@ use glam::{Vec2, Vec3};
 use rand::RngExt;
 
 use crate::{
+    bsdf::BsdfFlags,
     material::{Material, ShadingVertex},
     math::russian_roulette_probability,
     ray::Ray,
@@ -27,27 +28,28 @@ pub fn trace_radiance(
     let mut throughput = Vec3::ONE;
     let mut vtx = scene.shading_vertex(initial_hit, initial_ray.direction);
     let mut material = scene.instance_material(initial_hit.triangle.instance_index);
-    let mut is_primary_hit = true;
+    let mut count_emission_at_hit = true;
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
-        if is_primary_hit {
+        if count_emission_at_hit {
             if let Some(le) = material.le(&vtx) {
                 radiance += throughput * le;
             }
-        }
-
-        if !material.may_emit() {
-            let u_triangle = rng.random::<f32>();
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-            radiance += throughput
-                * sample_direct_area_light_radiance(scene, material, &vtx, u_triangle, us);
         }
 
         let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
         let Some(sample) = material.sample(&vtx, us) else {
             break;
         };
+        let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
+
+        if should_sample_direct_light(material, sample.flags) {
+            let u_triangle = rng.random::<f32>();
+            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            radiance += throughput
+                * sample_direct_area_light_radiance(scene, material, &vtx, u_triangle, us);
+        }
 
         throughput *= sample.weight;
 
@@ -69,10 +71,14 @@ pub fn trace_radiance(
 
         vtx = scene.shading_vertex(light_hit, next_ray.direction);
         material = scene.instance_material(light_hit.triangle.instance_index);
-        is_primary_hit = false;
+        count_emission_at_hit = is_delta_sample;
     }
 
     radiance
+}
+
+fn should_sample_direct_light(material: &Material, sample_flags: BsdfFlags) -> bool {
+    !material.may_emit() && !sample_flags.contains(BsdfFlags::DELTA)
 }
 
 fn sample_direct_area_light_radiance(
@@ -151,9 +157,11 @@ mod tests {
 
     use glam::{Mat4, Vec2, Vec3};
 
-    use super::sample_direct_area_light_radiance;
+    use super::super::test_helpers::mirror_to_light_scene;
+    use super::{sample_direct_area_light_radiance, should_sample_direct_light, trace_radiance};
     use crate::{
-        material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
+        bsdf::BsdfFlags,
+        material::{EmissiveMaterial, Material, MirrorMaterial, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
         scene::{InstanceIndex, Scene, TriangleRef},
     };
@@ -186,6 +194,27 @@ mod tests {
             instance_index: InstanceIndex(instance_index),
             triangle_index: 0,
         }
+    }
+
+    #[test]
+    fn direct_light_sampling_is_skipped_for_delta_samples() {
+        let mirror = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
+        let lambert = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
+        let light = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
+
+        assert!(!should_sample_direct_light(&mirror, BsdfFlags::DELTA));
+        assert!(should_sample_direct_light(&lambert, BsdfFlags::DIFFUSE));
+        assert!(!should_sample_direct_light(&light, BsdfFlags::DIFFUSE));
+    }
+
+    #[test]
+    fn trace_radiance_counts_light_after_delta_bounce() {
+        let (scene, ray, expected) = mirror_to_light_scene();
+        let mut rng = rand::rng();
+
+        let radiance = trace_radiance(&scene, ray, &mut rng, 2);
+
+        assert!(radiance.abs_diff_eq(expected, 1.0e-5));
     }
 
     #[test]
