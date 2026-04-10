@@ -4,7 +4,7 @@ use glam::{Vec2, Vec3};
 
 use crate::math::{cosine_weighted_hemisphere_pdf, sample_cosine_weighted_hemisphere};
 
-use super::BsdfSample;
+use super::{BsdfFlags, BsdfSample};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NormalizedLambertBsdf {
@@ -47,7 +47,12 @@ impl NormalizedLambertBsdf {
         // For cosine-weighted Lambert sampling, f * cos(theta) / pdf simplifies to rho.
         let weight = self.rho;
 
-        Some(BsdfSample { weight, wi, pdf })
+        Some(BsdfSample {
+            weight,
+            wi,
+            pdf,
+            flags: BsdfFlags::DIFFUSE,
+        })
     }
 }
 #[cfg(test)]
@@ -56,7 +61,7 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use super::NormalizedLambertBsdf;
+    use crate::bsdf::{BsdfFlags, NormalizedLambertBsdf};
 
     #[test]
     fn eval_returns_rho_over_pi_for_upper_hemisphere_directions() {
@@ -104,6 +109,7 @@ mod tests {
         assert!(sample.weight.abs_diff_eq(Vec3::new(0.3, 0.5, 0.7), 1.0e-6));
         assert!(sample.pdf > 0.0);
         assert!(sample.wi.z > 0.0);
+        assert_eq!(sample.flags, BsdfFlags::DIFFUSE);
     }
 
     #[test]

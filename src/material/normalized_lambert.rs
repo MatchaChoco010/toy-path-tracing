@@ -27,6 +27,7 @@ impl NormalizedLambertMaterial {
             weight: sample.weight,
             wi,
             pdf: sample.pdf,
+            flags: sample.flags,
         })
     }
 
