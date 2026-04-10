@@ -1222,6 +1222,7 @@ dependencies = [
 name = "toy-path-tracing"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "clap",
  "glam",
  "gltf",

@@ -30,3 +30,92 @@ impl IntegratorKind {
         }
     }
 }
+
+#[cfg(test)]
+pub(super) mod test_helpers {
+    use glam::{Vec2, Vec3};
+
+    use crate::{
+        material::{EmissiveMaterial, Material, MirrorMaterial},
+        mesh::{Mesh, Vertex},
+        ray::Ray,
+        scene::Scene,
+    };
+
+    pub(super) fn mirror_to_light_scene() -> (Scene, Ray, Vec3) {
+        let mut scene = Scene::new();
+        let mirror_color = Vec3::new(0.25, 0.5, 0.75);
+        let light_strength = 4.0;
+        let mirror_material =
+            scene.add_material(Material::Mirror(MirrorMaterial::new(mirror_color)));
+        let light_material = scene.add_material(Material::Emissive(EmissiveMaterial::new(
+            Vec3::ONE,
+            light_strength,
+        )));
+        let mirror_mesh = scene.add_mesh(mirror_triangle_mesh());
+        let light_mesh = scene.add_mesh(light_triangle_mesh());
+
+        scene.add_instance(mirror_mesh, mirror_material, glam::Mat4::IDENTITY);
+        scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
+        scene.build_bvh();
+
+        let mirror_hit = Vec3::new(0.25, 0.20, 0.0);
+        let light_hit = Vec3::new(0.65, 0.20, 1.0);
+        let reflected_direction = (light_hit - mirror_hit).normalize();
+        let incoming_direction = Vec3::new(
+            reflected_direction.x,
+            reflected_direction.y,
+            -reflected_direction.z,
+        )
+        .normalize();
+        let ray = Ray::new(mirror_hit - incoming_direction, incoming_direction);
+
+        (scene, ray, mirror_color * light_strength)
+    }
+
+    fn mirror_triangle_mesh() -> Mesh {
+        Mesh::new(
+            vec![
+                Vertex {
+                    position: Vec3::new(-1.0, -1.0, 0.0),
+                    normal: Vec3::Z,
+                    uv: Vec2::ZERO,
+                },
+                Vertex {
+                    position: Vec3::new(2.0, -1.0, 0.0),
+                    normal: Vec3::Z,
+                    uv: Vec2::X,
+                },
+                Vertex {
+                    position: Vec3::new(-1.0, 2.0, 0.0),
+                    normal: Vec3::Z,
+                    uv: Vec2::Y,
+                },
+            ],
+            vec![0, 1, 2],
+        )
+    }
+
+    fn light_triangle_mesh() -> Mesh {
+        Mesh::new(
+            vec![
+                Vertex {
+                    position: Vec3::new(0.45, 0.0, 1.0),
+                    normal: Vec3::Z,
+                    uv: Vec2::ZERO,
+                },
+                Vertex {
+                    position: Vec3::new(0.95, 0.0, 1.0),
+                    normal: Vec3::Z,
+                    uv: Vec2::X,
+                },
+                Vertex {
+                    position: Vec3::new(0.45, 0.5, 1.0),
+                    normal: Vec3::Z,
+                    uv: Vec2::Y,
+                },
+            ],
+            vec![0, 1, 2],
+        )
+    }
+}
