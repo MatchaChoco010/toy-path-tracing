@@ -34,6 +34,12 @@ cargo run --release -- --scene 1 --spp 128 --depth 24 -i pt -o result/scene-1-pt
 cargo run --release -- --scene 1 --spp 128 --depth 24 -i nee -o result/scene-1-nee.png
 ```
 
+完全鏡面反射の確認用シーンは `scene 2` で実行できます。
+
+```bash
+cargo run --release -- --scene 2 --spp 256 --depth 24 -i mis -o result/scene-2-mirror.png
+```
+
 解像度も含めて指定したい場合は `--width` と `--height` を使います。
 
 ```bash
@@ -63,9 +69,10 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | --- | --- |
 | `0` | Cornell box 風の部屋に、箱とバニーを配置したシーンです。 |
 | `1` | Cornell box 風の部屋に、バニーと 2 つの球を配置したシーンです。 |
+| `2` | Cornell box 風の部屋に、完全鏡面の銀色バニーと金色の球を配置したシーンです。 |
 
 補足:
-`load_scene()` の現在の実装では、`1` を指定したときだけ `scene_1` を読み込み、それ以外はすべて `scene_0` を読み込みます。
+`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2` を読み込み、それ以外はすべて `scene_0` を読み込みます。
 
 ## 現在の実装上の注意
 
