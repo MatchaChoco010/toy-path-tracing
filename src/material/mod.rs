@@ -185,7 +185,7 @@ mod tests {
             .sample(&shading_vertex, glam::Vec2::splat(0.5))
             .expect("expected a valid sample");
 
-        assert_eq!(sample.flags, BsdfFlags::DIFFUSE);
+        assert_eq!(sample.flags, BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION);
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));
         assert_eq!(sample.weight, color);
         assert_eq!(sample.pdf, 1.0);
-        assert_eq!(sample.flags, BsdfFlags::DELTA);
+        assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::REFLECTION);
     }
 
     #[test]

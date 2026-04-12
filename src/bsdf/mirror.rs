@@ -31,7 +31,7 @@ impl MirrorBsdf {
             weight: self.color,
             wi,
             pdf: 1.0,
-            flags: BsdfFlags::DELTA,
+            flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
         })
     }
 }
@@ -64,7 +64,7 @@ mod tests {
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));
         assert_eq!(sample.weight, color);
         assert_eq!(sample.pdf, 1.0);
-        assert_eq!(sample.flags, BsdfFlags::DELTA);
+        assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::REFLECTION);
     }
 
     #[test]

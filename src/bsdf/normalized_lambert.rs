@@ -51,7 +51,7 @@ impl NormalizedLambertBsdf {
             weight,
             wi,
             pdf,
-            flags: BsdfFlags::DIFFUSE,
+            flags: BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION,
         })
     }
 }
@@ -109,7 +109,7 @@ mod tests {
         assert!(sample.weight.abs_diff_eq(Vec3::new(0.3, 0.5, 0.7), 1.0e-6));
         assert!(sample.pdf > 0.0);
         assert!(sample.wi.z > 0.0);
-        assert_eq!(sample.flags, BsdfFlags::DIFFUSE);
+        assert_eq!(sample.flags, BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION);
     }
 
     #[test]
