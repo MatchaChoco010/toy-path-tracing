@@ -68,11 +68,7 @@ impl GlassBsdf {
         } else {
             transmission_probability
         };
-        let weight = if reflect {
-            Vec3::ONE * (reflectance / reflection_probability)
-        } else {
-            self.color * (transmittance / transmission_probability)
-        };
+        let weight = if reflect { Vec3::ONE } else { self.color };
         let flags = BsdfFlags::DELTA
             | if reflect {
                 BsdfFlags::REFLECTION
@@ -107,7 +103,7 @@ impl GlassBsdf {
 
         if us.x < reflection_probability {
             return Some(BsdfSample {
-                weight: Vec3::ONE * (reflectance / reflection_probability),
+                weight: Vec3::ONE,
                 wi: reflected_direction(wo),
                 pdf: reflection_probability,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
@@ -118,7 +114,7 @@ impl GlassBsdf {
         let radiance_scale = 1.0 / (eta * eta);
 
         Some(BsdfSample {
-            weight: self.color * (transmittance * radiance_scale / transmission_probability),
+            weight: self.color * radiance_scale,
             wi,
             pdf: transmission_probability,
             flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
