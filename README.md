@@ -40,6 +40,12 @@ cargo run --release -- --scene 1 --spp 128 --depth 24 -i nee -o result/scene-1-n
 cargo run --release -- --scene 2 --spp 256 --depth 24 -i mis -o result/scene-2-mirror.png
 ```
 
+ガラス材質の確認用シーンは `scene 3` で実行できます。
+
+```bash
+cargo run --release -- --scene 3 --spp 512 --depth 32 -i mis -o result/scene-3-glass.png
+```
+
 解像度も含めて指定したい場合は `--width` と `--height` を使います。
 
 ```bash
@@ -70,9 +76,10 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `0` | Cornell box 風の部屋に、箱とバニーを配置したシーンです。 |
 | `1` | Cornell box 風の部屋に、バニーと 2 つの球を配置したシーンです。 |
 | `2` | Cornell box 風の部屋に、完全鏡面の銀色バニーと金色の球を配置したシーンです。 |
+| `3` | Cornell box 風の部屋に、手前の透明ガラス球、左右の thin / 通常の水色ガラスバニー、球越しの歪み確認用の薄い青の Lambert バニーを配置した確認用シーンです。 |
 
 補足:
-`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2` を読み込み、それ以外はすべて `scene_0` を読み込みます。
+`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3` を読み込み、それ以外はすべて `scene_0` を読み込みます。
 
 ## 現在の実装上の注意
 

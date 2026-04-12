@@ -1,6 +1,7 @@
 mod scene_0;
 mod scene_1;
 mod scene_2;
+mod scene_3;
 
 use glam::{EulerRot, Quat};
 use std::error::Error;
@@ -11,6 +12,7 @@ pub fn load_scene(scene_index: u32) -> Result<(Scene, PinholeCamera), Box<dyn Er
     match scene_index {
         1 => scene_1::create_scene_1(),
         2 => scene_2::create_scene_2(),
+        3 => scene_3::create_scene_3(),
         _ => scene_0::create_scene_0(),
     }
 }
