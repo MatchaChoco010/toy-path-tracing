@@ -124,6 +124,50 @@ pub fn face_forward(normal: Vec3, reference: Vec3) -> Vec3 {
     }
 }
 
+pub fn fresnel_dielectric(mut cos_theta_i: f32, mut eta_i: f32, mut eta_t: f32) -> f32 {
+    cos_theta_i = cos_theta_i.clamp(-1.0, 1.0);
+
+    if cos_theta_i < 0.0 {
+        std::mem::swap(&mut eta_i, &mut eta_t);
+        cos_theta_i = -cos_theta_i;
+    }
+
+    let sin_theta_i = (1.0 - cos_theta_i * cos_theta_i).max(0.0).sqrt();
+    let sin_theta_t = (eta_i / eta_t) * sin_theta_i;
+    if sin_theta_t >= 1.0 {
+        return 1.0;
+    }
+
+    let cos_theta_t = (1.0 - sin_theta_t * sin_theta_t).max(0.0).sqrt();
+    let r_parallel =
+        (eta_t * cos_theta_i - eta_i * cos_theta_t) / (eta_t * cos_theta_i + eta_i * cos_theta_t);
+    let r_perpendicular =
+        (eta_i * cos_theta_i - eta_t * cos_theta_t) / (eta_i * cos_theta_i + eta_t * cos_theta_t);
+
+    0.5 * (r_parallel * r_parallel + r_perpendicular * r_perpendicular)
+}
+
+pub fn refract(wo: Vec3, eta: f32) -> Option<Vec3> {
+    if wo.z <= 0.0 {
+        return None;
+    }
+
+    let sin2_theta_o = (1.0 - wo.z * wo.z).max(0.0);
+    let sin2_theta_t = eta * eta * sin2_theta_o;
+    if sin2_theta_t >= 1.0 {
+        return None;
+    }
+
+    let cos_theta_t = (1.0 - sin2_theta_t).max(0.0).sqrt();
+    let wi = Vec3::new(-eta * wo.x, -eta * wo.y, -cos_theta_t).normalize_or_zero();
+
+    if wi.length_squared() == 0.0 {
+        return None;
+    }
+
+    Some(wi)
+}
+
 pub fn interpolate_vec2(barycentric: Vec3, v0: Vec2, v1: Vec2, v2: Vec2) -> Vec2 {
     barycentric.x * v0 + barycentric.y * v1 + barycentric.z * v2
 }
@@ -198,7 +242,7 @@ pub fn balance_heuristic(pdf_a: f32, pdf_b: f32) -> f32 {
 }
 
 pub fn russian_roulette_probability(throughput: Vec3) -> f32 {
-    throughput.max_element().clamp(0.05, 0.95)
+    throughput.max_element().clamp(0.05, 1.0)
 }
 
 #[cfg(test)]
@@ -207,9 +251,9 @@ mod tests {
 
     use super::{
         OrthonormalBasis, balance_heuristic, compute_surface_partials,
-        cosine_weighted_hemisphere_pdf, difference_of_products, face_forward, gamma,
-        interpolate_vec2, interpolate_vec3, max_component_index, permute_vec3, reinhard,
-        russian_roulette_probability, sample_cosine_weighted_hemisphere, sample_tent_1d,
+        cosine_weighted_hemisphere_pdf, difference_of_products, face_forward, fresnel_dielectric,
+        gamma, interpolate_vec2, interpolate_vec3, max_component_index, permute_vec3, refract,
+        reinhard, russian_roulette_probability, sample_cosine_weighted_hemisphere, sample_tent_1d,
     };
 
     #[test]
@@ -267,6 +311,38 @@ mod tests {
     }
 
     #[test]
+    fn fresnel_dielectric_matches_normal_incidence_reflectance() {
+        let reflectance = fresnel_dielectric(1.0, 1.0, 1.5);
+
+        assert!((reflectance - 0.04).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn fresnel_dielectric_returns_total_internal_reflection() {
+        let cos_theta_i = (1.0_f32 - 0.8_f32 * 0.8_f32).sqrt();
+        let reflectance = fresnel_dielectric(cos_theta_i, 1.5, 1.0);
+
+        assert_eq!(reflectance, 1.0);
+    }
+
+    #[test]
+    fn refract_returns_lower_hemisphere_direction() {
+        let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
+        let wi = refract(wo, 1.0 / 1.5).expect("expected refraction");
+
+        assert!(wi.z < 0.0);
+        assert!((wi.x + wo.x / 1.5).abs() < 1.0e-6);
+        assert!((wi.y + wo.y / 1.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn refract_returns_none_for_total_internal_reflection() {
+        let wo = Vec3::new(0.8, 0.0, 0.6).normalize();
+
+        assert!(refract(wo, 1.5).is_none());
+    }
+
+    #[test]
     fn interpolation_helpers_match_barycentric_combination() {
         let barycentric = Vec3::new(0.5, 0.25, 0.25);
 
@@ -316,6 +392,6 @@ mod tests {
     fn russian_roulette_probability_clamps_to_safe_range() {
         assert!((russian_roulette_probability(Vec3::splat(0.01)) - 0.05).abs() < 1.0e-6);
         assert!((russian_roulette_probability(Vec3::splat(0.5)) - 0.5).abs() < 1.0e-6);
-        assert!((russian_roulette_probability(Vec3::splat(10.0)) - 0.95).abs() < 1.0e-6);
+        assert!((russian_roulette_probability(Vec3::splat(10.0)) - 1.0).abs() < 1.0e-6);
     }
 }

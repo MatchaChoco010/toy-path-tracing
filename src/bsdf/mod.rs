@@ -1,8 +1,10 @@
+mod glass;
 mod mirror;
 mod normalized_lambert;
 
 use glam::Vec3;
 
+pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;
 

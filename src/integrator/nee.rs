@@ -9,7 +9,7 @@ use crate::{
     scene::Scene,
 };
 
-const RAY_EPSILON: f32 = 1.0e-4;
+use super::spawn_ray;
 
 pub fn trace_radiance(
     scene: &Scene,
@@ -61,7 +61,7 @@ pub fn trace_radiance(
             throughput /= survive_probability;
         }
 
-        let next_ray = Ray::new(vtx.p + RAY_EPSILON * vtx.ng, sample.wi);
+        let next_ray = spawn_ray(vtx.p, vtx.ng, sample.wi);
         let Some(light_hit) = scene
             .closest_hit(&next_ray)
             .expect("scene.build_bvh() must be called before traversal")
@@ -116,7 +116,7 @@ fn sample_direct_area_light_radiance(
         return Vec3::ZERO;
     }
 
-    let shadow_ray = Ray::new(vtx.p + RAY_EPSILON * vtx.ng, wi);
+    let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
     let Some(shadow_hit) = scene
         .closest_hit(&shadow_ray)
         .expect("scene.build_bvh() must be called before traversal")

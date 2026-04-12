@@ -31,6 +31,18 @@ impl IntegratorKind {
     }
 }
 
+const RAY_EPSILON: f32 = 1.0e-4;
+
+pub(super) fn spawn_ray(origin: Vec3, geometric_normal: Vec3, direction: Vec3) -> Ray {
+    let normal_offset = if direction.dot(geometric_normal) >= 0.0 {
+        geometric_normal
+    } else {
+        -geometric_normal
+    };
+
+    Ray::new(origin + RAY_EPSILON * normal_offset, direction)
+}
+
 #[cfg(test)]
 pub(super) mod test_helpers {
     use glam::{Vec2, Vec3};
@@ -117,5 +129,21 @@ pub(super) mod test_helpers {
             ],
             vec![0, 1, 2],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::spawn_ray;
+
+    #[test]
+    fn spawn_ray_offsets_along_the_sampled_hemisphere() {
+        let reflection_ray = spawn_ray(Vec3::ZERO, Vec3::Z, Vec3::Z);
+        let transmission_ray = spawn_ray(Vec3::ZERO, Vec3::Z, Vec3::NEG_Z);
+
+        assert_eq!(reflection_ray.origin, Vec3::new(0.0, 0.0, 1.0e-4));
+        assert_eq!(transmission_ray.origin, Vec3::new(0.0, 0.0, -1.0e-4));
     }
 }

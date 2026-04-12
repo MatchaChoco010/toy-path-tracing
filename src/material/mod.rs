@@ -1,4 +1,5 @@
 mod emissive;
+mod glass;
 mod mirror;
 mod normalized_lambert;
 
@@ -7,6 +8,7 @@ use glam::{Vec2, Vec3};
 use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
 
 pub use emissive::EmissiveMaterial;
+pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
 pub use normalized_lambert::NormalizedLambertMaterial;
 
@@ -14,6 +16,7 @@ pub use normalized_lambert::NormalizedLambertMaterial;
 pub enum Material {
     NormalizedLambert(NormalizedLambertMaterial),
     Mirror(MirrorMaterial),
+    Glass(GlassMaterial),
     Emissive(EmissiveMaterial),
 }
 
@@ -44,6 +47,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.sample(shading_vertex, us),
             Self::Mirror(material) => material.sample(shading_vertex, us),
+            Self::Glass(material) => material.sample(shading_vertex, us),
             Self::Emissive(material) => material.sample(shading_vertex, us),
         }
     }
@@ -52,6 +56,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::Mirror(material) => material.le(shading_vertex),
+            Self::Glass(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
     }
@@ -60,6 +65,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.eval(shading_vertex, wi),
             Self::Mirror(material) => material.eval(shading_vertex, wi),
+            Self::Glass(material) => material.eval(shading_vertex, wi),
             Self::Emissive(material) => material.eval(shading_vertex, wi),
         }
     }
@@ -68,6 +74,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
             Self::Mirror(material) => material.pdf(shading_vertex, wi),
+            Self::Glass(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
         }
     }
@@ -76,6 +83,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.may_emit(),
             Self::Mirror(material) => material.may_emit(),
+            Self::Glass(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
         }
     }
@@ -84,6 +92,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.max_emission(),
             Self::Mirror(material) => material.max_emission(),
+            Self::Glass(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
     }
@@ -102,7 +111,8 @@ mod tests {
     };
 
     use super::{
-        EmissiveMaterial, Material, MirrorMaterial, NormalizedLambertMaterial, ShadingVertex,
+        EmissiveMaterial, GlassMaterial, Material, MirrorMaterial, NormalizedLambertMaterial,
+        ShadingVertex,
     };
 
     fn test_shading_vertex(wo: Vec3) -> ShadingVertex {
@@ -142,6 +152,14 @@ mod tests {
     #[test]
     fn mirror_material_reports_no_emission_capability() {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
+
+        assert!(!material.may_emit());
+        assert_eq!(material.max_emission(), 0.0);
+    }
+
+    #[test]
+    fn glass_material_reports_no_emission_capability() {
+        let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
 
         assert!(!material.may_emit());
         assert_eq!(material.max_emission(), 0.0);
@@ -209,6 +227,30 @@ mod tests {
     #[test]
     fn mirror_material_eval_and_pdf_are_zero() {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
+        let shading_vertex = test_shading_vertex(Vec3::Z);
+
+        assert_eq!(material.eval(&shading_vertex, Vec3::Z), Vec3::ZERO);
+        assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
+    }
+
+    #[test]
+    fn glass_material_sample_can_return_transmission_flag() {
+        let color = Vec3::new(0.3, 0.5, 0.7);
+        let material = Material::Glass(GlassMaterial::new(1.5, color, false));
+        let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
+        let shading_vertex = test_shading_vertex(wo);
+        let sample = material
+            .sample(&shading_vertex, glam::Vec2::new(0.9, 0.5))
+            .expect("expected a valid sample");
+
+        assert!(sample.wi.z < 0.0);
+        assert!(sample.weight.abs_diff_eq(color * 2.25, 1.0e-6));
+        assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::TRANSMISSION);
+    }
+
+    #[test]
+    fn glass_material_eval_and_pdf_are_zero() {
+        let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
         let shading_vertex = test_shading_vertex(Vec3::Z);
 
         assert_eq!(material.eval(&shading_vertex, Vec3::Z), Vec3::ZERO);

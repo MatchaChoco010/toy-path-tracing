@@ -3,6 +3,8 @@ use rand::RngExt;
 
 use crate::{math::russian_roulette_probability, ray::Ray, scene::Scene};
 
+use super::spawn_ray;
+
 pub fn trace_radiance(
     scene: &Scene,
     initial_ray: Ray,
@@ -44,7 +46,7 @@ pub fn trace_radiance(
             throughput /= survive_probability;
         }
 
-        ray = Ray::new(shading_vertex.p + 1.0e-4 * shading_vertex.ng, sample.wi);
+        ray = spawn_ray(shading_vertex.p, shading_vertex.ng, sample.wi);
     }
 
     radiance
