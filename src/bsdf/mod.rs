@@ -1,9 +1,13 @@
+mod conductor_ggx;
 mod glass;
 mod mirror;
 mod normalized_lambert;
 
 use glam::Vec3;
 
+pub use conductor_ggx::ConductorGgxBsdf;
+pub use conductor_ggx::schlick_fresnel;
+pub use conductor_ggx::{pdf_wm_bounded_vndf, sample_wm_bounded_vndf};
 pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;

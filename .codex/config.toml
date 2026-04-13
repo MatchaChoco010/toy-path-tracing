@@ -2,3 +2,7 @@ web_search = "live"
 
 [features]
 shell_snapshot = true
+
+[mcp_servers.markitdown]
+command = "docker"
+args = ["run", "--rm", "-i", "markitdown-mcp:latest"]
