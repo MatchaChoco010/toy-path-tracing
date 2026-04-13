@@ -1,0 +1,44 @@
+prefix_rule(
+  pattern = ["git", "push"],
+  decision = "forbidden",
+  justification = "git push is prohibited in this repository.",
+  match = [
+    "git push",
+    "git push origin main",
+    "git push --force-with-lease",
+  ],
+)
+
+prefix_rule(
+  pattern = ["git", ["status", "diff", "log", "commit", "checkout", "switch", "fetch", "pull"]],
+  decision = "allow",
+  match = [
+    "git status",
+    "git diff",
+    "git log --oneline",
+    "git commit -m test",
+    "git checkout main",
+    "git switch main",
+    "git fetch origin",
+    "git pull --ff-only",
+  ],
+  not_match = [
+    "git push",
+    "git add .",
+  ],
+)
+
+prefix_rule(
+  pattern = ["git", "add"],
+  decision = "allow",
+  match = [
+    "git add src/main.rs",
+    "git add src/lib.rs src/math.rs",
+    "git add .codex/rules/default.rules",
+  ],
+  not_match = [
+    "git add .",
+    "git add -A",
+    "git add --all",
+  ],
+)
