@@ -1,3 +1,4 @@
+mod conductor_ggx;
 mod emissive;
 mod glass;
 mod mirror;
@@ -7,6 +8,7 @@ use glam::{Vec2, Vec3};
 
 use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
 
+pub use conductor_ggx::ConductorGgxMaterial;
 pub use emissive::EmissiveMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
@@ -16,6 +18,7 @@ pub use normalized_lambert::NormalizedLambertMaterial;
 pub enum Material {
     NormalizedLambert(NormalizedLambertMaterial),
     Mirror(MirrorMaterial),
+    ConductorGgx(ConductorGgxMaterial),
     Glass(GlassMaterial),
     Emissive(EmissiveMaterial),
 }
@@ -47,6 +50,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.sample(shading_vertex, us),
             Self::Mirror(material) => material.sample(shading_vertex, us),
+            Self::ConductorGgx(material) => material.sample(shading_vertex, us),
             Self::Glass(material) => material.sample(shading_vertex, us),
             Self::Emissive(material) => material.sample(shading_vertex, us),
         }
@@ -56,6 +60,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::Mirror(material) => material.le(shading_vertex),
+            Self::ConductorGgx(material) => material.le(shading_vertex),
             Self::Glass(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
@@ -65,6 +70,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.eval(shading_vertex, wi),
             Self::Mirror(material) => material.eval(shading_vertex, wi),
+            Self::ConductorGgx(material) => material.eval(shading_vertex, wi),
             Self::Glass(material) => material.eval(shading_vertex, wi),
             Self::Emissive(material) => material.eval(shading_vertex, wi),
         }
@@ -74,6 +80,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
             Self::Mirror(material) => material.pdf(shading_vertex, wi),
+            Self::ConductorGgx(material) => material.pdf(shading_vertex, wi),
             Self::Glass(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
         }
@@ -83,6 +90,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.may_emit(),
             Self::Mirror(material) => material.may_emit(),
+            Self::ConductorGgx(material) => material.may_emit(),
             Self::Glass(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
         }
@@ -92,6 +100,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.max_emission(),
             Self::Mirror(material) => material.max_emission(),
+            Self::ConductorGgx(material) => material.max_emission(),
             Self::Glass(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
@@ -111,8 +120,8 @@ mod tests {
     };
 
     use super::{
-        EmissiveMaterial, GlassMaterial, Material, MirrorMaterial, NormalizedLambertMaterial,
-        ShadingVertex,
+        ConductorGgxMaterial, EmissiveMaterial, GlassMaterial, Material, MirrorMaterial,
+        NormalizedLambertMaterial, ShadingVertex,
     };
 
     fn test_shading_vertex(wo: Vec3) -> ShadingVertex {
@@ -152,6 +161,14 @@ mod tests {
     #[test]
     fn mirror_material_reports_no_emission_capability() {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
+
+        assert!(!material.may_emit());
+        assert_eq!(material.max_emission(), 0.0);
+    }
+
+    #[test]
+    fn conductor_material_reports_no_emission_capability() {
+        let material = Material::ConductorGgx(ConductorGgxMaterial::new(Vec3::ONE, 0.5, 0.0));
 
         assert!(!material.may_emit());
         assert_eq!(material.max_emission(), 0.0);
@@ -222,6 +239,25 @@ mod tests {
         assert_eq!(sample.weight, color);
         assert_eq!(sample.pdf, 1.0);
         assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::REFLECTION);
+    }
+
+    #[test]
+    fn conductor_material_sample_returns_glossy_or_delta_reflection_flag() {
+        let material = Material::ConductorGgx(ConductorGgxMaterial::new(
+            Vec3::new(0.9, 0.7, 0.3),
+            0.4,
+            0.0,
+        ));
+        let shading_vertex = test_shading_vertex(Vec3::new(0.3, -0.4, 0.8660254).normalize());
+
+        let sample = material
+            .sample(&shading_vertex, glam::Vec2::new(0.3, 0.7))
+            .expect("expected a valid sample");
+
+        assert!(sample.flags.contains(BsdfFlags::REFLECTION));
+        assert!(
+            sample.flags.contains(BsdfFlags::GLOSSY) || sample.flags.contains(BsdfFlags::DELTA)
+        );
     }
 
     #[test]

@@ -147,6 +147,16 @@ pub fn fresnel_dielectric(mut cos_theta_i: f32, mut eta_i: f32, mut eta_t: f32) 
     0.5 * (r_parallel * r_parallel + r_perpendicular * r_perpendicular)
 }
 
+pub fn schlick_fresnel(f0: Vec3, cos_theta: f32) -> Vec3 {
+    let cos_theta = cos_theta.clamp(0.0, 1.0);
+    let one_minus_cos_theta = 1.0 - cos_theta;
+    f0 + (Vec3::ONE - f0) * one_minus_cos_theta.powi(5)
+}
+
+pub fn reflect(wo: Vec3, normal: Vec3) -> Vec3 {
+    (-wo + 2.0 * wo.dot(normal) * normal).normalize_or_zero()
+}
+
 pub fn refract(wo: Vec3, eta: f32) -> Option<Vec3> {
     if wo.z <= 0.0 {
         return None;
@@ -252,8 +262,9 @@ mod tests {
     use super::{
         OrthonormalBasis, balance_heuristic, compute_surface_partials,
         cosine_weighted_hemisphere_pdf, difference_of_products, face_forward, fresnel_dielectric,
-        gamma, interpolate_vec2, interpolate_vec3, max_component_index, permute_vec3, refract,
-        reinhard, russian_roulette_probability, sample_cosine_weighted_hemisphere, sample_tent_1d,
+        gamma, interpolate_vec2, interpolate_vec3, max_component_index, permute_vec3, reflect,
+        refract, reinhard, russian_roulette_probability, sample_cosine_weighted_hemisphere,
+        sample_tent_1d, schlick_fresnel,
     };
 
     #[test]
@@ -323,6 +334,22 @@ mod tests {
         let reflectance = fresnel_dielectric(cos_theta_i, 1.5, 1.0);
 
         assert_eq!(reflectance, 1.0);
+    }
+
+    #[test]
+    fn schlick_matches_f0_at_normal_incidence_and_one_at_grazing() {
+        let f0 = Vec3::new(0.2, 0.5, 0.8);
+
+        assert!(schlick_fresnel(f0, 1.0).abs_diff_eq(f0, 1.0e-6));
+        assert!(schlick_fresnel(f0, 0.0).abs_diff_eq(Vec3::ONE, 1.0e-6));
+    }
+
+    #[test]
+    fn reflect_mirrors_direction_around_surface_normal() {
+        let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
+        let wi = reflect(wo, Vec3::Z);
+
+        assert!(wi.abs_diff_eq(Vec3::new(-wo.x, -wo.y, wo.z).normalize(), 1.0e-6));
     }
 
     #[test]
