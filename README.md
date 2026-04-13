@@ -46,6 +46,18 @@ cargo run --release -- --scene 2 --spp 256 --depth 24 -i mis -o result/scene-2-m
 cargo run --release -- --scene 3 --spp 512 --depth 32 -i mis -o result/scene-3-glass.png
 ```
 
+Conductor GGX の roughness 差確認用シーンは `scene 4` で実行できます。
+
+```bash
+cargo run --release -- --scene 4 --spp 512 --depth 32 -i mis -o result/scene-4-conductor-ggx.png
+```
+
+Conductor GGX の anisotropy 差確認用シーンは `scene 5` で実行できます。
+
+```bash
+cargo run --release -- --scene 5 --spp 512 --depth 32 -i mis -o result/scene-5-conductor-ggx-anisotropy.png
+```
+
 解像度も含めて指定したい場合は `--width` と `--height` を使います。
 
 ```bash
@@ -77,9 +89,11 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `1` | Cornell box 風の部屋に、バニーと 2 つの球を配置したシーンです。 |
 | `2` | Cornell box 風の部屋に、完全鏡面の銀色バニーと金色の球を配置したシーンです。 |
 | `3` | Cornell box 風の部屋に、手前の透明ガラス球、左右の thin / 通常の水色ガラスバニー、球越しの歪み確認用の薄い青の Lambert バニーを配置した確認用シーンです。 |
+| `4` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.25 / 0.5 / 0.75 / 1.0` にした金色の Conductor GGX 球を 5 つ並べた確認用シーンです。 |
+| `5` | Cornell box 風の部屋に、roughness `0.3` の銀色 Conductor GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
 
 補足:
-`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3` を読み込み、それ以外はすべて `scene_0` を読み込みます。
+`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3`、`4` を指定すると `scene_4`、`5` を指定すると `scene_5` を読み込み、それ以外はすべて `scene_0` を読み込みます。
 
 ## 現在の実装上の注意
 
