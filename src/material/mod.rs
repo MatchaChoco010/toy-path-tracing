@@ -1,4 +1,5 @@
 mod conductor_ggx;
+mod dielectric_ggx;
 mod emissive;
 mod glass;
 mod mirror;
@@ -10,6 +11,7 @@ use rand::rngs::ThreadRng;
 use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
 
 pub use conductor_ggx::ConductorGgxMaterial;
+pub use dielectric_ggx::DielectricGgxMaterial;
 pub use emissive::EmissiveMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
@@ -20,6 +22,7 @@ pub enum Material {
     NormalizedLambert(NormalizedLambertMaterial),
     Mirror(MirrorMaterial),
     ConductorGgx(ConductorGgxMaterial),
+    DielectricGgx(DielectricGgxMaterial),
     Glass(GlassMaterial),
     Emissive(EmissiveMaterial),
 }
@@ -56,6 +59,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.sample(shading_vertex, rng),
             Self::Mirror(material) => material.sample(shading_vertex, rng),
             Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
+            Self::DielectricGgx(material) => material.sample(shading_vertex, rng),
             Self::Glass(material) => material.sample(shading_vertex, rng),
             Self::Emissive(material) => material.sample(shading_vertex, rng),
         }
@@ -66,6 +70,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::Mirror(material) => material.le(shading_vertex),
             Self::ConductorGgx(material) => material.le(shading_vertex),
+            Self::DielectricGgx(material) => material.le(shading_vertex),
             Self::Glass(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
@@ -76,6 +81,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.eval(shading_vertex, wi),
             Self::Mirror(material) => material.eval(shading_vertex, wi),
             Self::ConductorGgx(material) => material.eval(shading_vertex, wi),
+            Self::DielectricGgx(material) => material.eval(shading_vertex, wi),
             Self::Glass(material) => material.eval(shading_vertex, wi),
             Self::Emissive(material) => material.eval(shading_vertex, wi),
         }
@@ -86,6 +92,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
             Self::Mirror(material) => material.pdf(shading_vertex, wi),
             Self::ConductorGgx(material) => material.pdf(shading_vertex, wi),
+            Self::DielectricGgx(material) => material.pdf(shading_vertex, wi),
             Self::Glass(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
         }
@@ -96,6 +103,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.may_emit(),
             Self::Mirror(material) => material.may_emit(),
             Self::ConductorGgx(material) => material.may_emit(),
+            Self::DielectricGgx(material) => material.may_emit(),
             Self::Glass(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
         }
@@ -106,6 +114,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.max_emission(),
             Self::Mirror(material) => material.max_emission(),
             Self::ConductorGgx(material) => material.max_emission(),
+            Self::DielectricGgx(material) => material.max_emission(),
             Self::Glass(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
@@ -125,8 +134,8 @@ mod tests {
     };
 
     use super::{
-        ConductorGgxMaterial, EmissiveMaterial, GlassMaterial, Material, MirrorMaterial,
-        NormalizedLambertMaterial, ShadingVertex,
+        ConductorGgxMaterial, DielectricGgxMaterial, EmissiveMaterial, GlassMaterial, Material,
+        MirrorMaterial, NormalizedLambertMaterial, ShadingVertex,
     };
 
     fn test_shading_vertex(wo: Vec3) -> ShadingVertex {
@@ -182,6 +191,20 @@ mod tests {
     #[test]
     fn glass_material_reports_no_emission_capability() {
         let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
+
+        assert!(!material.may_emit());
+        assert_eq!(material.max_emission(), 0.0);
+    }
+
+    #[test]
+    fn dielectric_ggx_material_reports_no_emission_capability() {
+        let material = Material::DielectricGgx(DielectricGgxMaterial::new(
+            Vec3::ONE,
+            1.5,
+            0.3,
+            0.0,
+            false,
+        ));
 
         assert!(!material.may_emit());
         assert_eq!(material.max_emission(), 0.0);
