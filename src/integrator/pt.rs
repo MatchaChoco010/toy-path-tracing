@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 use rand::RngExt;
 
 use crate::{math::russian_roulette_probability, ray::Ray, scene::Scene};
@@ -31,8 +31,7 @@ pub fn trace_radiance(
             radiance += throughput * le;
         }
 
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let Some(sample) = material.sample(&shading_vertex, us) else {
+        let Some(sample) = material.sample(&shading_vertex, rng) else {
             break;
         };
 

@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 
 use super::{BsdfFlags, BsdfSample};
 
@@ -20,7 +20,7 @@ impl MirrorBsdf {
         0.0
     }
 
-    pub fn sample(&self, wo: Vec3, _us: Vec2) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3) -> Option<BsdfSample> {
         if wo.z <= 0.0 {
             return None;
         }
@@ -38,7 +38,7 @@ impl MirrorBsdf {
 
 #[cfg(test)]
 mod tests {
-    use glam::{Vec2, Vec3};
+    use glam::Vec3;
 
     use crate::bsdf::{BsdfFlags, MirrorBsdf};
 
@@ -56,9 +56,7 @@ mod tests {
         let bsdf = MirrorBsdf::new(color);
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
 
-        let sample = bsdf
-            .sample(wo, Vec2::new(0.25, 0.75))
-            .expect("expected a valid sample");
+        let sample = bsdf.sample(wo).expect("expected a valid sample");
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));
@@ -71,6 +69,6 @@ mod tests {
     fn sample_returns_none_for_lower_hemisphere_outgoing_direction() {
         let bsdf = MirrorBsdf::new(Vec3::ONE);
 
-        assert!(bsdf.sample(-Vec3::Z, Vec2::splat(0.5)).is_none());
+        assert!(bsdf.sample(-Vec3::Z).is_none());
     }
 }

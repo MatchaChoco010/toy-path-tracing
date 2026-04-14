@@ -1,14 +1,17 @@
 mod conductor_ggx;
+mod dielectric_ggx;
 mod emissive;
 mod glass;
 mod mirror;
 mod normalized_lambert;
 
 use glam::{Vec2, Vec3};
+use rand::rngs::ThreadRng;
 
 use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
 
 pub use conductor_ggx::ConductorGgxMaterial;
+pub use dielectric_ggx::DielectricGgxMaterial;
 pub use emissive::EmissiveMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
@@ -19,6 +22,7 @@ pub enum Material {
     NormalizedLambert(NormalizedLambertMaterial),
     Mirror(MirrorMaterial),
     ConductorGgx(ConductorGgxMaterial),
+    DielectricGgx(DielectricGgxMaterial),
     Glass(GlassMaterial),
     Emissive(EmissiveMaterial),
 }
@@ -46,13 +50,18 @@ pub struct MaterialSample {
 }
 
 impl Material {
-    pub fn sample(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+    pub fn sample(
+        &self,
+        shading_vertex: &ShadingVertex,
+        rng: &mut ThreadRng,
+    ) -> Option<MaterialSample> {
         match self {
-            Self::NormalizedLambert(material) => material.sample(shading_vertex, us),
-            Self::Mirror(material) => material.sample(shading_vertex, us),
-            Self::ConductorGgx(material) => material.sample(shading_vertex, us),
-            Self::Glass(material) => material.sample(shading_vertex, us),
-            Self::Emissive(material) => material.sample(shading_vertex, us),
+            Self::NormalizedLambert(material) => material.sample(shading_vertex, rng),
+            Self::Mirror(material) => material.sample(shading_vertex, rng),
+            Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
+            Self::DielectricGgx(material) => material.sample(shading_vertex, rng),
+            Self::Glass(material) => material.sample(shading_vertex, rng),
+            Self::Emissive(material) => material.sample(shading_vertex, rng),
         }
     }
 
@@ -61,6 +70,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::Mirror(material) => material.le(shading_vertex),
             Self::ConductorGgx(material) => material.le(shading_vertex),
+            Self::DielectricGgx(material) => material.le(shading_vertex),
             Self::Glass(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
@@ -71,6 +81,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.eval(shading_vertex, wi),
             Self::Mirror(material) => material.eval(shading_vertex, wi),
             Self::ConductorGgx(material) => material.eval(shading_vertex, wi),
+            Self::DielectricGgx(material) => material.eval(shading_vertex, wi),
             Self::Glass(material) => material.eval(shading_vertex, wi),
             Self::Emissive(material) => material.eval(shading_vertex, wi),
         }
@@ -81,6 +92,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
             Self::Mirror(material) => material.pdf(shading_vertex, wi),
             Self::ConductorGgx(material) => material.pdf(shading_vertex, wi),
+            Self::DielectricGgx(material) => material.pdf(shading_vertex, wi),
             Self::Glass(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
         }
@@ -91,6 +103,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.may_emit(),
             Self::Mirror(material) => material.may_emit(),
             Self::ConductorGgx(material) => material.may_emit(),
+            Self::DielectricGgx(material) => material.may_emit(),
             Self::Glass(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
         }
@@ -101,6 +114,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.max_emission(),
             Self::Mirror(material) => material.max_emission(),
             Self::ConductorGgx(material) => material.max_emission(),
+            Self::DielectricGgx(material) => material.max_emission(),
             Self::Glass(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
@@ -120,8 +134,8 @@ mod tests {
     };
 
     use super::{
-        ConductorGgxMaterial, EmissiveMaterial, GlassMaterial, Material, MirrorMaterial,
-        NormalizedLambertMaterial, ShadingVertex,
+        ConductorGgxMaterial, DielectricGgxMaterial, EmissiveMaterial, GlassMaterial, Material,
+        MirrorMaterial, NormalizedLambertMaterial, ShadingVertex,
     };
 
     fn test_shading_vertex(wo: Vec3) -> ShadingVertex {
@@ -183,6 +197,20 @@ mod tests {
     }
 
     #[test]
+    fn dielectric_ggx_material_reports_no_emission_capability() {
+        let material = Material::DielectricGgx(DielectricGgxMaterial::new(
+            Vec3::ONE,
+            1.5,
+            0.3,
+            0.0,
+            false,
+        ));
+
+        assert!(!material.may_emit());
+        assert_eq!(material.max_emission(), 0.0);
+    }
+
+    #[test]
     fn emissive_material_eval_is_always_zero() {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
         let shading_vertex = test_shading_vertex(Vec3::Z);
@@ -215,9 +243,10 @@ mod tests {
     fn lambert_material_sample_returns_diffuse_flag() {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let shading_vertex = test_shading_vertex(Vec3::Z);
+        let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, glam::Vec2::splat(0.5))
+            .sample(&shading_vertex, &mut rng)
             .expect("expected a valid sample");
 
         assert_eq!(sample.flags, BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION);
@@ -229,9 +258,10 @@ mod tests {
         let material = Material::Mirror(MirrorMaterial::new(color));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let shading_vertex = test_shading_vertex(wo);
+        let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, glam::Vec2::splat(0.5))
+            .sample(&shading_vertex, &mut rng)
             .expect("expected a valid sample");
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
@@ -249,9 +279,10 @@ mod tests {
             0.0,
         ));
         let shading_vertex = test_shading_vertex(Vec3::new(0.3, -0.4, 0.8660254).normalize());
+        let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, glam::Vec2::new(0.3, 0.7))
+            .sample(&shading_vertex, &mut rng)
             .expect("expected a valid sample");
 
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
@@ -275,9 +306,18 @@ mod tests {
         let material = Material::Glass(GlassMaterial::new(1.5, color, false));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let shading_vertex = test_shading_vertex(wo);
-        let sample = material
-            .sample(&shading_vertex, glam::Vec2::new(0.9, 0.5))
-            .expect("expected a valid sample");
+        let mut rng = rand::rng();
+
+        // Transmission probability at this angle is ~95%; retry a few times to
+        // avoid a flaky test when the RNG happens to pick the reflection branch.
+        let sample = (0..64)
+            .find_map(|_| {
+                let s = material.sample(&shading_vertex, &mut rng)?;
+                s.flags
+                    .contains(BsdfFlags::TRANSMISSION)
+                    .then_some(s)
+            })
+            .expect("expected a transmission sample within retry budget");
 
         assert!(sample.wi.z < 0.0);
         assert!(sample.weight.abs_diff_eq(color * 2.25, 1.0e-6));

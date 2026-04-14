@@ -1,4 +1,5 @@
 use glam::{Vec2, Vec3};
+use rand::{RngExt, rngs::ThreadRng};
 
 use crate::bsdf::NormalizedLambertBsdf;
 
@@ -14,11 +15,16 @@ impl NormalizedLambertMaterial {
         Self { rho }
     }
 
-    pub fn sample(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+    pub fn sample(
+        &self,
+        shading_vertex: &ShadingVertex,
+        rng: &mut ThreadRng,
+    ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
+        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
         let bsdf = NormalizedLambertBsdf::new(self.rho);
         let sample = bsdf.sample(wo_local, us)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);

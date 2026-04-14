@@ -58,6 +58,18 @@ Conductor GGX の anisotropy 差確認用シーンは `scene 5` で実行でき�
 cargo run --release -- --scene 5 --spp 512 --depth 32 -i mis -o result/scene-5-conductor-ggx-anisotropy.png
 ```
 
+Dielectric GGX の roughness 差確認用シーンは `scene 6` で実行できます。
+
+```bash
+cargo run --release -- --scene 6 --spp 1024 --depth 32 -i mis -o result/scene-6-dielectric-ggx.png
+```
+
+Dielectric GGX の anisotropy 差確認用シーンは `scene 7` で実行できます。
+
+```bash
+cargo run --release -- --scene 7 --spp 1024 --depth 32 -i mis -o result/scene-7-dielectric-ggx-anisotropy.png
+```
+
 解像度も含めて指定したい場合は `--width` と `--height` を使います。
 
 ```bash
@@ -91,9 +103,11 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `3` | Cornell box 風の部屋に、手前の透明ガラス球、左右の thin / 通常の水色ガラスバニー、球越しの歪み確認用の薄い青の Lambert バニーを配置した確認用シーンです。 |
 | `4` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.25 / 0.5 / 0.75 / 1.0` にした金色の Conductor GGX 球を 5 つ並べた確認用シーンです。 |
 | `5` | Cornell box 風の部屋に、roughness `0.3` の銀色 Conductor GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
+| `6` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6` にした透明な Dielectric GGX ガラス球を 5 つ、少しだけ宙に浮かせて並べ、地面への影と集光模様が見えるようにした確認用シーンです。 |
+| `7` | Cornell box 風の部屋に、roughness `0.3` の薄水色 Dielectric GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
 
 補足:
-`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3`、`4` を指定すると `scene_4`、`5` を指定すると `scene_5` を読み込み、それ以外はすべて `scene_0` を読み込みます。
+`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3`、`4` を指定すると `scene_4`、`5` を指定すると `scene_5`、`6` を指定すると `scene_6`、`7` を指定すると `scene_7` を読み込み、それ以外はすべて `scene_0` を読み込みます。
 
 ## 現在の実装上の注意
 

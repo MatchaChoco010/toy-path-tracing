@@ -1,4 +1,5 @@
-use glam::{Vec2, Vec3};
+use glam::Vec3;
+use rand::rngs::ThreadRng;
 
 use crate::bsdf::MirrorBsdf;
 
@@ -14,13 +15,17 @@ impl MirrorMaterial {
         Self { color }
     }
 
-    pub fn sample(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+    pub fn sample(
+        &self,
+        shading_vertex: &ShadingVertex,
+        _rng: &mut ThreadRng,
+    ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let bsdf = MirrorBsdf::new(self.color);
-        let sample = bsdf.sample(wo_local, us)?;
+        let sample = bsdf.sample(wo_local)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
         Some(MaterialSample {

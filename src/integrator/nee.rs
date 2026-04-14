@@ -38,8 +38,7 @@ pub fn trace_radiance(
             }
         }
 
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let Some(sample) = material.sample(&vtx, us) else {
+        let Some(sample) = material.sample(&vtx, rng) else {
             break;
         };
         let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
