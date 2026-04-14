@@ -5,6 +5,7 @@ mod mirror;
 mod normalized_lambert;
 
 use glam::{Vec2, Vec3};
+use rand::rngs::ThreadRng;
 
 use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
 
@@ -46,13 +47,17 @@ pub struct MaterialSample {
 }
 
 impl Material {
-    pub fn sample(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+    pub fn sample(
+        &self,
+        shading_vertex: &ShadingVertex,
+        rng: &mut ThreadRng,
+    ) -> Option<MaterialSample> {
         match self {
-            Self::NormalizedLambert(material) => material.sample(shading_vertex, us),
-            Self::Mirror(material) => material.sample(shading_vertex, us),
-            Self::ConductorGgx(material) => material.sample(shading_vertex, us),
-            Self::Glass(material) => material.sample(shading_vertex, us),
-            Self::Emissive(material) => material.sample(shading_vertex, us),
+            Self::NormalizedLambert(material) => material.sample(shading_vertex, rng),
+            Self::Mirror(material) => material.sample(shading_vertex, rng),
+            Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
+            Self::Glass(material) => material.sample(shading_vertex, rng),
+            Self::Emissive(material) => material.sample(shading_vertex, rng),
         }
     }
 
@@ -215,9 +220,10 @@ mod tests {
     fn lambert_material_sample_returns_diffuse_flag() {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let shading_vertex = test_shading_vertex(Vec3::Z);
+        let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, glam::Vec2::splat(0.5))
+            .sample(&shading_vertex, &mut rng)
             .expect("expected a valid sample");
 
         assert_eq!(sample.flags, BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION);
@@ -229,9 +235,10 @@ mod tests {
         let material = Material::Mirror(MirrorMaterial::new(color));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let shading_vertex = test_shading_vertex(wo);
+        let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, glam::Vec2::splat(0.5))
+            .sample(&shading_vertex, &mut rng)
             .expect("expected a valid sample");
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
@@ -249,9 +256,10 @@ mod tests {
             0.0,
         ));
         let shading_vertex = test_shading_vertex(Vec3::new(0.3, -0.4, 0.8660254).normalize());
+        let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, glam::Vec2::new(0.3, 0.7))
+            .sample(&shading_vertex, &mut rng)
             .expect("expected a valid sample");
 
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
@@ -275,9 +283,18 @@ mod tests {
         let material = Material::Glass(GlassMaterial::new(1.5, color, false));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let shading_vertex = test_shading_vertex(wo);
-        let sample = material
-            .sample(&shading_vertex, glam::Vec2::new(0.9, 0.5))
-            .expect("expected a valid sample");
+        let mut rng = rand::rng();
+
+        // Transmission probability at this angle is ~95%; retry a few times to
+        // avoid a flaky test when the RNG happens to pick the reflection branch.
+        let sample = (0..64)
+            .find_map(|_| {
+                let s = material.sample(&shading_vertex, &mut rng)?;
+                s.flags
+                    .contains(BsdfFlags::TRANSMISSION)
+                    .then_some(s)
+            })
+            .expect("expected a transmission sample within retry budget");
 
         assert!(sample.wi.z < 0.0);
         assert!(sample.weight.abs_diff_eq(color * 2.25, 1.0e-6));

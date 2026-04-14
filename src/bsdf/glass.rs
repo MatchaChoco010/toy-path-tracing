@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 
 use crate::math::{fresnel_dielectric, refract};
 
@@ -30,19 +30,19 @@ impl GlassBsdf {
         0.0
     }
 
-    pub fn sample(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3, uc: f32) -> Option<BsdfSample> {
         if wo.z <= 0.0 || self.eta <= 0.0 {
             return None;
         }
 
         if self.thin {
-            return self.sample_thin(wo, us);
+            return self.sample_thin(wo, uc);
         }
 
-        self.sample_thick(wo, us)
+        self.sample_thick(wo, uc)
     }
 
-    fn sample_thin(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_thin(&self, wo: Vec3, uc: f32) -> Option<BsdfSample> {
         let mut reflectance = fresnel_dielectric(wo.z.abs(), 1.0, self.eta);
         let transmittance = 1.0 - reflectance;
         let denominator = 1.0 - reflectance * reflectance;
@@ -57,7 +57,7 @@ impl GlassBsdf {
         let (reflection_probability, transmission_probability) =
             normalized_probabilities(reflectance, transmittance)?;
 
-        let reflect = us.x < reflection_probability;
+        let reflect = uc < reflection_probability;
         let wi = if reflect {
             reflected_direction(wo)
         } else {
@@ -84,7 +84,7 @@ impl GlassBsdf {
         })
     }
 
-    fn sample_thick(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_thick(&self, wo: Vec3, uc: f32) -> Option<BsdfSample> {
         let (eta_i, eta_t) = if self.front_face {
             (1.0, self.eta)
         } else {
@@ -101,7 +101,7 @@ impl GlassBsdf {
         let (reflection_probability, transmission_probability) =
             normalized_probabilities(reflectance, transmittance)?;
 
-        if us.x < reflection_probability {
+        if uc < reflection_probability {
             return Some(BsdfSample {
                 weight: Vec3::ONE,
                 wi: reflected_direction(wo),
@@ -140,7 +140,7 @@ fn normalized_probabilities(reflectance: f32, transmittance: f32) -> Option<(f32
 
 #[cfg(test)]
 mod tests {
-    use glam::{Vec2, Vec3};
+    use glam::Vec3;
 
     use crate::{
         bsdf::{BsdfFlags, GlassBsdf},
@@ -159,9 +159,7 @@ mod tests {
     fn thick_sample_can_choose_reflection() {
         let bsdf = GlassBsdf::new(1.5, Vec3::new(0.3, 0.5, 0.7), false, true);
         let wo = Vec3::new(0.0, 0.0, 1.0);
-        let sample = bsdf
-            .sample(wo, Vec2::new(0.01, 0.5))
-            .expect("expected a reflection sample");
+        let sample = bsdf.sample(wo, 0.01).expect("expected a reflection sample");
 
         assert_eq!(sample.wi, Vec3::Z);
         assert_eq!(sample.weight, Vec3::ONE);
@@ -175,9 +173,7 @@ mod tests {
         let eta = 1.5;
         let bsdf = GlassBsdf::new(eta, color, false, true);
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
-        let sample = bsdf
-            .sample(wo, Vec2::new(0.9, 0.5))
-            .expect("expected a transmission sample");
+        let sample = bsdf.sample(wo, 0.9).expect("expected a transmission sample");
         let expected_wi = refract(wo, 1.0 / eta).expect("expected refraction");
 
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));
@@ -193,7 +189,7 @@ mod tests {
         let bsdf = GlassBsdf::new(eta, color, false, false);
         let wo = Vec3::Z;
         let sample = bsdf
-            .sample(wo, Vec2::new(0.99, 0.5))
+            .sample(wo, 0.99)
             .expect("expected a transmission sample");
 
         assert!(sample.weight.abs_diff_eq(color / (eta * eta), 1.0e-6));
@@ -206,7 +202,7 @@ mod tests {
         let bsdf = GlassBsdf::new(1.5, Vec3::ONE, false, false);
         let wo = Vec3::new(0.8, 0.0, 0.6).normalize();
         let sample = bsdf
-            .sample(wo, Vec2::new(0.9, 0.5))
+            .sample(wo, 0.9)
             .expect("expected total internal reflection");
 
         assert!(sample.wi.abs_diff_eq(Vec3::new(-0.8, 0.0, 0.6), 1.0e-6));
@@ -222,7 +218,7 @@ mod tests {
         let bsdf = GlassBsdf::new(eta, color, true, true);
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let sample = bsdf
-            .sample(wo, Vec2::new(0.9, 0.5))
+            .sample(wo, 0.9)
             .expect("expected a thin transmission sample");
         let base_reflectance = fresnel_dielectric(wo.z, 1.0, eta);
         let expected_reflectance = base_reflectance
@@ -239,10 +235,10 @@ mod tests {
     fn sample_returns_none_for_invalid_configuration() {
         let bsdf = GlassBsdf::new(1.5, Vec3::ONE, false, true);
 
-        assert!(bsdf.sample(-Vec3::Z, Vec2::splat(0.5)).is_none());
+        assert!(bsdf.sample(-Vec3::Z, 0.5).is_none());
         assert!(
             GlassBsdf::new(0.0, Vec3::ONE, false, true)
-                .sample(Vec3::Z, Vec2::splat(0.5))
+                .sample(Vec3::Z, 0.5)
                 .is_none()
         );
     }

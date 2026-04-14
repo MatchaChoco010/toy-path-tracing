@@ -1,4 +1,5 @@
-use glam::{Vec2, Vec3};
+use glam::Vec3;
+use rand::rngs::ThreadRng;
 
 use super::{MaterialSample, ShadingVertex};
 
@@ -13,7 +14,11 @@ impl EmissiveMaterial {
         Self { color, strength }
     }
 
-    pub fn sample(&self, _shading_vertex: &ShadingVertex, _us: Vec2) -> Option<MaterialSample> {
+    pub fn sample(
+        &self,
+        _shading_vertex: &ShadingVertex,
+        _rng: &mut ThreadRng,
+    ) -> Option<MaterialSample> {
         None
     }
 

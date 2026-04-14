@@ -1,4 +1,5 @@
 use glam::{Vec2, Vec3};
+use rand::{RngExt, rngs::ThreadRng};
 
 use crate::{
     bsdf::{BsdfFlags, ConductorGgxBsdf},
@@ -25,7 +26,12 @@ impl ConductorGgxMaterial {
         }
     }
 
-    pub fn sample(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+    pub fn sample(
+        &self,
+        shading_vertex: &ShadingVertex,
+        rng: &mut ThreadRng,
+    ) -> Option<MaterialSample> {
+        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
         let sample = self.sample_with_frame(shading_vertex, shading_vertex.frame, us)?;
 
         if sample_matches_geometric_reflection_side(&sample, shading_vertex.ng) {
@@ -193,8 +199,9 @@ mod tests {
     fn sample_returns_reflection_sample() {
         let material = ConductorGgxMaterial::new(Vec3::new(0.9, 0.6, 0.2), 0.45, 0.25);
         let vtx = test_shading_vertex(Vec3::new(0.2, -0.1, 0.9746794).normalize());
+        let mut rng = rand::rng();
         let sample = material
-            .sample(&vtx, Vec2::new(0.41, 0.77))
+            .sample(&vtx, &mut rng)
             .expect("expected a reflection sample");
 
         assert!(sample.wi.z > 0.0);
