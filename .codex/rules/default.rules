@@ -10,7 +10,7 @@ prefix_rule(
 )
 
 prefix_rule(
-  pattern = ["git", ["status", "diff", "log", "commit", "checkout", "switch", "fetch", "pull"]],
+  pattern = ["git"],
   decision = "allow",
   match = [
     "git status",
@@ -21,24 +21,8 @@ prefix_rule(
     "git switch main",
     "git fetch origin",
     "git pull --ff-only",
-  ],
-  not_match = [
-    "git push",
-    "git add .",
-  ],
-)
-
-prefix_rule(
-  pattern = ["git", "add"],
-  decision = "allow",
-  match = [
-    "git add src/main.rs",
-    "git add src/lib.rs src/math.rs",
-    "git add .codex/rules/default.rules",
-  ],
-  not_match = [
-    "git add .",
-    "git add -A",
-    "git add --all",
+    "git branch --show-current",
+    "git merge feature/dielectric-ggx",
+    "git rebase main",
   ],
 )
