@@ -496,7 +496,11 @@ mod tests {
             .sample(wo, 0.0, Vec2::new(0.35, 0.72))
             .expect("expected a reflection sample");
 
-        assert!(sample.flags.contains(BsdfFlags::GLOSSY | BsdfFlags::REFLECTION));
+        assert!(
+            sample
+                .flags
+                .contains(BsdfFlags::GLOSSY | BsdfFlags::REFLECTION)
+        );
         assert!(sample.wi.z > 0.0);
         assert!(sample.pdf > 0.0);
 
@@ -507,8 +511,7 @@ mod tests {
 
     #[test]
     fn rough_transmission_sample_matches_eval_cos_over_pdf() {
-        let bsdf =
-            DielectricGgxBsdf::new(Vec3::new(0.5, 0.7, 0.9), 1.5, 0.3, 0.2, false, true);
+        let bsdf = DielectricGgxBsdf::new(Vec3::new(0.5, 0.7, 0.9), 1.5, 0.3, 0.2, false, true);
         let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
 
         // With uc = 1.0 we always pick the transmission branch.
@@ -516,7 +519,11 @@ mod tests {
             .sample(wo, 0.999, Vec2::new(0.4, 0.6))
             .expect("expected a transmission sample");
 
-        assert!(sample.flags.contains(BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION));
+        assert!(
+            sample
+                .flags
+                .contains(BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION)
+        );
         assert!(sample.wi.z < 0.0);
         assert!(sample.pdf > 0.0);
 

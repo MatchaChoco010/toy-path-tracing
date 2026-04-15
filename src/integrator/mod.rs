@@ -49,11 +49,7 @@ pub(super) fn spawn_ray(origin: Vec3, geometric_normal: Vec3, direction: Vec3) -
     Ray::new(origin + RAY_EPSILON * normal_offset, direction)
 }
 
-pub(super) fn unoccluded(
-    scene: &Scene,
-    vtx: &ShadingVertex,
-    li: &LightLiSample,
-) -> bool {
+pub(super) fn unoccluded(scene: &Scene, vtx: &ShadingVertex, li: &LightLiSample) -> bool {
     unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle)
 }
 

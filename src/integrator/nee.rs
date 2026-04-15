@@ -132,7 +132,7 @@ mod tests {
     use super::{direct_light_nee_contribution, should_sample_direct_light, trace_radiance};
     use crate::{
         bsdf::BsdfFlags,
-        environment_light::EnvironmentLight,
+        light::{DirectionalLight, EnvironmentLight, PointLight, SpotLight},
         material::{EmissiveMaterial, Material, MirrorMaterial, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
         ray::Ray,
@@ -272,18 +272,124 @@ mod tests {
         // selects a direction roughly aligned with the surface normal so the
         // cos_theta factor is positive (env uses +Y up, surface normal is +Z
         // via spherical sampling the direction with u=0 and v=0.5 maps to +Z).
-        let radiance = direct_light_nee_contribution(
-            &scene,
-            material,
-            &vtx,
-            0.5,
-            0.0,
-            Vec2::new(0.0, 0.5),
-        );
+        let radiance =
+            direct_light_nee_contribution(&scene, material, &vtx, 0.5, 0.0, Vec2::new(0.0, 0.5));
 
         assert!(radiance.x > 0.0);
         assert!(radiance.y > 0.0);
         assert!(radiance.z > 0.0);
+    }
+
+    #[test]
+    fn direct_radiance_matches_point_light_estimator() {
+        let mut scene = Scene::new();
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let floor_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+        ));
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_point_light(PointLight::new(
+            Vec3::new(0.25, 0.25, 2.0),
+            Vec3::ONE,
+            16.0 * PI,
+        ));
+        scene.build_bvh();
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            triangle_ref(0),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let material = scene.instance_material(InstanceIndex(0));
+        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let expected = 0.8 / PI;
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
+    }
+
+    #[test]
+    fn direct_radiance_matches_directional_light_estimator() {
+        let mut scene = Scene::new();
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let floor_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+        ));
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_directional_light(DirectionalLight::new(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::ONE,
+            2.0,
+        ));
+        scene.build_bvh();
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            triangle_ref(0),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let material = scene.instance_material(InstanceIndex(0));
+        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let expected = 2.0 * 0.8 / PI;
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
+    }
+
+    #[test]
+    fn direct_radiance_matches_spot_light_estimator_within_cone() {
+        let mut scene = Scene::new();
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let floor_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+        ));
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        // P=16π so Li at r=2 on axis equals 1.
+        scene.add_spot_light(SpotLight::new(
+            Vec3::new(0.25, 0.25, 2.0),
+            Vec3::NEG_Z,
+            Vec3::ONE,
+            16.0 * PI,
+            (30.0_f32).to_radians(),
+            (20.0_f32).to_radians(),
+        ));
+        scene.build_bvh();
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            triangle_ref(0),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let material = scene.instance_material(InstanceIndex(0));
+        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let expected = 0.8 / PI;
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
+    }
+
+    #[test]
+    fn direct_radiance_returns_zero_when_directional_light_is_blocked() {
+        let mut scene = Scene::new();
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let blocker_mesh = scene.add_mesh(unit_mesh(1.0));
+        let floor_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+        ));
+        let blocker_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.3)),
+        ));
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_instance(blocker_mesh, blocker_material, Mat4::IDENTITY);
+        scene.add_directional_light(DirectionalLight::new(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::ONE,
+            2.0,
+        ));
+        scene.build_bvh();
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            triangle_ref(0),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let material = scene.instance_material(InstanceIndex(0));
+        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        assert_eq!(radiance, Vec3::ZERO);
     }
 
     #[test]

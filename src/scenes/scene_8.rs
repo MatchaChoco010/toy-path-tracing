@@ -3,7 +3,7 @@ use std::{error::Error, path::Path};
 
 use crate::{
     camera::PinholeCamera,
-    environment_light::EnvironmentLight,
+    light::EnvironmentLight,
     material::{ConductorGgxMaterial, DielectricGgxMaterial, Material, NormalizedLambertMaterial},
     mesh::load_mesh,
     scene::Scene,
@@ -51,24 +51,16 @@ pub fn create_scene_8() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             * Mat4::from_translation(-sphere_pivot);
         scene.add_instance(sphere_mesh_index, metal_material, metal_transform);
 
-        let glass_material =
-            scene.add_material(Material::DielectricGgx(DielectricGgxMaterial::new(
-                glass_color,
-                glass_eta,
-                roughness,
-                0.0,
-                false,
-            )));
+        let glass_material = scene.add_material(Material::DielectricGgx(
+            DielectricGgxMaterial::new(glass_color, glass_eta, roughness, 0.0, false),
+        ));
         let glass_transform = Mat4::from_translation(Vec3::new(x, glass_lift, 0.0))
             * Mat4::from_scale(Vec3::splat(sphere_scale))
             * Mat4::from_translation(-sphere_pivot);
         scene.add_instance(sphere_mesh_index, glass_material, glass_transform);
     }
 
-    let env = EnvironmentLight::from_hdr_file(
-        "assets/sky/brown_photostudio_02_4k.hdr",
-        2.0,
-    )?;
+    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 2.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(

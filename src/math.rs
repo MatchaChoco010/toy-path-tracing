@@ -255,6 +255,14 @@ pub fn russian_roulette_probability(throughput: Vec3) -> f32 {
     throughput.max_element().clamp(0.05, 1.0)
 }
 
+// Cubic Hermite interpolation with zero derivatives at both endpoints.
+// S(edge0) = 0, S(edge1) = 1, S'(edge0) = S'(edge1) = 0, giving a C¹
+// transition without the visible seams a linear ramp produces.
+pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[cfg(test)]
 mod tests {
     use glam::{Vec2, Vec3};
@@ -264,7 +272,7 @@ mod tests {
         cosine_weighted_hemisphere_pdf, difference_of_products, face_forward, fresnel_dielectric,
         gamma, interpolate_vec2, interpolate_vec3, max_component_index, permute_vec3, reflect,
         refract, reinhard, russian_roulette_probability, sample_cosine_weighted_hemisphere,
-        sample_tent_1d, schlick_fresnel,
+        sample_tent_1d, schlick_fresnel, smoothstep,
     };
 
     #[test]
@@ -420,5 +428,36 @@ mod tests {
         assert!((russian_roulette_probability(Vec3::splat(0.01)) - 0.05).abs() < 1.0e-6);
         assert!((russian_roulette_probability(Vec3::splat(0.5)) - 0.5).abs() < 1.0e-6);
         assert!((russian_roulette_probability(Vec3::splat(10.0)) - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn smoothstep_pins_endpoints_and_midpoint() {
+        assert_eq!(smoothstep(0.0, 1.0, -0.5), 0.0);
+        assert_eq!(smoothstep(0.0, 1.0, 0.0), 0.0);
+        assert_eq!(smoothstep(0.0, 1.0, 1.0), 1.0);
+        assert_eq!(smoothstep(0.0, 1.0, 1.5), 1.0);
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn smoothstep_is_monotonic_and_symmetric() {
+        let n = 32;
+        let mut prev = smoothstep(0.0, 1.0, 0.0);
+        for i in 1..=n {
+            let x = i as f32 / n as f32;
+            let curr = smoothstep(0.0, 1.0, x);
+            assert!(curr >= prev, "smoothstep must be monotonic non-decreasing");
+            // Symmetric around 0.5: S(x) + S(1 - x) = 1.
+            let mirror = smoothstep(0.0, 1.0, 1.0 - x);
+            assert!((curr + mirror - 1.0).abs() < 1.0e-6);
+            prev = curr;
+        }
+    }
+
+    #[test]
+    fn smoothstep_handles_offset_edges() {
+        assert!((smoothstep(2.0, 4.0, 3.0) - 0.5).abs() < 1.0e-6);
+        assert_eq!(smoothstep(2.0, 4.0, 1.5), 0.0);
+        assert_eq!(smoothstep(2.0, 4.0, 5.0), 1.0);
     }
 }

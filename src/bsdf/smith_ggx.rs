@@ -107,9 +107,7 @@ pub fn sample_wm_vndf(wo: Vec3, alpha_x: f32, alpha_y: f32, us: Vec2) -> Option<
     p2 = (1.0 - s) * (1.0 - p1 * p1).max(0.0).sqrt() + s * p2;
 
     // Reproject onto hemisphere.
-    let nh = p1 * t1
-        + p2 * t2
-        + (1.0 - p1 * p1 - p2 * p2).max(0.0).sqrt() * wo_std;
+    let nh = p1 * t1 + p2 * t2 + (1.0 - p1 * p1 - p2 * p2).max(0.0).sqrt() * wo_std;
 
     // Unstretch back to anisotropic space.
     let wm = Vec3::new(alpha_x * nh.x, alpha_y * nh.y, nh.z.max(0.0)).normalize_or_zero();
@@ -181,9 +179,7 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use super::{
-        ggx_d, pdf_wm_bounded_vndf, pdf_wm_vndf, sample_wm_bounded_vndf, sample_wm_vndf,
-    };
+    use super::{ggx_d, pdf_wm_bounded_vndf, pdf_wm_vndf, sample_wm_bounded_vndf, sample_wm_vndf};
 
     const HEMISPHERE_Z_SAMPLES: usize = 256;
     const HEMISPHERE_PHI_SAMPLES: usize = 256;
@@ -263,8 +259,8 @@ mod tests {
             for y in 0..4 {
                 for x in 0..4 {
                     let us = Vec2::new((x as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
-                    let wm = sample_wm_vndf(wo, alpha_x, alpha_y, us)
-                        .expect("expected a VNDF sample");
+                    let wm =
+                        sample_wm_vndf(wo, alpha_x, alpha_y, us).expect("expected a VNDF sample");
 
                     assert!(wm.is_finite());
                     assert!(wm.z > 0.0);
