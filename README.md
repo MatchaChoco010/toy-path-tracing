@@ -14,66 +14,22 @@ cargo run --release -- [OPTIONS]
 
 ### 実行例
 
-`scene 0` を `64 spp` でレンダリングして `result/scene-0.png` に保存する例です。
+シーン番号と spp、出力先を指定して実行します。
 
 ```bash
-cargo run --release -- --spp 64 --scene 0 -o result/scene-0.png
+cargo run --release -- --scene 0 --spp 64 -o result/scene-0.png
 ```
 
-integrator を明示して実行したい場合は `--integrator` または `-i` を使います。現状は `mis`、`pt`、`nee` を選べます。
-
-```bash
-cargo run --release -- --scene 1 --spp 128 --depth 24 -i mis -o result/scene-1-mis.png
-```
+integrator を明示したい場合は `--integrator` または `-i` を使います。現状は `mis`、`pt`、`nee` を選べます。
 
 ```bash
 cargo run --release -- --scene 1 --spp 128 --depth 24 -i pt -o result/scene-1-pt.png
 ```
 
-```bash
-cargo run --release -- --scene 1 --spp 128 --depth 24 -i nee -o result/scene-1-nee.png
-```
-
-完全鏡面反射の確認用シーンは `scene 2` で実行できます。
-
-```bash
-cargo run --release -- --scene 2 --spp 256 --depth 24 -i mis -o result/scene-2-mirror.png
-```
-
-ガラス材質の確認用シーンは `scene 3` で実行できます。
-
-```bash
-cargo run --release -- --scene 3 --spp 512 --depth 32 -i mis -o result/scene-3-glass.png
-```
-
-Conductor GGX の roughness 差確認用シーンは `scene 4` で実行できます。
-
-```bash
-cargo run --release -- --scene 4 --spp 512 --depth 32 -i mis -o result/scene-4-conductor-ggx.png
-```
-
-Conductor GGX の anisotropy 差確認用シーンは `scene 5` で実行できます。
-
-```bash
-cargo run --release -- --scene 5 --spp 512 --depth 32 -i mis -o result/scene-5-conductor-ggx-anisotropy.png
-```
-
-Dielectric GGX の roughness 差確認用シーンは `scene 6` で実行できます。
-
-```bash
-cargo run --release -- --scene 6 --spp 1024 --depth 32 -i mis -o result/scene-6-dielectric-ggx.png
-```
-
-Dielectric GGX の anisotropy 差確認用シーンは `scene 7` で実行できます。
-
-```bash
-cargo run --release -- --scene 7 --spp 1024 --depth 32 -i mis -o result/scene-7-dielectric-ggx-anisotropy.png
-```
-
 解像度も含めて指定したい場合は `--width` と `--height` を使います。
 
 ```bash
-cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 -o result/scene-1.png
+cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/scene-1.png
 ```
 
 ## CLI 引数
@@ -109,8 +65,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `8` | 広い Lambert 床の上に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` にした Conductor GGX 金属球を 6 つ並べ、その上段に同じ roughness 列の Dielectric GGX ガラス球を 6 つ並べ、`assets/sky/` の HDRI を IBL として読み込む屋外風シーンです。 |
 | `9` | Cornell box の中央に大きめのラフな金色 Conductor GGX (`roughness = 0.35`) のバニーを置き、天井のエリアライトと `assets/sky/` の HDRI を IBL として併用する確認用シーンです。カメラはボックスの外からやや引いた位置にあり、ボックス外周の Sky も写り込みます。 |
 
-補足:
-`load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3`、`4` を指定すると `scene_4`、`5` を指定すると `scene_5`、`6` を指定すると `scene_6`、`7` を指定すると `scene_7` を読み込み、それ以外はすべて `scene_0` を読み込みます。
+未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 
 ## 現在の実装上の注意
 
