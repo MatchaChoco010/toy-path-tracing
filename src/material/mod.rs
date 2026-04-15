@@ -198,13 +198,8 @@ mod tests {
 
     #[test]
     fn dielectric_ggx_material_reports_no_emission_capability() {
-        let material = Material::DielectricGgx(DielectricGgxMaterial::new(
-            Vec3::ONE,
-            1.5,
-            0.3,
-            0.0,
-            false,
-        ));
+        let material =
+            Material::DielectricGgx(DielectricGgxMaterial::new(Vec3::ONE, 1.5, 0.3, 0.0, false));
 
         assert!(!material.may_emit());
         assert_eq!(material.max_emission(), 0.0);
@@ -313,9 +308,7 @@ mod tests {
         let sample = (0..64)
             .find_map(|_| {
                 let s = material.sample(&shading_vertex, &mut rng)?;
-                s.flags
-                    .contains(BsdfFlags::TRANSMISSION)
-                    .then_some(s)
+                s.flags.contains(BsdfFlags::TRANSMISSION).then_some(s)
             })
             .expect("expected a transmission sample within retry budget");
 

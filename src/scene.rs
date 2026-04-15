@@ -3,8 +3,10 @@ use std::fmt;
 
 use crate::{
     bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
-    environment_light::EnvironmentLight,
-    light::LightSampler,
+    light::{
+        DirectionalLight, DirectionalLightIndex, EnvironmentLight, LightSampler, PointLight,
+        PointLightIndex, SpotLight, SpotLightIndex,
+    },
     material::{Material, ShadingVertex},
     math::{
         OrthonormalBasis, compute_surface_partials, face_forward, interpolate_vec2,
@@ -81,6 +83,9 @@ pub struct Scene {
     pub area_light_weight_sum: f32,
     pub bvh: Option<SceneBvh>,
     pub environment_light: Option<EnvironmentLight>,
+    pub point_lights: Vec<PointLight>,
+    pub directional_lights: Vec<DirectionalLight>,
+    pub spot_lights: Vec<SpotLight>,
     pub light_sampler: LightSampler,
 }
 
@@ -169,6 +174,27 @@ impl Scene {
 
     pub fn environment_light(&self) -> Option<&EnvironmentLight> {
         self.environment_light.as_ref()
+    }
+
+    pub fn add_point_light(&mut self, light: PointLight) -> PointLightIndex {
+        let index = PointLightIndex(self.point_lights.len());
+        self.point_lights.push(light);
+        self.rebuild_light_sampler();
+        index
+    }
+
+    pub fn add_directional_light(&mut self, light: DirectionalLight) -> DirectionalLightIndex {
+        let index = DirectionalLightIndex(self.directional_lights.len());
+        self.directional_lights.push(light);
+        self.rebuild_light_sampler();
+        index
+    }
+
+    pub fn add_spot_light(&mut self, light: SpotLight) -> SpotLightIndex {
+        let index = SpotLightIndex(self.spot_lights.len());
+        self.spot_lights.push(light);
+        self.rebuild_light_sampler();
+        index
     }
 
     pub fn rebuild_light_sampler(&mut self) {

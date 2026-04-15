@@ -236,7 +236,10 @@ mod tests {
         }
 
         assert!(saw_reflection, "expected at least one reflection sample");
-        assert!(saw_transmission, "expected at least one transmission sample");
+        assert!(
+            saw_transmission,
+            "expected at least one transmission sample"
+        );
     }
 
     #[test]
@@ -249,6 +252,10 @@ mod tests {
         let sample = material
             .sample(&vtx, &mut rng)
             .expect("expected a back-face sample");
-        assert!(sample.flags.intersects(BsdfFlags::REFLECTION | BsdfFlags::TRANSMISSION));
+        assert!(
+            sample
+                .flags
+                .intersects(BsdfFlags::REFLECTION | BsdfFlags::TRANSMISSION)
+        );
     }
 }

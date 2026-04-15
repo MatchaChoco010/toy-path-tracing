@@ -3,6 +3,9 @@ use std::path::Path;
 
 use glam::{Vec2, Vec3};
 
+use super::{LightLiSample, LightType};
+use crate::scene::Scene;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvironmentLight {
     width: usize,
@@ -146,6 +149,39 @@ impl EnvironmentLight {
     }
 }
 
+pub(super) fn sample_li(scene: &Scene, us: Vec2) -> Option<LightLiSample> {
+    let env = scene.environment_light.as_ref()?;
+    let sample = env.sample(us)?;
+    if sample.pdf <= 0.0 {
+        return None;
+    }
+
+    Some(LightLiSample {
+        radiance: sample.radiance,
+        wi: sample.direction,
+        pdf: sample.pdf,
+        distance: f32::INFINITY,
+        light_type: LightType::Infinite,
+        target_triangle: None,
+    })
+}
+
+pub fn infinite_light_pdf_li(scene: &Scene, direction: Vec3) -> f32 {
+    scene
+        .environment_light
+        .as_ref()
+        .map(|env| env.pdf(direction))
+        .unwrap_or(0.0)
+}
+
+pub fn infinite_light_le(scene: &Scene, direction: Vec3) -> Vec3 {
+    scene
+        .environment_light
+        .as_ref()
+        .map(|env| env.radiance(direction))
+        .unwrap_or(Vec3::ZERO)
+}
+
 fn luminance(v: Vec3) -> f32 {
     0.2126 * v.x + 0.7152 * v.y + 0.0722 * v.z
 }
@@ -161,14 +197,14 @@ fn pixel_coord(t: f32, size: usize) -> usize {
     idx.min(size - 1)
 }
 
-pub fn uv_to_direction(uv: Vec2) -> Vec3 {
+fn uv_to_direction(uv: Vec2) -> Vec3 {
     let phi = uv.x * TAU;
     let theta = uv.y * PI;
     let sin_theta = theta.sin();
     Vec3::new(sin_theta * phi.sin(), theta.cos(), sin_theta * phi.cos())
 }
 
-pub fn direction_to_uv(direction: Vec3) -> Vec2 {
+fn direction_to_uv(direction: Vec3) -> Vec2 {
     let dir = direction.normalize_or_zero();
     let y = dir.y.clamp(-1.0, 1.0);
     let theta = y.acos();
@@ -179,11 +215,7 @@ pub fn direction_to_uv(direction: Vec3) -> Vec2 {
     Vec2::new((phi / TAU).clamp(0.0, 1.0), (theta / PI).clamp(0.0, 1.0))
 }
 
-fn build_distribution(
-    width: usize,
-    height: usize,
-    pixels: &[Vec3],
-) -> (Vec<f32>, Vec<f32>, f32) {
+fn build_distribution(width: usize, height: usize, pixels: &[Vec3]) -> (Vec<f32>, Vec<f32>, f32) {
     let mut conditional_cdf = vec![0.0f32; height * (width + 1)];
     let mut row_integrals = vec![0.0f32; height];
 
@@ -223,10 +255,7 @@ fn sample_cdf(cdf: &[f32], u: f32) -> (usize, f32) {
     debug_assert!(cdf.len() >= 2);
     let last = cdf.len() - 2;
     let u = u.clamp(0.0, 1.0);
-    let idx = cdf
-        .partition_point(|&c| c <= u)
-        .saturating_sub(1)
-        .min(last);
+    let idx = cdf.partition_point(|&c| c <= u).saturating_sub(1).min(last);
     let a = cdf[idx];
     let b = cdf[idx + 1];
     let du = if b > a {
@@ -243,7 +272,12 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use super::{EnvironmentLight, direction_to_uv, uv_to_direction};
+    use super::super::{LightKind, LightSampleContext, LightType, sample_light_li};
+    use super::{
+        EnvironmentLight, direction_to_uv, infinite_light_le, infinite_light_pdf_li,
+        uv_to_direction,
+    };
+    use crate::scene::Scene;
 
     fn uniform_environment(width: usize, height: usize, radiance: f32) -> EnvironmentLight {
         let pixels = vec![Vec3::splat(radiance); width * height];
@@ -252,7 +286,14 @@ mod tests {
 
     #[test]
     fn direction_uv_roundtrip_on_axes() {
-        for direction in [Vec3::Y, Vec3::NEG_Y, Vec3::Z, Vec3::NEG_Z, Vec3::X, Vec3::NEG_X] {
+        for direction in [
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+            Vec3::X,
+            Vec3::NEG_X,
+        ] {
             let uv = direction_to_uv(direction);
             let reconstructed = uv_to_direction(uv);
             assert!(
@@ -288,7 +329,9 @@ mod tests {
         let env = EnvironmentLight::from_pixels(16, 8, pixels, 1.0);
 
         for (ux, uy) in [(0.1, 0.1), (0.5, 0.5), (0.8, 0.3), (0.95, 0.85)] {
-            let sample = env.sample(Vec2::new(ux, uy)).expect("sample should succeed");
+            let sample = env
+                .sample(Vec2::new(ux, uy))
+                .expect("sample should succeed");
             let queried = env.pdf(sample.direction);
             assert!(
                 (sample.pdf - queried).abs() / sample.pdf.max(1.0e-6) < 1.0e-3,
@@ -319,7 +362,9 @@ mod tests {
         let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0);
 
         for (ux, uy) in [(0.1, 0.1), (0.4, 0.4), (0.7, 0.7), (0.95, 0.05)] {
-            let sample = env.sample(Vec2::new(ux, uy)).expect("sample should succeed");
+            let sample = env
+                .sample(Vec2::new(ux, uy))
+                .expect("sample should succeed");
             let uv = direction_to_uv(sample.direction);
             let i = (uv.x * width as f32) as usize;
             let j = (uv.y * height as f32) as usize;
@@ -331,7 +376,6 @@ mod tests {
     #[test]
     fn integrated_pdf_over_sphere_is_one() {
         let env = uniform_environment(64, 32, 1.0);
-        // Monte-Carlo integrate pdf on uniformly sampled sphere directions.
         let n = 4096;
         let mut sum = 0.0;
         for k in 0..n {
@@ -344,8 +388,39 @@ mod tests {
             let dir = Vec3::new(r * phi.cos(), z, r * phi.sin());
             sum += env.pdf(dir);
         }
-        // Expected: pdf = 1/(4π). Mean * 4π ≈ 1.
         let integral = sum / n as f32 * 4.0 * PI;
-        assert!((integral - 1.0).abs() < 5.0e-2, "integrated pdf = {integral}");
+        assert!(
+            (integral - 1.0).abs() < 5.0e-2,
+            "integrated pdf = {integral}"
+        );
+    }
+
+    #[test]
+    fn sample_light_li_for_infinite_returns_environment_sample() {
+        let mut scene = Scene::new();
+        let pixels = vec![Vec3::splat(1.0); 32 * 16];
+        scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0));
+
+        let ctx = LightSampleContext {
+            p: Vec3::ZERO,
+            ng: Vec3::Z,
+            ns: Vec3::Z,
+        };
+
+        let li = sample_light_li(&scene, LightKind::Infinite, &ctx, 0.0, Vec2::new(0.3, 0.6))
+            .expect("expected a sample");
+
+        assert_eq!(li.light_type, LightType::Infinite);
+        assert!(li.target_triangle.is_none());
+        assert!(li.distance.is_infinite());
+        assert!((li.wi.length() - 1.0).abs() < 1.0e-5);
+        assert!(li.pdf > 0.0);
+    }
+
+    #[test]
+    fn infinite_light_helpers_report_zero_when_missing() {
+        let scene = Scene::new();
+        assert_eq!(infinite_light_le(&scene, Vec3::Z), Vec3::ZERO);
+        assert_eq!(infinite_light_pdf_li(&scene, Vec3::Z), 0.0);
     }
 }

@@ -65,6 +65,8 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `8` | 広い Lambert 床の上に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` にした Conductor GGX 金属球を 6 つ並べ、その上段に同じ roughness 列の Dielectric GGX ガラス球を 6 つ並べ、`assets/sky/` の HDRI を IBL として読み込む屋外風シーンです。 |
 | `9` | Cornell box の中央に大きめのラフな金色 Conductor GGX (`roughness = 0.35`) のバニーを置き、天井のエリアライトと `assets/sky/` の HDRI を IBL として併用する確認用シーンです。カメラはボックスの外からやや引いた位置にあり、ボックス外周の Sky も写り込みます。 |
 | `10` | White furnace test 用シーン。`1.0` の一様な白い環境光のもと、上段に roughness を `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` と並べた Dielectric GGX ガラス球、下段に同じ roughness 列の銀色 Conductor GGX 金属球を 6 個ずつ配置し、エネルギー保存をチェックします。 |
+| `11` | 広い Lambert 床の上に薄青の Lambert バニーを置き、`DirectionalLight` (太陽相当の平行光) 1 つだけで照らす delta 光源の基本確認シーンです。 |
+| `12` | Cornell box 風の部屋からエリアライトを外し、薄青 Lambert バニーとラフな金色 / 銅色の Conductor GGX 球を配置。暖色と寒色の `PointLight` を 2 灯、バニーに向けたマゼンタ / ティールの `SpotLight` を 2 灯で照らす delta 光源ミックスの確認シーンです。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

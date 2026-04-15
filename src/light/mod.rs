@@ -1,9 +1,23 @@
+mod area;
+mod directional;
+mod environment;
+mod point;
+mod spot;
+
 use glam::{Vec2, Vec3};
 
 use crate::{
     material::ShadingVertex,
     scene::{Scene, TriangleRef},
 };
+
+pub use area::area_light_pdf_li;
+pub use directional::{DirectionalLight, DirectionalLightIndex};
+pub use environment::{
+    EnvironmentLight, EnvironmentLightSample, infinite_light_le, infinite_light_pdf_li,
+};
+pub use point::{PointLight, PointLightIndex};
+pub use spot::{SpotLight, SpotLightIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LightType {
@@ -27,6 +41,9 @@ impl LightType {
 pub enum LightKind {
     Area,
     Infinite,
+    DeltaPoint(usize),
+    DeltaDirectional(usize),
+    DeltaSpot(usize),
 }
 
 impl LightKind {
@@ -34,6 +51,8 @@ impl LightKind {
         match self {
             Self::Area => LightType::Area,
             Self::Infinite => LightType::Infinite,
+            Self::DeltaPoint(_) | Self::DeltaSpot(_) => LightType::DeltaPosition,
+            Self::DeltaDirectional(_) => LightType::DeltaDirection,
         }
     }
 
@@ -136,6 +155,15 @@ impl LightSampler {
         if scene.environment_light.is_some() {
             entries.push((LightKind::Infinite, 1.0));
         }
+        for i in 0..scene.point_lights.len() {
+            entries.push((LightKind::DeltaPoint(i), 1.0));
+        }
+        for i in 0..scene.directional_lights.len() {
+            entries.push((LightKind::DeltaDirectional(i), 1.0));
+        }
+        for i in 0..scene.spot_lights.len() {
+            entries.push((LightKind::DeltaSpot(i), 1.0));
+        }
         Self::from_weighted_kinds(&entries)
     }
 
@@ -193,108 +221,22 @@ pub fn sample_light_li(
     us: Vec2,
 ) -> Option<LightLiSample> {
     match kind {
-        LightKind::Area => sample_area_light(scene, ctx, u_aux, us),
-        LightKind::Infinite => sample_infinite_light(scene, us),
+        LightKind::Area => area::sample_li(scene, ctx, u_aux, us),
+        LightKind::Infinite => environment::sample_li(scene, us),
+        LightKind::DeltaPoint(i) => point::sample_li(&scene.point_lights[i], ctx),
+        LightKind::DeltaDirectional(i) => directional::sample_li(&scene.directional_lights[i]),
+        LightKind::DeltaSpot(i) => spot::sample_li(&scene.spot_lights[i], ctx),
     }
-}
-
-fn sample_area_light(
-    scene: &Scene,
-    ctx: &LightSampleContext,
-    u_aux: f32,
-    us: Vec2,
-) -> Option<LightLiSample> {
-    let point = scene.sample_area_light_point(u_aux, us)?;
-    if point.pdf_area <= 0.0 {
-        return None;
-    }
-
-    let to_light = point.p - ctx.p;
-    let distance_squared = to_light.length_squared();
-    if distance_squared <= 0.0 {
-        return None;
-    }
-    let distance = distance_squared.sqrt();
-    let wi = to_light / distance;
-
-    let light_material = scene.instance_material(point.triangle.instance_index);
-    if !light_material.may_emit() {
-        return None;
-    }
-
-    let lvtx = scene.shading_vertex_from_triangle_sample(point.triangle, point.barycentric, wi);
-    let le = light_material.le(&lvtx)?;
-
-    let cos_light = lvtx.ng.dot(-wi).max(0.0);
-    if cos_light <= 0.0 {
-        return None;
-    }
-
-    let pdf_solid_angle = point.pdf_area * distance_squared / cos_light;
-
-    Some(LightLiSample {
-        radiance: le,
-        wi,
-        pdf: pdf_solid_angle,
-        distance,
-        light_type: LightType::Area,
-        target_triangle: Some(point.triangle),
-    })
-}
-
-fn sample_infinite_light(scene: &Scene, us: Vec2) -> Option<LightLiSample> {
-    let env = scene.environment_light.as_ref()?;
-    let sample = env.sample(us)?;
-    if sample.pdf <= 0.0 {
-        return None;
-    }
-
-    Some(LightLiSample {
-        radiance: sample.radiance,
-        wi: sample.direction,
-        pdf: sample.pdf,
-        distance: f32::INFINITY,
-        light_type: LightType::Infinite,
-        target_triangle: None,
-    })
-}
-
-pub fn area_light_pdf_li(scene: &Scene, vtx: &ShadingVertex, lvtx: &ShadingVertex) -> f32 {
-    scene.area_light_pdf_solid_angle(vtx, lvtx).unwrap_or(0.0)
-}
-
-pub fn infinite_light_pdf_li(scene: &Scene, direction: Vec3) -> f32 {
-    scene
-        .environment_light
-        .as_ref()
-        .map(|env| env.pdf(direction))
-        .unwrap_or(0.0)
-}
-
-pub fn infinite_light_le(scene: &Scene, direction: Vec3) -> Vec3 {
-    scene
-        .environment_light
-        .as_ref()
-        .map(|env| env.radiance(direction))
-        .unwrap_or(Vec3::ZERO)
 }
 
 #[cfg(test)]
-mod tests {
+mod test_helpers {
     use glam::{Vec2, Vec3};
 
-    use super::{
-        LightKind, LightSampleContext, LightSampler, LightType, infinite_light_le,
-        infinite_light_pdf_li, sample_light_li,
-    };
-    use crate::{
-        environment_light::EnvironmentLight,
-        material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
-        mesh::{Mesh, Vertex},
-        scene::Scene,
-    };
+    use super::EnvironmentLight;
+    use crate::mesh::{Mesh, Vertex};
 
-    fn unit_mesh(z: f32) -> Mesh {
+    pub fn unit_mesh(z: f32) -> Mesh {
         Mesh::new(
             vec![
                 Vertex {
@@ -317,10 +259,24 @@ mod tests {
         )
     }
 
-    fn uniform_environment(radiance: f32) -> EnvironmentLight {
+    pub fn uniform_environment(radiance: f32) -> EnvironmentLight {
         let pixels = vec![Vec3::splat(radiance); 32 * 16];
         EnvironmentLight::from_pixels(32, 16, pixels, 1.0)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f32::consts::PI;
+
+    use glam::Vec3;
+
+    use super::test_helpers::{uniform_environment, unit_mesh};
+    use super::{DirectionalLight, LightKind, LightSampler, LightType, PointLight, SpotLight};
+    use crate::{
+        material::{EmissiveMaterial, Material},
+        scene::Scene,
+    };
 
     #[test]
     fn light_type_delta_and_infinite_classification() {
@@ -344,6 +300,29 @@ mod tests {
     }
 
     #[test]
+    fn light_kind_classifies_delta_variants_correctly() {
+        assert_eq!(
+            LightKind::DeltaPoint(0).light_type(),
+            LightType::DeltaPosition
+        );
+        assert_eq!(
+            LightKind::DeltaSpot(2).light_type(),
+            LightType::DeltaPosition
+        );
+        assert_eq!(
+            LightKind::DeltaDirectional(1).light_type(),
+            LightType::DeltaDirection
+        );
+
+        assert!(LightKind::DeltaPoint(0).is_delta());
+        assert!(LightKind::DeltaSpot(0).is_delta());
+        assert!(LightKind::DeltaDirectional(0).is_delta());
+        assert!(!LightKind::DeltaPoint(0).is_infinite());
+        assert!(!LightKind::DeltaSpot(0).is_infinite());
+        assert!(LightKind::DeltaDirectional(0).is_infinite());
+    }
+
+    #[test]
     fn empty_sampler_returns_no_sample() {
         let sampler = LightSampler::new();
         assert!(sampler.is_empty());
@@ -353,8 +332,10 @@ mod tests {
 
     #[test]
     fn uniform_sampler_across_two_kinds_returns_equal_pmf() {
-        let sampler =
-            LightSampler::from_weighted_kinds(&[(LightKind::Area, 1.0), (LightKind::Infinite, 1.0)]);
+        let sampler = LightSampler::from_weighted_kinds(&[
+            (LightKind::Area, 1.0),
+            (LightKind::Infinite, 1.0),
+        ]);
 
         assert_eq!(sampler.len(), 2);
         assert!((sampler.pmf(LightKind::Area) - 0.5).abs() < 1.0e-6);
@@ -369,8 +350,10 @@ mod tests {
 
     #[test]
     fn weighted_sampler_biases_toward_heavy_kind() {
-        let sampler =
-            LightSampler::from_weighted_kinds(&[(LightKind::Area, 9.0), (LightKind::Infinite, 1.0)]);
+        let sampler = LightSampler::from_weighted_kinds(&[
+            (LightKind::Area, 9.0),
+            (LightKind::Infinite, 1.0),
+        ]);
         assert!((sampler.pmf(LightKind::Area) - 0.9).abs() < 1.0e-6);
         assert!((sampler.pmf(LightKind::Infinite) - 0.1).abs() < 1.0e-6);
     }
@@ -399,73 +382,44 @@ mod tests {
     }
 
     #[test]
-    fn sample_light_li_for_area_matches_solid_angle_pdf() {
+    fn build_from_scene_lists_each_delta_light_individually() {
         let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let light_mesh = scene.add_mesh(unit_mesh(1.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+        scene.add_point_light(PointLight::new(Vec3::X, Vec3::ONE, 1.0));
+        scene.add_point_light(PointLight::new(Vec3::Y, Vec3::ONE, 1.0));
+        scene.add_directional_light(DirectionalLight::new(Vec3::NEG_Z, Vec3::ONE, 1.0));
+        scene.add_spot_light(SpotLight::new(
+            Vec3::ZERO,
+            Vec3::NEG_Z,
+            Vec3::ONE,
+            1.0,
+            PI / 6.0,
+            PI / 8.0,
         ));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
-        scene.add_instance(floor_mesh, floor_material, glam::Mat4::IDENTITY);
-        scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
-        scene.build_bvh();
 
-        let ctx = LightSampleContext {
-            p: Vec3::new(0.25, 0.25, 0.0),
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-        };
-
-        let li = sample_light_li(
-            &scene,
-            LightKind::Area,
-            &ctx,
-            0.5,
-            Vec2::new(0.25, 0.5),
-        )
-        .expect("expected a sample");
-
-        assert_eq!(li.light_type, LightType::Area);
-        assert!(li.target_triangle.is_some());
-        assert!((li.pdf - 2.0).abs() < 1.0e-4);
-        assert!(li.radiance.abs_diff_eq(Vec3::splat(10.0), 1.0e-5));
-        assert!((li.distance - 1.0).abs() < 1.0e-5);
-        assert!(li.wi.abs_diff_eq(Vec3::Z, 1.0e-5));
+        let sampler = LightSampler::build_from_scene(&scene);
+        assert_eq!(sampler.len(), 4);
+        assert!(sampler.contains(LightKind::DeltaPoint(0)));
+        assert!(sampler.contains(LightKind::DeltaPoint(1)));
+        assert!(sampler.contains(LightKind::DeltaDirectional(0)));
+        assert!(sampler.contains(LightKind::DeltaSpot(0)));
+        assert!((sampler.pmf(LightKind::DeltaPoint(0)) - 0.25).abs() < 1.0e-5);
+        assert!((sampler.pmf(LightKind::DeltaDirectional(0)) - 0.25).abs() < 1.0e-5);
     }
 
     #[test]
-    fn sample_light_li_for_infinite_returns_environment_sample() {
+    fn build_from_scene_mixes_area_environment_and_delta_lights() {
         let mut scene = Scene::new();
         scene.set_environment_light(uniform_environment(1.0));
+        let light_mesh = scene.add_mesh(unit_mesh(1.0));
+        let light_material =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 1.0)));
+        scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
+        scene.add_point_light(PointLight::new(Vec3::Y, Vec3::splat(1.0), 2.0));
 
-        let ctx = LightSampleContext {
-            p: Vec3::ZERO,
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-        };
-
-        let li = sample_light_li(
-            &scene,
-            LightKind::Infinite,
-            &ctx,
-            0.0,
-            Vec2::new(0.3, 0.6),
-        )
-        .expect("expected a sample");
-
-        assert_eq!(li.light_type, LightType::Infinite);
-        assert!(li.target_triangle.is_none());
-        assert!(li.distance.is_infinite());
-        assert!((li.wi.length() - 1.0).abs() < 1.0e-5);
-        assert!(li.pdf > 0.0);
-    }
-
-    #[test]
-    fn infinite_light_helpers_report_zero_when_missing() {
-        let scene = Scene::new();
-        assert_eq!(infinite_light_le(&scene, Vec3::Z), Vec3::ZERO);
-        assert_eq!(infinite_light_pdf_li(&scene, Vec3::Z), 0.0);
+        let sampler = LightSampler::build_from_scene(&scene);
+        assert_eq!(sampler.len(), 3);
+        assert!(sampler.contains(LightKind::Area));
+        assert!(sampler.contains(LightKind::Infinite));
+        assert!(sampler.contains(LightKind::DeltaPoint(0)));
     }
 }

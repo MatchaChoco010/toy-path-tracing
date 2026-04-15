@@ -1,7 +1,6 @@
 pub mod bsdf;
 pub mod bvh;
 pub mod camera;
-pub mod environment_light;
 pub mod integrator;
 pub mod light;
 pub mod material;

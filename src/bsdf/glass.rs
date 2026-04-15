@@ -173,7 +173,9 @@ mod tests {
         let eta = 1.5;
         let bsdf = GlassBsdf::new(eta, color, false, true);
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
-        let sample = bsdf.sample(wo, 0.9).expect("expected a transmission sample");
+        let sample = bsdf
+            .sample(wo, 0.9)
+            .expect("expected a transmission sample");
         let expected_wi = refract(wo, 1.0 / eta).expect("expected refraction");
 
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));

@@ -3,7 +3,7 @@ use std::{error::Error, path::Path};
 
 use crate::{
     camera::PinholeCamera,
-    environment_light::EnvironmentLight,
+    light::EnvironmentLight,
     material::{ConductorGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial},
     mesh::load_mesh,
     scene::Scene,

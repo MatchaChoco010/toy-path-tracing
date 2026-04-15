@@ -1,9 +1,7 @@
 use glam::Vec3;
 use rand::RngExt;
 
-use crate::{
-    light::infinite_light_le, math::russian_roulette_probability, ray::Ray, scene::Scene,
-};
+use crate::{light::infinite_light_le, math::russian_roulette_probability, ray::Ray, scene::Scene};
 
 use super::spawn_ray;
 
@@ -61,7 +59,7 @@ mod tests {
 
     use super::super::test_helpers::mirror_to_light_scene;
     use super::trace_radiance;
-    use crate::{environment_light::EnvironmentLight, ray::Ray, scene::Scene};
+    use crate::{light::EnvironmentLight, ray::Ray, scene::Scene};
 
     #[test]
     fn trace_radiance_counts_light_after_delta_bounce() {
