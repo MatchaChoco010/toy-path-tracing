@@ -32,12 +32,19 @@ struct Args {
 
     #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
+
+    #[arg(long = "env-scale", default_value_t = 1.0)]
+    env_scale: f32,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let resolution = UVec2::new(args.width, args.height);
     let (mut scene, camera) = load_scene(args.scene)?;
+    if let Some(env) = scene.environment_light.as_mut() {
+        let new_scale = env.scale() * args.env_scale;
+        env.set_scale(new_scale);
+    }
     let build_bvh_start = Instant::now();
     scene.build_bvh();
     println!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));

@@ -89,6 +89,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `--spp <SPP>` | `32` | Samples Per Pixel。各ピクセルで何本のパスを積分するかを指定します。`1` 以上のみ指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上のみ指定できます。 |
 | `-i, --integrator <INTEGRATOR>` | `mis` | 使用する integrator を指定します。現在は `mis`、`pt`、`nee` を選べます。存在しない名前を指定するとエラーになります。 |
+| `--env-scale <ENV_SCALE>` | `1.0` | 環境光 (HDRI) の強度倍率です。シーンが環境光を持っている場合、ロード時の scale にこの値を乗算します。環境光が無いシーンでは効果はありません。 |
 | `-h, --help` | なし | ヘルプを表示します。 |
 
 ## 現在のシーン番号
@@ -105,6 +106,8 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 --depth 24 
 | `5` | Cornell box 風の部屋に、roughness `0.3` の銀色 Conductor GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
 | `6` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6` にした透明な Dielectric GGX ガラス球を 5 つ、少しだけ宙に浮かせて並べ、地面への影と集光模様が見えるようにした確認用シーンです。 |
 | `7` | Cornell box 風の部屋に、roughness `0.3` の薄水色 Dielectric GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
+| `8` | 広い Lambert 床の上に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` にした Conductor GGX 金属球を 6 つ並べ、その上段に同じ roughness 列の Dielectric GGX ガラス球を 6 つ並べ、`assets/sky/` の HDRI を IBL として読み込む屋外風シーンです。 |
+| `9` | Cornell box の中央に大きめのラフな金色 Conductor GGX (`roughness = 0.35`) のバニーを置き、天井のエリアライトと `assets/sky/` の HDRI を IBL として併用する確認用シーンです。カメラはボックスの外からやや引いた位置にあり、ボックス外周の Sky も写り込みます。 |
 
 補足:
 `load_scene()` の現在の実装では、`1` を指定すると `scene_1`、`2` を指定すると `scene_2`、`3` を指定すると `scene_3`、`4` を指定すると `scene_4`、`5` を指定すると `scene_5`、`6` を指定すると `scene_6`、`7` を指定すると `scene_7` を読み込み、それ以外はすべて `scene_0` を読み込みます。
