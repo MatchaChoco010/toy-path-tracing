@@ -64,6 +64,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `7` | Cornell box 風の部屋に、roughness `0.3` の薄水色 Dielectric GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
 | `8` | 広い Lambert 床の上に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` にした Conductor GGX 金属球を 6 つ並べ、その上段に同じ roughness 列の Dielectric GGX ガラス球を 6 つ並べ、`assets/sky/` の HDRI を IBL として読み込む屋外風シーンです。 |
 | `9` | Cornell box の中央に大きめのラフな金色 Conductor GGX (`roughness = 0.35`) のバニーを置き、天井のエリアライトと `assets/sky/` の HDRI を IBL として併用する確認用シーンです。カメラはボックスの外からやや引いた位置にあり、ボックス外周の Sky も写り込みます。 |
+| `10` | White furnace test 用シーン。`1.0` の一様な白い環境光のもと、上段に roughness を `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` と並べた Dielectric GGX ガラス球、下段に同じ roughness 列の銀色 Conductor GGX 金属球を 6 個ずつ配置し、エネルギー保存をチェックします。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 
