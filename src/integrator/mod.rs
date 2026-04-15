@@ -2,7 +2,12 @@ use clap::ValueEnum;
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use crate::{ray::Ray, scene::Scene};
+use crate::{
+    light::LightLiSample,
+    material::ShadingVertex,
+    ray::Ray,
+    scene::{Scene, TriangleRef},
+};
 
 pub mod mis;
 pub mod nee;
@@ -32,6 +37,7 @@ impl IntegratorKind {
 }
 
 const RAY_EPSILON: f32 = 1.0e-4;
+const SHADOW_TOLERANCE: f32 = 1.0e-3;
 
 pub(super) fn spawn_ray(origin: Vec3, geometric_normal: Vec3, direction: Vec3) -> Ray {
     let normal_offset = if direction.dot(geometric_normal) >= 0.0 {
@@ -41,6 +47,40 @@ pub(super) fn spawn_ray(origin: Vec3, geometric_normal: Vec3, direction: Vec3) -
     };
 
     Ray::new(origin + RAY_EPSILON * normal_offset, direction)
+}
+
+pub(super) fn unoccluded(
+    scene: &Scene,
+    vtx: &ShadingVertex,
+    li: &LightLiSample,
+) -> bool {
+    unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle)
+}
+
+pub(super) fn unoccluded_ray(
+    scene: &Scene,
+    vtx: &ShadingVertex,
+    wi: Vec3,
+    distance: f32,
+    target_triangle: Option<TriangleRef>,
+) -> bool {
+    let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
+    let hit = scene
+        .closest_hit(&shadow_ray)
+        .expect("scene.build_bvh() must be called before traversal");
+
+    match hit {
+        None => true,
+        Some(hit) => {
+            if let Some(target) = target_triangle {
+                hit.triangle == target
+            } else if distance.is_infinite() {
+                false
+            } else {
+                hit.t >= distance * (1.0 - SHADOW_TOLERANCE)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
