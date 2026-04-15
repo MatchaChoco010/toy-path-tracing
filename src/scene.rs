@@ -3,6 +3,8 @@ use std::fmt;
 
 use crate::{
     bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
+    environment_light::EnvironmentLight,
+    light::LightSampler,
     material::{Material, ShadingVertex},
     math::{
         OrthonormalBasis, compute_surface_partials, face_forward, interpolate_vec2,
@@ -78,6 +80,8 @@ pub struct Scene {
     pub area_light_triangles: Vec<AreaLightTriangle>,
     pub area_light_weight_sum: f32,
     pub bvh: Option<SceneBvh>,
+    pub environment_light: Option<EnvironmentLight>,
+    pub light_sampler: LightSampler,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,9 +151,28 @@ impl Scene {
                 triangle_index,
             }));
         self.register_area_light_triangles(instance_index);
+        self.rebuild_light_sampler();
         self.bvh = None;
 
         instance_index
+    }
+
+    pub fn set_environment_light(&mut self, light: EnvironmentLight) {
+        self.environment_light = Some(light);
+        self.rebuild_light_sampler();
+    }
+
+    pub fn clear_environment_light(&mut self) {
+        self.environment_light = None;
+        self.rebuild_light_sampler();
+    }
+
+    pub fn environment_light(&self) -> Option<&EnvironmentLight> {
+        self.environment_light.as_ref()
+    }
+
+    pub fn rebuild_light_sampler(&mut self) {
+        self.light_sampler = LightSampler::build_from_scene(self);
     }
 
     pub fn build_bvh(&mut self) {
@@ -166,6 +189,9 @@ impl Scene {
     }
 
     pub fn closest_hit(&self, ray: &Ray) -> Result<Option<SceneHit>, ClosestHitError> {
+        if self.instances.is_empty() {
+            return Ok(None);
+        }
         let bvh = self.bvh.as_ref().ok_or(ClosestHitError::BvhNotBuilt)?;
         let mut closest_world_t = f32::INFINITY;
         let mut closest_hit = None;

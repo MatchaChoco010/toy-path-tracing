@@ -1,7 +1,9 @@
 use glam::Vec3;
 use rand::RngExt;
 
-use crate::{math::russian_roulette_probability, ray::Ray, scene::Scene};
+use crate::{
+    light::infinite_light_le, math::russian_roulette_probability, ray::Ray, scene::Scene,
+};
 
 use super::spawn_ray;
 
@@ -17,10 +19,12 @@ pub fn trace_radiance(
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
-        let Some(hit) = scene
+        let hit = scene
             .closest_hit(&ray)
-            .expect("scene.build_bvh() must be called before traversal")
-        else {
+            .expect("scene.build_bvh() must be called before traversal");
+
+        let Some(hit) = hit else {
+            radiance += throughput * infinite_light_le(scene, ray.direction);
             break;
         };
 
@@ -53,8 +57,11 @@ pub fn trace_radiance(
 
 #[cfg(test)]
 mod tests {
+    use glam::Vec3;
+
     use super::super::test_helpers::mirror_to_light_scene;
     use super::trace_radiance;
+    use crate::{environment_light::EnvironmentLight, ray::Ray, scene::Scene};
 
     #[test]
     fn trace_radiance_counts_light_after_delta_bounce() {
@@ -64,5 +71,20 @@ mod tests {
         let radiance = trace_radiance(&scene, ray, &mut rng, 2);
 
         assert!(radiance.abs_diff_eq(expected, 1.0e-5));
+    }
+
+    #[test]
+    fn trace_radiance_returns_environment_light_on_direct_escape() {
+        let mut scene = Scene::new();
+        let env_radiance = Vec3::new(0.2, 0.4, 0.8);
+        let pixels = vec![env_radiance; 16 * 8];
+        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0));
+        scene.build_bvh();
+
+        let mut rng = rand::rng();
+        let ray = Ray::new(Vec3::ZERO, Vec3::Y);
+        let radiance = trace_radiance(&scene, ray, &mut rng, 4);
+
+        assert!(radiance.abs_diff_eq(env_radiance, 1.0e-5));
     }
 }

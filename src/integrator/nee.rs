@@ -3,13 +3,14 @@ use rand::RngExt;
 
 use crate::{
     bsdf::BsdfFlags,
+    light::{LightSampleContext, infinite_light_le, sample_light_li},
     material::{Material, ShadingVertex},
     math::russian_roulette_probability,
     ray::Ray,
     scene::Scene,
 };
 
-use super::spawn_ray;
+use super::{spawn_ray, unoccluded};
 
 pub fn trace_radiance(
     scene: &Scene,
@@ -17,21 +18,27 @@ pub fn trace_radiance(
     rng: &mut rand::rngs::ThreadRng,
     max_depth: u32,
 ) -> Vec3 {
-    let Some(initial_hit) = scene
-        .closest_hit(&initial_ray)
-        .expect("scene.build_bvh() must be called before traversal")
-    else {
-        return Vec3::ZERO;
-    };
-
     let mut radiance = Vec3::ZERO;
     let mut throughput = Vec3::ONE;
-    let mut vtx = scene.shading_vertex(initial_hit, initial_ray.direction);
-    let mut material = scene.instance_material(initial_hit.triangle.instance_index);
+    let mut ray = initial_ray;
     let mut count_emission_at_hit = true;
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
+        let hit = scene
+            .closest_hit(&ray)
+            .expect("scene.build_bvh() must be called before traversal");
+
+        let Some(hit) = hit else {
+            if count_emission_at_hit {
+                radiance += throughput * infinite_light_le(scene, ray.direction);
+            }
+            break;
+        };
+
+        let vtx = scene.shading_vertex(hit, ray.direction);
+        let material = scene.instance_material(hit.triangle.instance_index);
+
         if count_emission_at_hit {
             if let Some(le) = material.le(&vtx) {
                 radiance += throughput * le;
@@ -44,10 +51,11 @@ pub fn trace_radiance(
         let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
 
         if should_sample_direct_light(material, sample.flags) {
-            let u_triangle = rng.random::<f32>();
+            let u_light_select = rng.random::<f32>();
+            let u_aux = rng.random::<f32>();
             let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
             radiance += throughput
-                * sample_direct_area_light_radiance(scene, material, &vtx, u_triangle, us);
+                * direct_light_nee_contribution(scene, material, &vtx, u_light_select, u_aux, us);
         }
 
         throughput *= sample.weight;
@@ -60,94 +68,58 @@ pub fn trace_radiance(
             throughput /= survive_probability;
         }
 
-        let next_ray = spawn_ray(vtx.p, vtx.ng, sample.wi);
-        let Some(light_hit) = scene
-            .closest_hit(&next_ray)
-            .expect("scene.build_bvh() must be called before traversal")
-        else {
-            break;
-        };
-
-        vtx = scene.shading_vertex(light_hit, next_ray.direction);
-        material = scene.instance_material(light_hit.triangle.instance_index);
+        ray = spawn_ray(vtx.p, vtx.ng, sample.wi);
         count_emission_at_hit = is_delta_sample;
     }
 
     radiance
 }
 
-fn should_sample_direct_light(material: &Material, sample_flags: BsdfFlags) -> bool {
+pub(super) fn should_sample_direct_light(material: &Material, sample_flags: BsdfFlags) -> bool {
     !material.may_emit() && !sample_flags.contains(BsdfFlags::DELTA)
 }
 
-fn sample_direct_area_light_radiance(
+pub(super) fn direct_light_nee_contribution(
     scene: &Scene,
     material: &Material,
     vtx: &ShadingVertex,
-    u_triangle: f32,
+    u_light_select: f32,
+    u_aux: f32,
     us: Vec2,
 ) -> Vec3 {
-    let Some(light_sample) = scene.sample_area_light_point(u_triangle, us) else {
+    let Some(sampled_light) = scene.light_sampler.sample(u_light_select) else {
         return Vec3::ZERO;
     };
 
-    if light_sample.pdf_area <= 0.0 {
+    let ctx = LightSampleContext::from_vertex(vtx);
+    let Some(li) = sample_light_li(scene, sampled_light.kind, &ctx, u_aux, us) else {
+        return Vec3::ZERO;
+    };
+
+    if li.pdf <= 0.0 {
         return Vec3::ZERO;
     }
 
-    let to_light = light_sample.p - vtx.p;
-    let distance_squared = to_light.length_squared();
-    if distance_squared <= 0.0 {
-        return Vec3::ZERO;
-    }
-
-    let distance = distance_squared.sqrt();
-    // We need the actual distance for the geometry term anyway, so build the
-    // unit direction from the same scalar instead of normalizing separately.
-    let wi = to_light / distance;
-    let f = material.eval(vtx, wi);
+    let f = material.eval(vtx, li.wi);
     if f.length_squared() == 0.0 {
         return Vec3::ZERO;
     }
 
-    let cos_surface = vtx.ns.dot(wi).max(0.0);
+    let cos_surface = vtx.ns.dot(li.wi).max(0.0);
     if cos_surface <= 0.0 {
         return Vec3::ZERO;
     }
 
-    let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
-    let Some(shadow_hit) = scene
-        .closest_hit(&shadow_ray)
-        .expect("scene.build_bvh() must be called before traversal")
-    else {
-        return Vec3::ZERO;
-    };
-
-    if shadow_hit.triangle != light_sample.triangle {
+    if !unoccluded(scene, vtx, &li) {
         return Vec3::ZERO;
     }
 
-    let lvtx = scene.shading_vertex_from_triangle_sample(
-        light_sample.triangle,
-        light_sample.barycentric,
-        shadow_ray.direction,
-    );
-    let light_material = scene.instance_material(light_sample.triangle.instance_index);
-    if !light_material.may_emit() {
+    let pdf_total = sampled_light.pmf * li.pdf;
+    if pdf_total <= 0.0 {
         return Vec3::ZERO;
     }
 
-    let Some(le) = light_material.le(&lvtx) else {
-        return Vec3::ZERO;
-    };
-
-    let cos_light = lvtx.ng.dot(-wi).max(0.0);
-    if cos_light <= 0.0 {
-        return Vec3::ZERO;
-    }
-
-    let geometry = (cos_surface * cos_light) / distance_squared;
-    le * f * (geometry / light_sample.pdf_area)
+    li.radiance * f * (cos_surface / pdf_total)
 }
 
 #[cfg(test)]
@@ -157,11 +129,13 @@ mod tests {
     use glam::{Mat4, Vec2, Vec3};
 
     use super::super::test_helpers::mirror_to_light_scene;
-    use super::{sample_direct_area_light_radiance, should_sample_direct_light, trace_radiance};
+    use super::{direct_light_nee_contribution, should_sample_direct_light, trace_radiance};
     use crate::{
         bsdf::BsdfFlags,
+        environment_light::EnvironmentLight,
         material::{EmissiveMaterial, Material, MirrorMaterial, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
+        ray::Ray,
         scene::{InstanceIndex, Scene, TriangleRef},
     };
 
@@ -236,8 +210,10 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
+        // With only a single area light the sampler always selects it (pmf=1),
+        // so the estimator reduces to the classic direct-light formula.
         let radiance =
-            sample_direct_area_light_radiance(&scene, material, &vtx, 0.5, Vec2::new(0.25, 0.5));
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5));
 
         assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-5));
     }
@@ -268,8 +244,60 @@ mod tests {
         );
         let material = scene.instance_material(InstanceIndex(0));
         let radiance =
-            sample_direct_area_light_radiance(&scene, material, &vtx, 0.5, Vec2::new(0.25, 0.5));
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5));
 
         assert_eq!(radiance, Vec3::ZERO);
+    }
+
+    #[test]
+    fn direct_radiance_includes_environment_light_contribution() {
+        let mut scene = Scene::new();
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let floor_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+        ));
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        let env_radiance = Vec3::splat(2.0);
+        let pixels = vec![env_radiance; 16 * 8];
+        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0));
+        scene.build_bvh();
+
+        let vtx = scene.shading_vertex_from_triangle_sample(
+            triangle_ref(0),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::NEG_Z,
+        );
+        let material = scene.instance_material(InstanceIndex(0));
+        // Infinite light is the only light, so sampler pmf is 1. Pick a u that
+        // selects a direction roughly aligned with the surface normal so the
+        // cos_theta factor is positive (env uses +Y up, surface normal is +Z
+        // via spherical sampling the direction with u=0 and v=0.5 maps to +Z).
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.5,
+            0.0,
+            Vec2::new(0.0, 0.5),
+        );
+
+        assert!(radiance.x > 0.0);
+        assert!(radiance.y > 0.0);
+        assert!(radiance.z > 0.0);
+    }
+
+    #[test]
+    fn trace_radiance_sees_environment_on_direct_escape() {
+        let mut scene = Scene::new();
+        let env_radiance = Vec3::new(0.5, 0.25, 0.75);
+        let pixels = vec![env_radiance; 16 * 8];
+        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0));
+        scene.build_bvh();
+
+        let mut rng = rand::rng();
+        let ray = Ray::new(Vec3::ZERO, Vec3::Y);
+        let radiance = trace_radiance(&scene, ray, &mut rng, 2);
+
+        assert!(radiance.abs_diff_eq(env_radiance, 1.0e-5));
     }
 }
