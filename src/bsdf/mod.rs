@@ -31,6 +31,7 @@ pub struct BsdfSample {
     pub wi: Vec3,
     pub pdf: f32,
     pub flags: BsdfFlags,
+    pub eta: f32,
 }
 
 #[cfg(test)]

@@ -9,8 +9,8 @@ use crate::{
     },
     material::{Material, ShadingVertex},
     math::{
-        OrthonormalBasis, compute_surface_partials, face_forward, interpolate_vec2,
-        interpolate_vec3,
+        OrthonormalBasis, compute_surface_partials, difference_of_products, face_forward,
+        interpolate_vec2, interpolate_vec3,
     },
     mesh::{Bounds, Mesh},
     ray::{Ray, intersect_triangle},
@@ -337,6 +337,21 @@ impl Scene {
         barycentric: Vec3,
         incident_direction: Vec3,
     ) -> ShadingVertex {
+        self.shading_vertex_from_triangle_sample_impl(
+            triangle,
+            barycentric,
+            incident_direction,
+            None,
+        )
+    }
+
+    fn shading_vertex_from_triangle_sample_impl(
+        &self,
+        triangle: TriangleRef,
+        barycentric: Vec3,
+        incident_direction: Vec3,
+        ray: Option<&Ray>,
+    ) -> ShadingVertex {
         let [p0, p1, p2] = self.triangle_positions(triangle);
         let [n0, n1, n2] = self.triangle_normals(triangle);
         let [uv0, uv1, uv2] = self.triangle_uvs(triangle);
@@ -346,14 +361,18 @@ impl Scene {
         let shading_normal = interpolate_vec3(barycentric, n0, n1, n2).normalize_or_zero();
         let front_face = geometric_normal.dot(-incident_direction) >= 0.0;
         let ng = face_forward(geometric_normal, -incident_direction);
-        let ns = face_forward(
-            if shading_normal.length_squared() > 0.0 {
-                shading_normal
-            } else {
-                ng
-            },
-            ng,
-        );
+        let raw_ns = if shading_normal.length_squared() > 0.0 {
+            shading_normal
+        } else {
+            ng
+        };
+        let ns = face_forward(raw_ns, ng);
+        let (mut dndu, mut dndv) = compute_surface_partials([n0, n1, n2], [uv0, uv1, uv2])
+            .unwrap_or((Vec3::ZERO, Vec3::ZERO));
+        if ns.dot(raw_ns) < 0.0 {
+            dndu = -dndu;
+            dndv = -dndv;
+        }
         let (mut dpdu, mut dpdv) = compute_surface_partials([p0, p1, p2], [uv0, uv1, uv2])
             .unwrap_or_else(|| {
                 let frame = OrthonormalBasis::from_normal(ns);
@@ -367,23 +386,37 @@ impl Scene {
         if dpdv.length_squared() == 0.0 {
             dpdv = frame.bitangent();
         }
+        let differentials = compute_shading_differentials(p, ng, dpdu, dpdv, ray);
 
         ShadingVertex {
             triangle,
             p,
             uv,
+            dudx: differentials.dudx,
+            dvdx: differentials.dvdx,
+            dudy: differentials.dudy,
+            dvdy: differentials.dvdy,
             ng,
             ns,
             wo: (-incident_direction).normalize_or_zero(),
             dpdu,
             dpdv,
+            dpdx: differentials.dpdx,
+            dpdy: differentials.dpdy,
+            dndu,
+            dndv,
             frame,
             front_face,
         }
     }
 
-    pub fn shading_vertex(&self, hit: SceneHit, incident_direction: Vec3) -> ShadingVertex {
-        self.shading_vertex_from_triangle_sample(hit.triangle, hit.barycentric, incident_direction)
+    pub fn shading_vertex(&self, hit: SceneHit, ray: &Ray) -> ShadingVertex {
+        self.shading_vertex_from_triangle_sample_impl(
+            hit.triangle,
+            hit.barycentric,
+            ray.direction,
+            Some(ray),
+        )
     }
 
     pub fn area_light_triangle_probability(&self, triangle: TriangleRef) -> Option<f32> {
@@ -601,6 +634,150 @@ fn closest_mesh_hit(mesh: &Mesh, ray: &Ray, t_max: f32) -> Option<MeshHit> {
     closest_hit
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ShadingDifferentials {
+    dpdx: Vec3,
+    dpdy: Vec3,
+    dudx: f32,
+    dvdx: f32,
+    dudy: f32,
+    dvdy: f32,
+}
+
+impl ShadingDifferentials {
+    fn zero() -> Self {
+        Self {
+            dpdx: Vec3::ZERO,
+            dpdy: Vec3::ZERO,
+            dudx: 0.0,
+            dvdx: 0.0,
+            dudy: 0.0,
+            dvdy: 0.0,
+        }
+    }
+}
+
+fn compute_shading_differentials(
+    p: Vec3,
+    n: Vec3,
+    dpdu: Vec3,
+    dpdv: Vec3,
+    ray: Option<&Ray>,
+) -> ShadingDifferentials {
+    let Some(ray) = ray else {
+        return ShadingDifferentials::zero();
+    };
+
+    if let Some(differential) = ray.differential {
+        let plane_d = -n.dot(p);
+        let rx_denominator = n.dot(differential.rx_direction);
+        let ry_denominator = n.dot(differential.ry_direction);
+
+        if rx_denominator.abs() > 1.0e-8 && ry_denominator.abs() > 1.0e-8 {
+            let tx = (-n.dot(differential.rx_origin) - plane_d) / rx_denominator;
+            let ty = (-n.dot(differential.ry_origin) - plane_d) / ry_denominator;
+            let px = differential.rx_origin + tx * differential.rx_direction;
+            let py = differential.ry_origin + ty * differential.ry_direction;
+            let dpdx = px - p;
+            let dpdy = py - p;
+
+            if tx.is_finite()
+                && ty.is_finite()
+                && dpdx.is_finite()
+                && dpdy.is_finite()
+                && let Some(differentials) = differentials_from_dp(dpdu, dpdv, dpdx, dpdy)
+            {
+                return differentials;
+            }
+        }
+    }
+
+    cone_shading_differentials(p, n, dpdu, dpdv, ray).unwrap_or_else(ShadingDifferentials::zero)
+}
+
+fn differentials_from_dp(
+    dpdu: Vec3,
+    dpdv: Vec3,
+    dpdx: Vec3,
+    dpdy: Vec3,
+) -> Option<ShadingDifferentials> {
+    let ata00 = dpdu.dot(dpdu);
+    let ata01 = dpdu.dot(dpdv);
+    let ata11 = dpdv.dot(dpdv);
+    let determinant = difference_of_products(ata00, ata11, ata01, ata01);
+
+    if determinant.abs() <= 1.0e-12 || !determinant.is_finite() {
+        return None;
+    }
+
+    let inv_det = 1.0 / determinant;
+    let atb0x = dpdu.dot(dpdx);
+    let atb1x = dpdv.dot(dpdx);
+    let atb0y = dpdu.dot(dpdy);
+    let atb1y = dpdv.dot(dpdy);
+    let dudx = difference_of_products(ata11, atb0x, ata01, atb1x) * inv_det;
+    let dvdx = difference_of_products(ata00, atb1x, ata01, atb0x) * inv_det;
+    let dudy = difference_of_products(ata11, atb0y, ata01, atb1y) * inv_det;
+    let dvdy = difference_of_products(ata00, atb1y, ata01, atb0y) * inv_det;
+
+    Some(ShadingDifferentials {
+        dpdx,
+        dpdy,
+        dudx: finite_clamped_derivative(dudx),
+        dvdx: finite_clamped_derivative(dvdx),
+        dudy: finite_clamped_derivative(dudy),
+        dvdy: finite_clamped_derivative(dvdy),
+    })
+}
+
+fn cone_shading_differentials(
+    p: Vec3,
+    n: Vec3,
+    dpdu: Vec3,
+    dpdv: Vec3,
+    ray: &Ray,
+) -> Option<ShadingDifferentials> {
+    let ray_t = ray_parameter_to_point(ray, p)?;
+    let width = ray.cone.width_at(ray_t);
+    if width <= 0.0 {
+        return None;
+    }
+
+    let cos_theta = ray.direction.normalize_or_zero().dot(n).abs().max(1.0e-3);
+    let projected_width = width / cos_theta;
+    let dudx = projected_width / dpdu.length().max(1.0e-6);
+    let dvdy = projected_width / dpdv.length().max(1.0e-6);
+    let dpdx = dpdu * dudx;
+    let dpdy = dpdv * dvdy;
+
+    Some(ShadingDifferentials {
+        dpdx,
+        dpdy,
+        dudx,
+        dvdx: 0.0,
+        dudy: 0.0,
+        dvdy,
+    })
+}
+
+fn ray_parameter_to_point(ray: &Ray, p: Vec3) -> Option<f32> {
+    let direction_length_squared = ray.direction.length_squared();
+    if direction_length_squared <= 0.0 {
+        return None;
+    }
+
+    let t = (p - ray.origin).dot(ray.direction) / direction_length_squared;
+    t.is_finite().then_some(t)
+}
+
+fn finite_clamped_derivative(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(-1.0e8, 1.0e8)
+    } else {
+        0.0
+    }
+}
+
 fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
     let mut corners = [
         Vec3::new(bounds.min.x, bounds.min.y, bounds.min.z),
@@ -637,7 +814,7 @@ mod tests {
     use crate::{
         material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
-        ray::Ray,
+        ray::{Ray, RayCone, RayDifferential},
     };
 
     fn unit_mesh(z: f32) -> Mesh {
@@ -903,7 +1080,8 @@ mod tests {
             barycentric: Vec3::new(0.5, 0.25, 0.25),
         };
 
-        let shading_vertex = scene.shading_vertex(hit, Vec3::NEG_Z);
+        let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
+        let shading_vertex = scene.shading_vertex(hit, &ray);
 
         assert!(
             shading_vertex
@@ -925,6 +1103,71 @@ mod tests {
         assert!(shading_vertex.front_face);
         assert!(shading_vertex.dpdu.length_squared() > 0.0);
         assert!(shading_vertex.dpdv.length_squared() > 0.0);
+    }
+
+    #[test]
+    fn shading_vertex_computes_uv_differentials_from_ray_differential() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        let hit = SceneHit {
+            triangle: TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            t: 1.0,
+            barycentric: Vec3::new(0.5, 0.25, 0.25),
+        };
+        let ray =
+            Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z).with_differential(RayDifferential {
+                rx_origin: Vec3::new(0.35, 0.25, 1.0),
+                ry_origin: Vec3::new(0.25, 0.45, 1.0),
+                rx_direction: Vec3::NEG_Z,
+                ry_direction: Vec3::NEG_Z,
+            });
+
+        let shading_vertex = scene.shading_vertex(hit, &ray);
+
+        assert!(
+            shading_vertex
+                .dpdx
+                .abs_diff_eq(Vec3::new(0.1, 0.0, 0.0), 1.0e-6)
+        );
+        assert!(
+            shading_vertex
+                .dpdy
+                .abs_diff_eq(Vec3::new(0.0, 0.2, 0.0), 1.0e-6)
+        );
+        assert!((shading_vertex.dudx - 0.1).abs() < 1.0e-6);
+        assert_eq!(shading_vertex.dvdx, 0.0);
+        assert_eq!(shading_vertex.dudy, 0.0);
+        assert!((shading_vertex.dvdy - 0.2).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn shading_vertex_falls_back_to_ray_cone_without_differentials() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let material_index = default_material(&mut scene);
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        let hit = SceneHit {
+            triangle: TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            t: 1.0,
+            barycentric: Vec3::new(0.5, 0.25, 0.25),
+        };
+        let ray =
+            Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z).with_cone(RayCone::new(0.1, 0.0));
+
+        let shading_vertex = scene.shading_vertex(hit, &ray);
+
+        assert!((shading_vertex.dudx - 0.1).abs() < 1.0e-6);
+        assert_eq!(shading_vertex.dvdx, 0.0);
+        assert_eq!(shading_vertex.dudy, 0.0);
+        assert!((shading_vertex.dvdy - 0.1).abs() < 1.0e-6);
     }
 
     #[test]

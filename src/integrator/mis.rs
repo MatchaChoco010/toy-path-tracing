@@ -13,7 +13,7 @@ use crate::{
     scene::Scene,
 };
 
-use super::{spawn_ray, unoccluded};
+use super::{spawn_scattered_ray, unoccluded};
 
 pub fn trace_radiance(
     scene: &Scene,
@@ -32,7 +32,9 @@ pub fn trace_radiance(
         return infinite_light_le(scene, initial_ray.direction);
     };
 
-    let mut vtx = scene.shading_vertex(initial_hit, initial_ray.direction);
+    let mut ray = initial_ray;
+    let mut hit_t = initial_hit.t;
+    let mut vtx = scene.shading_vertex(initial_hit, &ray);
     let mut material = scene.instance_material(initial_hit.triangle.instance_index);
 
     if let Some(le) = material.le(&vtx) {
@@ -65,14 +67,14 @@ pub fn trace_radiance(
             throughput /= survive_probability;
         }
 
-        let next_ray = spawn_ray(vtx.p, vtx.ng, sample.wi);
+        let next_ray = spawn_scattered_ray(&ray, hit_t, &vtx, &sample);
         let next_hit = scene
             .closest_hit(&next_ray)
             .expect("scene.build_bvh() must be called before traversal");
 
         match next_hit {
             Some(next_hit) => {
-                let next_vtx = scene.shading_vertex(next_hit, next_ray.direction);
+                let next_vtx = scene.shading_vertex(next_hit, &next_ray);
                 let next_material = scene.instance_material(next_hit.triangle.instance_index);
                 radiance += emitted_radiance_from_bsdf_sample_area(
                     scene,
@@ -86,6 +88,8 @@ pub fn trace_radiance(
 
                 vtx = next_vtx;
                 material = next_material;
+                ray = next_ray;
+                hit_t = next_hit.t;
             }
             None => {
                 radiance += emitted_radiance_from_bsdf_sample_infinite(

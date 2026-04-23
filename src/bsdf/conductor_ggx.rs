@@ -113,6 +113,7 @@ impl ConductorGgxBsdf {
             wi,
             pdf,
             flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
+            eta: 1.0,
         })
     }
 
@@ -129,6 +130,7 @@ impl ConductorGgxBsdf {
             wi,
             pdf: 1.0,
             flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
+            eta: 1.0,
         })
     }
 

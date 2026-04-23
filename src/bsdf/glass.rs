@@ -81,6 +81,7 @@ impl GlassBsdf {
             wi,
             pdf,
             flags,
+            eta: 1.0,
         })
     }
 
@@ -107,6 +108,7 @@ impl GlassBsdf {
                 wi: reflected_direction(wo),
                 pdf: reflection_probability,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
+                eta: 1.0,
             });
         }
 
@@ -118,6 +120,7 @@ impl GlassBsdf {
             wi,
             pdf: transmission_probability,
             flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
+            eta,
         })
     }
 }

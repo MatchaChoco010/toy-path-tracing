@@ -250,6 +250,7 @@ impl DielectricGgxBsdf {
             wi,
             pdf,
             flags,
+            eta: 1.0,
         })
     }
 
@@ -271,6 +272,7 @@ impl DielectricGgxBsdf {
                 wi: reflected_direction(wo),
                 pdf: pr,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
+                eta: 1.0,
             });
         }
 
@@ -282,6 +284,7 @@ impl DielectricGgxBsdf {
             wi,
             pdf: pt,
             flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
+            eta: eta_rel,
         })
     }
 
@@ -321,6 +324,7 @@ impl DielectricGgxBsdf {
                 wi,
                 pdf,
                 flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
+                eta: 1.0,
             })
         } else {
             // Transmission branch.
@@ -349,6 +353,7 @@ impl DielectricGgxBsdf {
                 wi,
                 pdf,
                 flags: BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
+                eta: eta_rel,
             })
         }
     }

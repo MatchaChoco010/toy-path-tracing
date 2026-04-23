@@ -9,6 +9,8 @@ use super::{
     MaterialSample, ShadingVertex, Texture, TextureColorSpace, texture::load_optional_texture,
 };
 
+const DIFFUSE_CONE_SPREAD: f32 = 0.5;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedLambertMaterial {
     pub rho: Vec3,
@@ -52,6 +54,8 @@ impl NormalizedLambertMaterial {
             wi,
             pdf: sample.pdf,
             flags: sample.flags,
+            eta: sample.eta,
+            cone_spread: DIFFUSE_CONE_SPREAD,
         })
     }
 
@@ -92,7 +96,13 @@ impl NormalizedLambertMaterial {
             * self
                 .rho_texture
                 .as_ref()
-                .map(|texture| texture.sample_rgb(shading_vertex.uv))
+                .map(|texture| {
+                    texture.sample_rgb_filtered(
+                        shading_vertex.uv,
+                        shading_vertex.uv_dx(),
+                        shading_vertex.uv_dy(),
+                    )
+                })
                 .unwrap_or(Vec3::ONE)
     }
 }
@@ -117,11 +127,19 @@ mod tests {
             },
             p: Vec3::ZERO,
             uv,
+            dudx: 0.0,
+            dvdx: 0.0,
+            dudy: 0.0,
+            dvdy: 0.0,
             ng: Vec3::Z,
             ns: Vec3::Z,
             wo: Vec3::Z,
             dpdu: Vec3::X,
             dpdv: Vec3::Y,
+            dpdx: Vec3::ZERO,
+            dpdy: Vec3::ZERO,
+            dndu: Vec3::ZERO,
+            dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
         }

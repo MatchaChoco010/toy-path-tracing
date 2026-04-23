@@ -61,7 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             for sample_index in 0..args.spp {
                 let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-                let ray = camera.generate_ray(resolution, UVec2::new(x, y), us);
+                let ray =
+                    camera.generate_ray_differential(resolution, UVec2::new(x, y), us, args.spp);
                 let sample = args.integrator.trace_radiance(&scene, ray, rng, args.depth);
                 let sample_count = (sample_index + 1) as f32;
                 color += (sample - color) / sample_count;

@@ -6,11 +6,42 @@ use crate::math::{difference_of_products, gamma, max_component_index, permute_ve
 pub struct Ray {
     pub origin: Vec3,
     pub direction: Vec3,
+    pub differential: Option<RayDifferential>,
+    pub cone: RayCone,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayDifferential {
+    pub rx_origin: Vec3,
+    pub ry_origin: Vec3,
+    pub rx_direction: Vec3,
+    pub ry_direction: Vec3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RayCone {
+    pub width: f32,
+    pub spread_angle: f32,
 }
 
 impl Ray {
     pub fn new(origin: Vec3, direction: Vec3) -> Self {
-        Self { origin, direction }
+        Self {
+            origin,
+            direction,
+            differential: None,
+            cone: RayCone::default(),
+        }
+    }
+
+    pub fn with_differential(mut self, differential: RayDifferential) -> Self {
+        self.differential = Some(differential);
+        self
+    }
+
+    pub fn with_cone(mut self, cone: RayCone) -> Self {
+        self.cone = cone;
+        self
     }
 
     pub fn at(&self, t: f32) -> Vec3 {
@@ -21,6 +52,39 @@ impl Ray {
         Self {
             origin: transform.transform_point3(self.origin),
             direction: transform.transform_vector3(self.direction),
+            differential: self.differential.map(|differential| RayDifferential {
+                rx_origin: transform.transform_point3(differential.rx_origin),
+                ry_origin: transform.transform_point3(differential.ry_origin),
+                rx_direction: transform.transform_vector3(differential.rx_direction),
+                ry_direction: transform.transform_vector3(differential.ry_direction),
+            }),
+            cone: self.cone,
+        }
+    }
+}
+
+impl RayCone {
+    pub fn new(width: f32, spread_angle: f32) -> Self {
+        Self {
+            width: width.max(0.0),
+            spread_angle: spread_angle.max(0.0),
+        }
+    }
+
+    pub fn width_at(self, t: f32) -> f32 {
+        if t.is_finite() {
+            (self.width + self.spread_angle * t.max(0.0)).max(0.0)
+        } else {
+            self.width
+        }
+    }
+}
+
+impl Default for RayCone {
+    fn default() -> Self {
+        Self {
+            width: 0.0,
+            spread_angle: 0.0,
         }
     }
 }
@@ -108,9 +172,9 @@ pub fn intersect_triangle(
     p2t.z *= sz;
     let t_scaled = e0 * p0t.z + e1 * p1t.z + e2 * p2t.z;
 
-    if det < 0.0 && (t_scaled >= 0.0 || t_scaled < t_max * det) {
-        return None;
-    } else if det > 0.0 && (t_scaled <= 0.0 || t_scaled > t_max * det) {
+    if (det < 0.0 && (t_scaled >= 0.0 || t_scaled < t_max * det))
+        || (det > 0.0 && (t_scaled <= 0.0 || t_scaled > t_max * det))
+    {
         return None;
     }
 
