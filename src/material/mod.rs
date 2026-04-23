@@ -4,6 +4,7 @@ mod emissive;
 mod glass;
 mod mirror;
 mod normalized_lambert;
+mod texture;
 
 use glam::{Vec2, Vec3};
 use rand::rngs::ThreadRng;
@@ -16,6 +17,7 @@ pub use emissive::EmissiveMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
 pub use normalized_lambert::NormalizedLambertMaterial;
+pub use texture::{Texture, TextureColorSpace};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Material {
