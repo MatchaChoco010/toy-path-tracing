@@ -4,8 +4,8 @@ use rand::RngExt;
 use crate::{
     bsdf::BsdfFlags,
     light::{
-        LightKind, LightSampleContext, area_light_pdf_li, infinite_light_le, infinite_light_pdf_li,
-        sample_light_li,
+        LightKind, LightSampleContext, area_light_pdf_li, infinite_light_le,
+        infinite_light_pdf_li_mis_compensated, sample_light_li_mis_compensated,
     },
     material::{Material, ShadingVertex},
     math::{balance_heuristic, russian_roulette_probability},
@@ -120,7 +120,8 @@ pub(super) fn direct_light_mis_contribution(
     };
 
     let ctx = LightSampleContext::from_vertex(vtx);
-    let Some(li) = sample_light_li(scene, sampled_light.kind, &ctx, u_aux, us) else {
+    let Some(li) = sample_light_li_mis_compensated(scene, sampled_light.kind, &ctx, u_aux, us)
+    else {
         return Vec3::ZERO;
     };
 
@@ -205,7 +206,7 @@ fn emitted_radiance_from_bsdf_sample_infinite(
         return throughput * le;
     }
 
-    let light_pdf = pmf * infinite_light_pdf_li(scene, direction);
+    let light_pdf = pmf * infinite_light_pdf_li_mis_compensated(scene, direction);
     let mis_weight = balance_heuristic(bsdf_pdf, light_pdf);
 
     throughput * le * mis_weight

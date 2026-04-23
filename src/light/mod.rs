@@ -15,6 +15,7 @@ pub use area::area_light_pdf_li;
 pub use directional::{DirectionalLight, DirectionalLightIndex};
 pub use environment::{
     EnvironmentLight, EnvironmentLightSample, infinite_light_le, infinite_light_pdf_li,
+    infinite_light_pdf_li_mis_compensated,
 };
 pub use point::{PointLight, PointLightIndex};
 pub use spot::{SpotLight, SpotLightIndex};
@@ -226,6 +227,19 @@ pub fn sample_light_li(
         LightKind::DeltaPoint(i) => point::sample_li(&scene.point_lights[i], ctx),
         LightKind::DeltaDirectional(i) => directional::sample_li(&scene.directional_lights[i]),
         LightKind::DeltaSpot(i) => spot::sample_li(&scene.spot_lights[i], ctx),
+    }
+}
+
+pub fn sample_light_li_mis_compensated(
+    scene: &Scene,
+    kind: LightKind,
+    ctx: &LightSampleContext,
+    u_aux: f32,
+    us: Vec2,
+) -> Option<LightLiSample> {
+    match kind {
+        LightKind::Infinite => environment::sample_li_mis_compensated(scene, us),
+        _ => sample_light_li(scene, kind, ctx, u_aux, us),
     }
 }
 

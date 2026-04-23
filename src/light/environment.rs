@@ -12,6 +12,13 @@ pub struct EnvironmentLight {
     height: usize,
     scale: f32,
     pixels: Vec<Vec3>,
+    distribution: EnvironmentDistribution,
+    mis_compensated_distribution: EnvironmentDistribution,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct EnvironmentDistribution {
+    texel_weights: Vec<f32>,
     conditional_cdf: Vec<f32>,
     marginal_cdf: Vec<f32>,
     total_weight: f32,
@@ -34,17 +41,21 @@ impl EnvironmentLight {
             "pixel buffer length does not match width * height"
         );
 
-        let (conditional_cdf, marginal_cdf, total_weight) =
-            build_distribution(width, height, &pixels);
+        let distribution =
+            build_distribution(width, height, environment_weights(width, height, &pixels));
+        let mis_compensated_distribution = build_distribution(
+            width,
+            height,
+            mis_compensated_environment_weights(width, height, &pixels),
+        );
 
         Self {
             width,
             height,
             scale,
             pixels,
-            conditional_cdf,
-            marginal_cdf,
-            total_weight,
+            distribution,
+            mis_compensated_distribution,
         }
     }
 
@@ -89,7 +100,27 @@ impl EnvironmentLight {
     }
 
     pub fn pdf(&self, direction: Vec3) -> f32 {
-        if self.total_weight <= 0.0 {
+        self.pdf_with_distribution(&self.distribution, direction)
+    }
+
+    pub fn pdf_mis_compensated(&self, direction: Vec3) -> f32 {
+        self.pdf_with_distribution(&self.mis_compensated_distribution, direction)
+    }
+
+    pub fn sample(&self, us: Vec2) -> Option<EnvironmentLightSample> {
+        self.sample_with_distribution(&self.distribution, us)
+    }
+
+    pub fn sample_mis_compensated(&self, us: Vec2) -> Option<EnvironmentLightSample> {
+        self.sample_with_distribution(&self.mis_compensated_distribution, us)
+    }
+
+    fn pdf_with_distribution(
+        &self,
+        distribution: &EnvironmentDistribution,
+        direction: Vec3,
+    ) -> f32 {
+        if distribution.total_weight <= 0.0 {
             return 0.0;
         }
         let uv = direction_to_uv(direction);
@@ -99,22 +130,26 @@ impl EnvironmentLight {
         }
         let i = pixel_coord(uv.x, self.width);
         let j = pixel_coord(uv.y, self.height);
-        let weight = self.pixel_weight(i, j);
+        let weight = distribution.texel_weight(i, j, self.width);
         if weight <= 0.0 {
             return 0.0;
         }
-        let p2d = weight / self.total_weight * (self.width as f32) * (self.height as f32);
+        let p2d = weight / distribution.total_weight * (self.width as f32) * (self.height as f32);
         p2d / (TAU * PI * sin_theta)
     }
 
-    pub fn sample(&self, us: Vec2) -> Option<EnvironmentLightSample> {
-        if self.total_weight <= 0.0 {
+    fn sample_with_distribution(
+        &self,
+        distribution: &EnvironmentDistribution,
+        us: Vec2,
+    ) -> Option<EnvironmentLightSample> {
+        if distribution.total_weight <= 0.0 {
             return None;
         }
 
-        let (j, dv) = sample_cdf(&self.marginal_cdf, us.y);
+        let (j, dv) = sample_cdf(&distribution.marginal_cdf, us.y);
         let row_offset = j * (self.width + 1);
-        let row = &self.conditional_cdf[row_offset..row_offset + self.width + 1];
+        let row = &distribution.conditional_cdf[row_offset..row_offset + self.width + 1];
         let (i, du) = sample_cdf(row, us.x);
 
         let u_cont = (i as f32 + du) / self.width as f32;
@@ -126,12 +161,12 @@ impl EnvironmentLight {
         if sin_theta <= 0.0 {
             return None;
         }
-        let weight = self.pixel_weight(i, j);
+        let weight = distribution.texel_weight(i, j, self.width);
         if weight <= 0.0 {
             return None;
         }
 
-        let p2d = weight / self.total_weight * (self.width as f32) * (self.height as f32);
+        let p2d = weight / distribution.total_weight * (self.width as f32) * (self.height as f32);
         let pdf = p2d / (TAU * PI * sin_theta);
         let radiance = self.scale * self.pixels[j * self.width + i];
 
@@ -141,11 +176,6 @@ impl EnvironmentLight {
             uv,
             pdf,
         })
-    }
-
-    fn pixel_weight(&self, i: usize, j: usize) -> f32 {
-        let pixel = self.pixels[j * self.width + i];
-        luminance(pixel).max(0.0) * row_sin_theta(j, self.height)
     }
 }
 
@@ -166,11 +196,36 @@ pub(super) fn sample_li(scene: &Scene, us: Vec2) -> Option<LightLiSample> {
     })
 }
 
+pub(super) fn sample_li_mis_compensated(scene: &Scene, us: Vec2) -> Option<LightLiSample> {
+    let env = scene.environment_light.as_ref()?;
+    let sample = env.sample_mis_compensated(us)?;
+    if sample.pdf <= 0.0 {
+        return None;
+    }
+
+    Some(LightLiSample {
+        radiance: sample.radiance,
+        wi: sample.direction,
+        pdf: sample.pdf,
+        distance: f32::INFINITY,
+        light_type: LightType::Infinite,
+        target_triangle: None,
+    })
+}
+
 pub fn infinite_light_pdf_li(scene: &Scene, direction: Vec3) -> f32 {
     scene
         .environment_light
         .as_ref()
         .map(|env| env.pdf(direction))
+        .unwrap_or(0.0)
+}
+
+pub fn infinite_light_pdf_li_mis_compensated(scene: &Scene, direction: Vec3) -> f32 {
+    scene
+        .environment_light
+        .as_ref()
+        .map(|env| env.pdf_mis_compensated(direction))
         .unwrap_or(0.0)
 }
 
@@ -215,15 +270,82 @@ fn direction_to_uv(direction: Vec3) -> Vec2 {
     Vec2::new((phi / TAU).clamp(0.0, 1.0), (theta / PI).clamp(0.0, 1.0))
 }
 
-fn build_distribution(width: usize, height: usize, pixels: &[Vec3]) -> (Vec<f32>, Vec<f32>, f32) {
+impl EnvironmentDistribution {
+    fn texel_weight(&self, i: usize, j: usize, width: usize) -> f32 {
+        self.texel_weights[j * width + i]
+    }
+}
+
+fn environment_weights(width: usize, height: usize, pixels: &[Vec3]) -> Vec<f32> {
+    let mut weights = vec![0.0; width * height];
+    for j in 0..height {
+        let sin_theta = row_sin_theta(j, height);
+        for i in 0..width {
+            weights[j * width + i] = positive_luminance(pixels[j * width + i]) * sin_theta;
+        }
+    }
+    weights
+}
+
+fn mis_compensated_environment_weights(width: usize, height: usize, pixels: &[Vec3]) -> Vec<f32> {
+    let mean_luminance = solid_angle_mean_luminance(width, height, pixels);
+    let compensation_epsilon = mean_luminance.abs().max(1.0) * 1.0e-6;
+    let mut weights = vec![0.0; width * height];
+    for j in 0..height {
+        let sin_theta = row_sin_theta(j, height);
+        for i in 0..width {
+            let l = positive_luminance(pixels[j * width + i]);
+            // Normal-independent MIS compensation for equal BSDF/env sampling.
+            // The texel-domain CDF still needs the lat-long sin(theta) jacobian.
+            let compensated = l - mean_luminance;
+            weights[j * width + i] = if compensated > compensation_epsilon {
+                compensated * sin_theta
+            } else {
+                0.0
+            };
+        }
+    }
+    weights
+}
+
+fn solid_angle_mean_luminance(width: usize, height: usize, pixels: &[Vec3]) -> f32 {
+    let mut weighted_sum = 0.0;
+    let mut weight_sum = 0.0;
+    for j in 0..height {
+        let sin_theta = row_sin_theta(j, height);
+        weight_sum += sin_theta * width as f32;
+        for i in 0..width {
+            weighted_sum += positive_luminance(pixels[j * width + i]) * sin_theta;
+        }
+    }
+    if weight_sum > 0.0 {
+        weighted_sum / weight_sum
+    } else {
+        0.0
+    }
+}
+
+fn positive_luminance(v: Vec3) -> f32 {
+    luminance(v).max(0.0)
+}
+
+fn build_distribution(
+    width: usize,
+    height: usize,
+    mut texel_weights: Vec<f32>,
+) -> EnvironmentDistribution {
+    assert_eq!(texel_weights.len(), width * height);
+    for weight in &mut texel_weights {
+        *weight = weight.max(0.0);
+    }
+
     let mut conditional_cdf = vec![0.0f32; height * (width + 1)];
     let mut row_integrals = vec![0.0f32; height];
 
     for j in 0..height {
-        let sin_theta = row_sin_theta(j, height);
         let row_offset = j * (width + 1);
         for i in 0..width {
-            let weight = luminance(pixels[j * width + i]).max(0.0) * sin_theta;
+            let weight = texel_weights[j * width + i];
             conditional_cdf[row_offset + i + 1] = conditional_cdf[row_offset + i] + weight;
         }
         let row_sum = conditional_cdf[row_offset + width];
@@ -248,7 +370,12 @@ fn build_distribution(width: usize, height: usize, pixels: &[Vec3]) -> (Vec<f32>
         }
     }
 
-    (conditional_cdf, marginal_cdf, total)
+    EnvironmentDistribution {
+        texel_weights,
+        conditional_cdf,
+        marginal_cdf,
+        total_weight: total,
+    }
 }
 
 fn sample_cdf(cdf: &[f32], u: f32) -> (usize, f32) {
@@ -352,6 +479,14 @@ mod tests {
     }
 
     #[test]
+    fn uniform_environment_has_no_mis_compensated_samples() {
+        let env = uniform_environment(8, 4, 1.0);
+
+        assert!(env.sample_mis_compensated(Vec2::new(0.5, 0.5)).is_none());
+        assert_eq!(env.pdf_mis_compensated(Vec3::Y), 0.0);
+    }
+
+    #[test]
     fn peaked_environment_concentrates_samples_on_bright_pixel() {
         let width = 32;
         let height = 16;
@@ -370,6 +505,76 @@ mod tests {
             let j = (uv.y * height as f32) as usize;
             assert_eq!(i, bright_i);
             assert_eq!(j, bright_j);
+        }
+    }
+
+    #[test]
+    fn mis_compensated_environment_keeps_only_above_mean_texels() {
+        let width = 4;
+        let height = 2;
+        let bright_i = 2;
+        let bright_j = 1;
+        let mut pixels = vec![Vec3::splat(1.0); width * height];
+        pixels[bright_j * width + bright_i] = Vec3::splat(9.0);
+        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0);
+
+        let low_direction = uv_to_direction(Vec2::new(0.125, 0.25));
+        let bright_direction = uv_to_direction(Vec2::new(
+            (bright_i as f32 + 0.5) / width as f32,
+            (bright_j as f32 + 0.5) / height as f32,
+        ));
+
+        assert_eq!(env.pdf_mis_compensated(low_direction), 0.0);
+        assert!(env.pdf_mis_compensated(bright_direction) > 0.0);
+
+        for (ux, uy) in [(0.1, 0.1), (0.4, 0.4), (0.7, 0.7), (0.95, 0.95)] {
+            let sample = env
+                .sample_mis_compensated(Vec2::new(ux, uy))
+                .expect("compensated sample should choose the bright texel");
+            let uv = direction_to_uv(sample.direction);
+            let i = (uv.x * width as f32) as usize;
+            let j = (uv.y * height as f32) as usize;
+            assert_eq!(i, bright_i);
+            assert_eq!(j, bright_j);
+        }
+    }
+
+    #[test]
+    fn mis_compensated_mean_uses_spherical_jacobian() {
+        let width = 1;
+        let height = 4;
+        let mut pixels = vec![Vec3::ZERO; width * height];
+        pixels[0] = Vec3::splat(4.0);
+        pixels[1] = Vec3::splat(1.2);
+        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0);
+
+        let high_solid_angle_row_direction = uv_to_direction(Vec2::new(0.5, 0.375));
+
+        assert!(
+            env.pdf_mis_compensated(high_solid_angle_row_direction) > 0.0,
+            "row 1 stays above the jacobian-weighted mean"
+        );
+    }
+
+    #[test]
+    fn mis_compensated_sample_pdf_matches_pdf_query() {
+        let mut pixels = vec![Vec3::splat(0.2); 16 * 8];
+        pixels[2 * 16 + 4] = Vec3::splat(8.0);
+        pixels[5 * 16 + 11] = Vec3::splat(4.0);
+        let env = EnvironmentLight::from_pixels(16, 8, pixels, 1.0);
+
+        for (ux, uy) in [(0.1, 0.1), (0.5, 0.5), (0.8, 0.3), (0.95, 0.85)] {
+            let sample = env
+                .sample_mis_compensated(Vec2::new(ux, uy))
+                .expect("compensated sample should succeed");
+            let queried = env.pdf_mis_compensated(sample.direction);
+            assert!(
+                (sample.pdf - queried).abs() / sample.pdf.max(1.0e-6) < 1.0e-3,
+                "pdf mismatch: sample.pdf={}, pdf(dir)={}",
+                sample.pdf,
+                queried
+            );
+            assert!(sample.pdf > 0.0);
         }
     }
 
