@@ -69,6 +69,8 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `12` | Cornell box 風の部屋からエリアライトを外し、薄青 Lambert バニーとラフな金色 / 銅色の Conductor GGX 球を配置。暖色と寒色の `PointLight` を 2 灯、バニーに向けたマゼンタ / ティールの `SpotLight` を 2 灯で照らす delta 光源ミックスの確認シーンです。 |
 | `13` | 広い Lambert 床の上に少し大きめの diffuse バニーを置き、`assets/sky/brown_photostudio_02_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
 | `14` | scene 13 と同じ床 / バニー構成で、`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
+| `15` | Cornell box 風の部屋に、`assets/gltf/sphere-color.png` と `assets/gltf/sphere-roughness.png` を使う金属 Conductor GGX 球、同じ color texture を使う Lambert 球を斜めに並べたテクスチャ確認用シーンです。 |
+| `16` | scene 14 と同じ床 / Sky 環境に、`assets/gltf/bunny-color.png` を使う Lambert バニーと、`assets/gltf/sphere-color.png` / `assets/gltf/sphere-roughness.png` を使う金属 Conductor GGX 球を配置したテクスチャ確認用シーンです。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

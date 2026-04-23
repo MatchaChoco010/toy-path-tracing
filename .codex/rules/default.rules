@@ -1,7 +1,7 @@
 prefix_rule(
   pattern = ["git", "push"],
-  decision = "forbidden",
-  justification = "git push is prohibited in this repository.",
+  decision = "ask",
+  justification = "Confirm with the user before pushing to a remote repository.",
   match = [
     "git push",
     "git push origin main",
