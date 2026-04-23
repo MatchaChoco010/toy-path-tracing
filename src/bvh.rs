@@ -156,12 +156,12 @@ fn build_node(primitives: &mut [BuilderPrimitive], start: usize, end: usize) -> 
                 .unwrap_or(core::cmp::Ordering::Equal)
         });
 
-        if let Some((split_index, cost)) = evaluate_split(&sorted, parent_surface_area) {
-            if cost < best_cost {
-                best_cost = cost;
-                best_split = Some(start + split_index);
-                best_order = sorted;
-            }
+        if let Some((split_index, cost)) = evaluate_split(&sorted, parent_surface_area)
+            && cost < best_cost
+        {
+            best_cost = cost;
+            best_split = Some(start + split_index);
+            best_order = sorted;
         }
     }
 

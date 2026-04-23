@@ -34,11 +34,19 @@ pub struct ShadingVertex {
     pub triangle: TriangleRef,
     pub p: Vec3,
     pub uv: Vec2,
+    pub dudx: f32,
+    pub dvdx: f32,
+    pub dudy: f32,
+    pub dvdy: f32,
     pub ng: Vec3,
     pub ns: Vec3,
     pub wo: Vec3,
     pub dpdu: Vec3,
     pub dpdv: Vec3,
+    pub dpdx: Vec3,
+    pub dpdy: Vec3,
+    pub dndu: Vec3,
+    pub dndv: Vec3,
     pub frame: OrthonormalBasis,
     pub front_face: bool,
 }
@@ -49,6 +57,18 @@ pub struct MaterialSample {
     pub wi: Vec3,
     pub pdf: f32,
     pub flags: BsdfFlags,
+    pub eta: f32,
+    pub cone_spread: f32,
+}
+
+impl ShadingVertex {
+    pub fn uv_dx(&self) -> Vec2 {
+        Vec2::new(self.dudx, self.dvdx)
+    }
+
+    pub fn uv_dy(&self) -> Vec2 {
+        Vec2::new(self.dudy, self.dvdy)
+    }
 }
 
 impl Material {
@@ -148,11 +168,19 @@ mod tests {
             },
             p: Vec3::ZERO,
             uv: glam::Vec2::ZERO,
+            dudx: 0.0,
+            dvdx: 0.0,
+            dudy: 0.0,
+            dvdy: 0.0,
             ng: Vec3::Z,
             ns: Vec3::Z,
             wo,
             dpdu: Vec3::X,
             dpdv: Vec3::Y,
+            dpdx: Vec3::ZERO,
+            dpdy: Vec3::ZERO,
+            dndu: Vec3::ZERO,
+            dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
         }

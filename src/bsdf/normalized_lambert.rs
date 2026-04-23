@@ -52,6 +52,7 @@ impl NormalizedLambertBsdf {
             wi,
             pdf,
             flags: BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION,
+            eta: 1.0,
         })
     }
 }

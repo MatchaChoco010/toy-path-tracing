@@ -10,7 +10,7 @@ use crate::{
     scene::Scene,
 };
 
-use super::{spawn_ray, unoccluded};
+use super::{spawn_scattered_ray, unoccluded};
 
 pub fn trace_radiance(
     scene: &Scene,
@@ -36,13 +36,11 @@ pub fn trace_radiance(
             break;
         };
 
-        let vtx = scene.shading_vertex(hit, ray.direction);
+        let vtx = scene.shading_vertex(hit, &ray);
         let material = scene.instance_material(hit.triangle.instance_index);
 
-        if count_emission_at_hit {
-            if let Some(le) = material.le(&vtx) {
-                radiance += throughput * le;
-            }
+        if count_emission_at_hit && let Some(le) = material.le(&vtx) {
+            radiance += throughput * le;
         }
 
         let Some(sample) = material.sample(&vtx, rng) else {
@@ -68,7 +66,7 @@ pub fn trace_radiance(
             throughput /= survive_probability;
         }
 
-        ray = spawn_ray(vtx.p, vtx.ng, sample.wi);
+        ray = spawn_scattered_ray(&ray, hit.t, &vtx, &sample);
         count_emission_at_hit = is_delta_sample;
     }
 

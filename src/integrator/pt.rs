@@ -3,7 +3,7 @@ use rand::RngExt;
 
 use crate::{light::infinite_light_le, math::russian_roulette_probability, ray::Ray, scene::Scene};
 
-use super::spawn_ray;
+use super::spawn_scattered_ray;
 
 pub fn trace_radiance(
     scene: &Scene,
@@ -26,7 +26,7 @@ pub fn trace_radiance(
             break;
         };
 
-        let shading_vertex = scene.shading_vertex(hit, ray.direction);
+        let shading_vertex = scene.shading_vertex(hit, &ray);
         let material = scene.instance_material(hit.triangle.instance_index);
 
         if let Some(le) = material.le(&shading_vertex) {
@@ -47,7 +47,7 @@ pub fn trace_radiance(
             throughput /= survive_probability;
         }
 
-        ray = spawn_ray(shading_vertex.p, shading_vertex.ng, sample.wi);
+        ray = spawn_scattered_ray(&ray, hit.t, &shading_vertex, &sample);
     }
 
     radiance
