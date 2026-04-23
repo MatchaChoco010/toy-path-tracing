@@ -1,4 +1,9 @@
 {
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "autoAllowBashIfSandboxed": true
+  },
   "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [

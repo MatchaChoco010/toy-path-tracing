@@ -67,6 +67,8 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `10` | White furnace test 用シーン。`1.0` の一様な白い環境光のもと、上段に roughness を `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` と並べた Dielectric GGX ガラス球、下段に同じ roughness 列の銀色 Conductor GGX 金属球を 6 個ずつ配置し、エネルギー保存をチェックします。 |
 | `11` | 広い Lambert 床の上に薄青の Lambert バニーを置き、`DirectionalLight` (太陽相当の平行光) 1 つだけで照らす delta 光源の基本確認シーンです。 |
 | `12` | Cornell box 風の部屋からエリアライトを外し、薄青 Lambert バニーとラフな金色 / 銅色の Conductor GGX 球を配置。暖色と寒色の `PointLight` を 2 灯、バニーに向けたマゼンタ / ティールの `SpotLight` を 2 灯で照らす delta 光源ミックスの確認シーンです。 |
+| `13` | 広い Lambert 床の上に少し大きめの diffuse バニーを置き、`assets/sky/brown_photostudio_02_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
+| `14` | scene 13 と同じ床 / バニー構成で、`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 
