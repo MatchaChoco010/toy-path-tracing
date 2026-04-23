@@ -272,7 +272,7 @@ mod tests {
     fn conductor_material_sample_returns_glossy_or_delta_reflection_flag() {
         let material = Material::ConductorGgx(ConductorGgxMaterial::new(
             Vec3::new(0.9, 0.7, 0.3),
-            0.4,
+            0.0,
             0.0,
         ));
         let shading_vertex = test_shading_vertex(Vec3::new(0.3, -0.4, 0.8660254).normalize());
