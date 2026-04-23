@@ -1,12 +1,15 @@
 web_search = "live"
 
-approval_policy = "never"
+approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 allow_login_shell = false
 
 [sandbox_workspace_write]
-network_access = false
-writable_roots = ["/home/orito/ghq/github.com/MatchaChoco010/toy-path-tracing", "/tmp"]
+network_access = true
+writable_roots = [
+  "/home/orito/ghq/github.com/MatchaChoco010/toy-path-tracing",
+  "/tmp"
+]
 
 [features]
 shell_snapshot = true
