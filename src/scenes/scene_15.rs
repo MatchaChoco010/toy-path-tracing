@@ -45,10 +45,15 @@ pub fn create_scene_15() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             0.0,
             Some(sphere_color_path),
             Some(sphere_roughness_path),
+            None,
         )?,
     ));
     let lambert = scene.add_material(Material::NormalizedLambert(
-        NormalizedLambertMaterial::try_new_with_texture_path(Vec3::ONE, Some(sphere_color_path))?,
+        NormalizedLambertMaterial::try_new_with_texture_path(
+            Vec3::ONE,
+            Some(sphere_color_path),
+            None,
+        )?,
     ));
 
     let sphere = load_mesh(Path::new("assets/gltf/sphere.glb"))?;
