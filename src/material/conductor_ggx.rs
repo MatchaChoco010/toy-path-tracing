@@ -3,13 +3,12 @@ use std::path::Path;
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{
-    bsdf::{BsdfFlags, ConductorGgxBsdf},
-    math::OrthonormalBasis,
-};
+use crate::bsdf::{BsdfFlags, ConductorGgxBsdf};
 
 use super::{
-    MaterialSample, ShadingVertex, Texture, TextureColorSpace, texture::load_optional_texture,
+    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
+    normal_map::load_optional_normal_map, sample_matches_geometric_side,
+    texture::load_optional_texture,
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -21,6 +20,8 @@ pub struct ConductorGgxMaterial {
     pub roughness: f32,
     pub roughness_texture: Option<Texture>,
     pub anisotropy: f32,
+    pub normal_map: Option<NormalMap>,
+    pub normal_strength: f32,
 }
 
 impl ConductorGgxMaterial {
@@ -31,6 +32,8 @@ impl ConductorGgxMaterial {
             roughness,
             roughness_texture: None,
             anisotropy,
+            normal_map: None,
+            normal_strength: 1.0,
         }
     }
 
@@ -40,6 +43,7 @@ impl ConductorGgxMaterial {
         anisotropy: f32,
         base_color_texture_path: Option<&Path>,
         roughness_texture_path: Option<&Path>,
+        normal_map_path: Option<&Path>,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             base_color,
@@ -53,7 +57,16 @@ impl ConductorGgxMaterial {
                 TextureColorSpace::Linear,
             )?,
             anisotropy,
+            normal_map: load_optional_normal_map(normal_map_path)?,
+            normal_strength: 1.0,
         })
+    }
+
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
+        self.normal_map
+            .as_ref()
+            .map(|normal_map| normal_map.apply(shading_vertex, self.normal_strength))
+            .unwrap_or(*shading_vertex)
     }
 
     pub fn sample(
@@ -62,39 +75,25 @@ impl ConductorGgxMaterial {
         rng: &mut ThreadRng,
     ) -> Option<MaterialSample> {
         let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let sample = self.sample_with_frame(shading_vertex, shading_vertex.frame, us)?;
+        let sample = self.sample_impl(shading_vertex, us)?;
 
-        if sample_matches_geometric_reflection_side(&sample, shading_vertex.ng) {
-            return Some(sample);
-        }
-
-        let geometric_frame =
-            OrthonormalBasis::from_normal_and_tangent(shading_vertex.ng, shading_vertex.dpdu);
-        let sample = self.sample_with_frame(shading_vertex, geometric_frame, us)?;
-
-        if !sample_matches_geometric_reflection_side(&sample, shading_vertex.ng) {
-            return None;
-        }
-
-        Some(sample)
+        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
     }
 
-    fn sample_with_frame(
-        &self,
-        shading_vertex: &ShadingVertex,
-        frame: OrthonormalBasis,
-        us: Vec2,
-    ) -> Option<MaterialSample> {
+    fn sample_impl(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
         }
 
-        let wo_local = frame.world_to_local(shading_vertex.wo).normalize_or_zero();
+        let wo_local = shading_vertex
+            .frame
+            .world_to_local(shading_vertex.wo)
+            .normalize_or_zero();
         let roughness = self.roughness_at(shading_vertex);
         let (alpha_x, alpha_y) = self.alpha_xy_from_roughness(roughness);
         let bsdf = ConductorGgxBsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
         let sample = bsdf.sample(wo_local, us)?;
-        let wi = frame.local_to_world(sample.wi);
+        let wi = shading_vertex.frame.local_to_world(sample.wi);
         let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
             2.0 * roughness.clamp(0.0, 1.0)
         } else {
@@ -208,17 +207,6 @@ impl ConductorGgxMaterial {
     }
 }
 
-fn sample_matches_geometric_reflection_side(
-    sample: &MaterialSample,
-    geometric_normal: Vec3,
-) -> bool {
-    if !sample.flags.contains(BsdfFlags::REFLECTION) {
-        return false;
-    }
-
-    sample.wi.dot(geometric_normal) > 1.0e-6
-}
-
 #[cfg(test)]
 mod tests {
     use glam::{Vec2, Vec3};
@@ -295,6 +283,18 @@ mod tests {
     }
 
     #[test]
+    fn sample_returns_none_when_shading_normal_reflects_below_geometry() {
+        let material = ConductorGgxMaterial::new(Vec3::ONE, 0.0, 0.0);
+        let mut vtx = test_shading_vertex(Vec3::Z);
+        let ns = Vec3::new(0.8660254, 0.0, 0.5).normalize();
+        vtx.ns = ns;
+        vtx.frame = OrthonormalBasis::from_normal_and_tangent(ns, vtx.dpdu);
+        let mut rng = rand::rng();
+
+        assert!(material.sample(&vtx, &mut rng).is_none());
+    }
+
+    #[test]
     fn textures_modulate_base_color_and_roughness() {
         let material = ConductorGgxMaterial {
             base_color: Vec3::new(0.5, 0.5, 0.5),
@@ -302,6 +302,8 @@ mod tests {
             roughness: 0.8,
             roughness_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::splat(0.5)])),
             anisotropy: 0.0,
+            normal_map: None,
+            normal_strength: 1.0,
         };
         let vtx = test_shading_vertex(Vec3::Z);
         let (alpha_x, alpha_y) = material.alpha_xy_at(&vtx);

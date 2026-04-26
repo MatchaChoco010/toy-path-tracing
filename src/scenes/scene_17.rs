@@ -18,6 +18,7 @@ pub fn create_scene_17() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         NormalizedLambertMaterial::try_new_with_texture_path(
             Vec3::ONE,
             Some(Path::new("assets/gltf/floor-brick.png")),
+            None,
         )?,
     ));
     let floor_mesh = scene.add_mesh(load_mesh(Path::new("assets/gltf/floor.glb"))?);

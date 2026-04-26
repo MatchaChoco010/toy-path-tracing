@@ -8,10 +8,11 @@ use crate::{
     scene::Scene,
 };
 
-use super::uniform_scale_for_height;
+use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_15() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_18() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
+    let normal_strength = 0.2;
     let wall_gray = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.60)),
     ));
@@ -36,28 +37,28 @@ pub fn create_scene_15() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let light_mesh = scene.add_mesh(load_mesh(Path::new("assets/gltf/light.glb"))?);
     scene.add_instance(light_mesh, light, Mat4::IDENTITY);
 
-    let sphere_color_path = Path::new("assets/gltf/sphere-color.png");
-    let sphere_roughness_path = Path::new("assets/gltf/sphere-roughness.png");
-    let metal = scene.add_material(Material::ConductorGgx(
-        ConductorGgxMaterial::try_new_with_texture_paths(
-            Vec3::ONE,
-            1.0,
-            0.0,
-            Some(sphere_color_path),
-            Some(sphere_roughness_path),
-            None,
-        )?,
-    ));
-    let lambert = scene.add_material(Material::NormalizedLambert(
-        NormalizedLambertMaterial::try_new_with_texture_path(
-            Vec3::ONE,
-            Some(sphere_color_path),
-            None,
-        )?,
-    ));
+    let normal_map_path = Path::new("assets/gltf/sphere-normal.png");
+    let mut lambert_material = NormalizedLambertMaterial::try_new_with_texture_path(
+        Vec3::new(0.72, 0.76, 0.82),
+        None,
+        Some(normal_map_path),
+    )?;
+    lambert_material.normal_strength = normal_strength;
+    let lambert = scene.add_material(Material::NormalizedLambert(lambert_material));
+
+    let mut metal_material = ConductorGgxMaterial::try_new_with_texture_paths(
+        Vec3::new(0.95, 0.78, 0.42),
+        0.4,
+        0.0,
+        None,
+        None,
+        Some(normal_map_path),
+    )?;
+    metal_material.normal_strength = normal_strength;
+    let metal = scene.add_material(Material::ConductorGgx(metal_material));
 
     let sphere = load_mesh(Path::new("assets/gltf/sphere.glb"))?;
-    let sphere_scale = uniform_scale_for_height(&sphere, 1.08);
+    let sphere_scale = uniform_scale_for_height(&sphere, 1.05);
     let sphere_pivot = Vec3::new(
         sphere.bounds.center().x,
         sphere.bounds.min.y,
@@ -65,19 +66,21 @@ pub fn create_scene_15() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     );
     let sphere_mesh = scene.add_mesh(sphere);
 
-    let metal_transform = Mat4::from_translation(Vec3::new(-0.72, 0.0, -0.05))
-        * Mat4::from_scale(Vec3::splat(sphere_scale))
-        * Mat4::from_translation(-sphere_pivot);
-    scene.add_instance(sphere_mesh, metal, metal_transform);
-
-    let lambert_transform = Mat4::from_translation(Vec3::new(0.72, 0.0, -1.15))
+    let lambert_transform = Mat4::from_translation(Vec3::new(-0.72, 0.0, 0.35))
+        * Mat4::from_quat(game_rotation_degrees(0.0, -25.0, 0.0))
         * Mat4::from_scale(Vec3::splat(sphere_scale))
         * Mat4::from_translation(-sphere_pivot);
     scene.add_instance(sphere_mesh, lambert, lambert_transform);
 
+    let metal_transform = Mat4::from_translation(Vec3::new(0.72, 0.0, -0.85))
+        * Mat4::from_quat(game_rotation_degrees(0.0, 25.0, 0.0))
+        * Mat4::from_scale(Vec3::splat(sphere_scale))
+        * Mat4::from_translation(-sphere_pivot);
+    scene.add_instance(sphere_mesh, metal, metal_transform);
+
     let camera = PinholeCamera::new(
         Vec3::new(0.0, 2.05, 7.0),
-        Vec3::new(0.0, 1.05, -0.55),
+        Vec3::new(0.0, 0.95, -0.25),
         Vec3::Y,
         38.0_f32.to_radians(),
     );

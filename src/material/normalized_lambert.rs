@@ -6,7 +6,9 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::NormalizedLambertBsdf;
 
 use super::{
-    MaterialSample, ShadingVertex, Texture, TextureColorSpace, texture::load_optional_texture,
+    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
+    normal_map::load_optional_normal_map, reflection_direction_matches_geometric_side,
+    sample_matches_geometric_side, texture::load_optional_texture,
 };
 
 const DIFFUSE_CONE_SPREAD: f32 = 0.5;
@@ -15,6 +17,8 @@ const DIFFUSE_CONE_SPREAD: f32 = 0.5;
 pub struct NormalizedLambertMaterial {
     pub rho: Vec3,
     pub rho_texture: Option<Texture>,
+    pub normal_map: Option<NormalMap>,
+    pub normal_strength: f32,
 }
 
 impl NormalizedLambertMaterial {
@@ -22,17 +26,29 @@ impl NormalizedLambertMaterial {
         Self {
             rho,
             rho_texture: None,
+            normal_map: None,
+            normal_strength: 1.0,
         }
     }
 
     pub fn try_new_with_texture_path(
         rho: Vec3,
         rho_texture_path: Option<&Path>,
+        normal_map_path: Option<&Path>,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             rho,
             rho_texture: load_optional_texture(rho_texture_path, TextureColorSpace::Srgb)?,
+            normal_map: load_optional_normal_map(normal_map_path)?,
+            normal_strength: 1.0,
         })
+    }
+
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
+        self.normal_map
+            .as_ref()
+            .map(|normal_map| normal_map.apply(shading_vertex, self.normal_strength))
+            .unwrap_or(*shading_vertex)
     }
 
     pub fn sample(
@@ -49,17 +65,23 @@ impl NormalizedLambertMaterial {
         let sample = bsdf.sample(wo_local, us)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
-        Some(MaterialSample {
+        let sample = MaterialSample {
             weight: sample.weight,
             wi,
             pdf: sample.pdf,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread: DIFFUSE_CONE_SPREAD,
-        })
+        };
+
+        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
     }
 
     pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+        if !reflection_direction_matches_geometric_side(shading_vertex, wi) {
+            return Vec3::ZERO;
+        }
+
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
@@ -70,6 +92,10 @@ impl NormalizedLambertMaterial {
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
+        if !reflection_direction_matches_geometric_side(shading_vertex, wi) {
+            return 0.0;
+        }
+
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
@@ -150,6 +176,8 @@ mod tests {
         let material = NormalizedLambertMaterial {
             rho: Vec3::new(0.5, 0.5, 0.5),
             rho_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            normal_map: None,
+            normal_strength: 1.0,
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
 
@@ -162,7 +190,7 @@ mod tests {
 
     #[test]
     fn none_texture_keeps_existing_rho() {
-        let material = NormalizedLambertMaterial::try_new_with_texture_path(Vec3::ONE, None)
+        let material = NormalizedLambertMaterial::try_new_with_texture_path(Vec3::ONE, None, None)
             .expect("None texture should not try to load an image");
 
         assert_eq!(material, NormalizedLambertMaterial::new(Vec3::ONE));

@@ -8,6 +8,8 @@ mod scene_14;
 mod scene_15;
 mod scene_16;
 mod scene_17;
+mod scene_18;
+mod scene_19;
 mod scene_2;
 mod scene_3;
 mod scene_4;
@@ -41,6 +43,8 @@ pub fn load_scene(scene_index: u32) -> Result<(Scene, PinholeCamera), Box<dyn Er
         15 => scene_15::create_scene_15(),
         16 => scene_16::create_scene_16(),
         17 => scene_17::create_scene_17(),
+        18 => scene_18::create_scene_18(),
+        19 => scene_19::create_scene_19(),
         _ => scene_0::create_scene_0(),
     }
 }

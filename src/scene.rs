@@ -337,15 +337,17 @@ impl Scene {
         barycentric: Vec3,
         incident_direction: Vec3,
     ) -> ShadingVertex {
-        self.shading_vertex_from_triangle_sample_impl(
+        let shading_vertex = self.base_shading_vertex_from_triangle_sample_impl(
             triangle,
             barycentric,
             incident_direction,
             None,
-        )
+        );
+        self.instance_material(triangle.instance_index)
+            .prepare_shading_vertex(&shading_vertex)
     }
 
-    fn shading_vertex_from_triangle_sample_impl(
+    fn base_shading_vertex_from_triangle_sample_impl(
         &self,
         triangle: TriangleRef,
         barycentric: Vec3,
@@ -411,12 +413,14 @@ impl Scene {
     }
 
     pub fn shading_vertex(&self, hit: SceneHit, ray: &Ray) -> ShadingVertex {
-        self.shading_vertex_from_triangle_sample_impl(
+        let shading_vertex = self.base_shading_vertex_from_triangle_sample_impl(
             hit.triangle,
             hit.barycentric,
             ray.direction,
             Some(ray),
-        )
+        );
+        self.instance_material(hit.triangle.instance_index)
+            .prepare_shading_vertex(&shading_vertex)
     }
 
     pub fn area_light_triangle_probability(&self, triangle: TriangleRef) -> Option<f32> {
@@ -812,7 +816,7 @@ mod tests {
         TriangleRef,
     };
     use crate::{
-        material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
+        material::{EmissiveMaterial, Material, NormalMap, NormalizedLambertMaterial, Texture},
         mesh::{Mesh, Vertex},
         ray::{Ray, RayCone, RayDifferential},
     };
@@ -1103,6 +1107,46 @@ mod tests {
         assert!(shading_vertex.front_face);
         assert!(shading_vertex.dpdu.length_squared() > 0.0);
         assert!(shading_vertex.dpdv.length_squared() > 0.0);
+    }
+
+    #[test]
+    fn shading_vertex_applies_material_normal_map() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
+        let normal_texel = 0.5 * (local_normal + Vec3::ONE);
+        let material_index =
+            scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial {
+                rho: Vec3::ONE,
+                rho_texture: None,
+                normal_map: Some(NormalMap::from_texture(Texture::from_pixels(
+                    1,
+                    1,
+                    vec![normal_texel],
+                ))),
+                normal_strength: 1.0,
+            }));
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        let hit = SceneHit {
+            triangle: TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            },
+            t: 1.0,
+            barycentric: Vec3::new(0.5, 0.25, 0.25),
+        };
+
+        let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
+        let shading_vertex = scene.shading_vertex(hit, &ray);
+
+        assert!(shading_vertex.ng.abs_diff_eq(Vec3::Z, 1.0e-6));
+        assert!(shading_vertex.ns.abs_diff_eq(local_normal, 1.0e-6));
+        assert!(
+            shading_vertex
+                .frame
+                .normal()
+                .abs_diff_eq(local_normal, 1.0e-6)
+        );
     }
 
     #[test]

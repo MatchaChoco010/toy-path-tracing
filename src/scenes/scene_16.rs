@@ -25,6 +25,7 @@ pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         NormalizedLambertMaterial::try_new_with_texture_path(
             Vec3::ONE,
             Some(Path::new("assets/gltf/bunny-color.png")),
+            None,
         )?,
     ));
     let bunny = load_mesh(Path::new("assets/gltf/bunny.glb"))?;
@@ -48,6 +49,7 @@ pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             0.0,
             Some(Path::new("assets/gltf/sphere-color.png")),
             Some(Path::new("assets/gltf/sphere-roughness.png")),
+            None,
         )?,
     ));
     let sphere = load_mesh(Path::new("assets/gltf/sphere.glb"))?;

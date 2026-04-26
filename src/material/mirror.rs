@@ -6,13 +6,17 @@ use rand::rngs::ThreadRng;
 use crate::bsdf::MirrorBsdf;
 
 use super::{
-    MaterialSample, ShadingVertex, Texture, TextureColorSpace, texture::load_optional_texture,
+    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
+    normal_map::load_optional_normal_map, sample_matches_geometric_side,
+    texture::load_optional_texture,
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirrorMaterial {
     pub color: Vec3,
     pub color_texture: Option<Texture>,
+    pub normal_map: Option<NormalMap>,
+    pub normal_strength: f32,
 }
 
 impl MirrorMaterial {
@@ -20,17 +24,29 @@ impl MirrorMaterial {
         Self {
             color,
             color_texture: None,
+            normal_map: None,
+            normal_strength: 1.0,
         }
     }
 
     pub fn try_new_with_texture_path(
         color: Vec3,
         color_texture_path: Option<&Path>,
+        normal_map_path: Option<&Path>,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             color,
             color_texture: load_optional_texture(color_texture_path, TextureColorSpace::Srgb)?,
+            normal_map: load_optional_normal_map(normal_map_path)?,
+            normal_strength: 1.0,
         })
+    }
+
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
+        self.normal_map
+            .as_ref()
+            .map(|normal_map| normal_map.apply(shading_vertex, self.normal_strength))
+            .unwrap_or(*shading_vertex)
     }
 
     pub fn sample(
@@ -46,14 +62,16 @@ impl MirrorMaterial {
         let sample = bsdf.sample(wo_local)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
-        Some(MaterialSample {
+        let sample = MaterialSample {
             weight: sample.weight,
             wi,
             pdf: sample.pdf,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread: 0.0,
-        })
+        };
+
+        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
     }
 
     pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3) -> Vec3 {
@@ -133,6 +151,8 @@ mod tests {
         let material = MirrorMaterial {
             color: Vec3::new(0.5, 0.5, 0.5),
             color_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            normal_map: None,
+            normal_strength: 1.0,
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
         let mut rng = rand::rng();
@@ -141,5 +161,17 @@ mod tests {
             .expect("expected a valid mirror sample");
 
         assert!(sample.weight.abs_diff_eq(Vec3::new(0.1, 0.2, 0.3), 1.0e-6));
+    }
+
+    #[test]
+    fn sample_returns_none_when_shading_normal_reflects_below_geometry() {
+        let material = MirrorMaterial::new(Vec3::ONE);
+        let mut vtx = test_shading_vertex(Vec2::ZERO);
+        let ns = Vec3::new(0.8660254, 0.0, 0.5).normalize();
+        vtx.ns = ns;
+        vtx.frame = OrthonormalBasis::from_normal_and_tangent(ns, vtx.dpdu);
+        let mut rng = rand::rng();
+
+        assert!(material.sample(&vtx, &mut rng).is_none());
     }
 }

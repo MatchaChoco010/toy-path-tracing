@@ -3,6 +3,7 @@ mod dielectric_ggx;
 mod emissive;
 mod glass;
 mod mirror;
+mod normal_map;
 mod normalized_lambert;
 mod texture;
 
@@ -16,6 +17,7 @@ pub use dielectric_ggx::DielectricGgxMaterial;
 pub use emissive::EmissiveMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
+pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
 pub use texture::{Texture, TextureColorSpace};
 
@@ -72,6 +74,17 @@ impl ShadingVertex {
 }
 
 impl Material {
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
+        match self {
+            Self::NormalizedLambert(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::Mirror(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::ConductorGgx(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::DielectricGgx(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::Glass(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::Emissive(_) => *shading_vertex,
+        }
+    }
+
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
@@ -140,6 +153,49 @@ impl Material {
             Self::Glass(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
+    }
+}
+
+pub(super) fn sample_matches_geometric_side(
+    sample: &MaterialSample,
+    geometric_normal: Vec3,
+) -> bool {
+    let side = sample.wi.dot(geometric_normal);
+    let epsilon = 1.0e-6;
+
+    if sample.flags.contains(BsdfFlags::TRANSMISSION) {
+        return side < -epsilon;
+    }
+    if sample.flags.contains(BsdfFlags::REFLECTION) {
+        return side > epsilon;
+    }
+
+    true
+}
+
+pub(super) fn reflection_direction_matches_geometric_side(
+    shading_vertex: &ShadingVertex,
+    wi: Vec3,
+) -> bool {
+    shading_vertex.wo.dot(shading_vertex.ng) > 0.0 && wi.dot(shading_vertex.ng) > 0.0
+}
+
+pub(super) fn dielectric_direction_matches_geometric_side(
+    shading_vertex: &ShadingVertex,
+    wi: Vec3,
+    wi_local: Vec3,
+) -> bool {
+    let epsilon = 1.0e-6;
+
+    if shading_vertex.wo.dot(shading_vertex.ng) <= epsilon {
+        return false;
+    }
+    if wi_local.z > 0.0 {
+        wi.dot(shading_vertex.ng) > epsilon
+    } else if wi_local.z < 0.0 {
+        wi.dot(shading_vertex.ng) < -epsilon
+    } else {
+        false
     }
 }
 

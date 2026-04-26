@@ -3,13 +3,12 @@ use std::path::Path;
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{
-    bsdf::{BsdfFlags, DielectricGgxBsdf},
-    math::OrthonormalBasis,
-};
+use crate::bsdf::{BsdfFlags, DielectricGgxBsdf};
 
 use super::{
-    MaterialSample, ShadingVertex, Texture, TextureColorSpace, texture::load_optional_texture,
+    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
+    dielectric_direction_matches_geometric_side, normal_map::load_optional_normal_map,
+    sample_matches_geometric_side, texture::load_optional_texture,
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -23,6 +22,8 @@ pub struct DielectricGgxMaterial {
     pub roughness_texture: Option<Texture>,
     pub anisotropy: f32,
     pub thin: bool,
+    pub normal_map: Option<NormalMap>,
+    pub normal_strength: f32,
 }
 
 impl DielectricGgxMaterial {
@@ -35,6 +36,8 @@ impl DielectricGgxMaterial {
             roughness_texture: None,
             anisotropy,
             thin,
+            normal_map: None,
+            normal_strength: 1.0,
         }
     }
 
@@ -46,6 +49,7 @@ impl DielectricGgxMaterial {
         thin: bool,
         color_texture_path: Option<&Path>,
         roughness_texture_path: Option<&Path>,
+        normal_map_path: Option<&Path>,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             color,
@@ -58,7 +62,16 @@ impl DielectricGgxMaterial {
             )?,
             anisotropy,
             thin,
+            normal_map: load_optional_normal_map(normal_map_path)?,
+            normal_strength: 1.0,
         })
+    }
+
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
+        self.normal_map
+            .as_ref()
+            .map(|normal_map| normal_map.apply(shading_vertex, self.normal_strength))
+            .unwrap_or(*shading_vertex)
     }
 
     pub fn sample(
@@ -68,32 +81,21 @@ impl DielectricGgxMaterial {
     ) -> Option<MaterialSample> {
         let uc = rng.random::<f32>();
         let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let sample = self.sample_with_frame(shading_vertex, shading_vertex.frame, uc, us)?;
+        let sample = self.sample_impl(shading_vertex, uc, us)?;
 
-        if sample_matches_geometric_side(&sample, shading_vertex.ng) {
-            return Some(sample);
-        }
-
-        // Shading-normal interpolation can route the sample to the wrong side
-        // of the surface; retry with the geometric frame in that case.
-        let geometric_frame = OrthonormalBasis::from_normal(shading_vertex.ng);
-        let sample = self.sample_with_frame(shading_vertex, geometric_frame, uc, us)?;
-
-        if !sample_matches_geometric_side(&sample, shading_vertex.ng) {
-            return None;
-        }
-
-        Some(sample)
+        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
     }
 
-    fn sample_with_frame(
+    fn sample_impl(
         &self,
         shading_vertex: &ShadingVertex,
-        frame: OrthonormalBasis,
         uc: f32,
         us: Vec2,
     ) -> Option<MaterialSample> {
-        let wo_local = frame.world_to_local(shading_vertex.wo).normalize_or_zero();
+        let wo_local = shading_vertex
+            .frame
+            .world_to_local(shading_vertex.wo)
+            .normalize_or_zero();
         let roughness = self.roughness_at(shading_vertex);
         let (alpha_x, alpha_y) = self.alpha_xy_from_roughness(roughness);
         let bsdf = DielectricGgxBsdf::new(
@@ -105,7 +107,7 @@ impl DielectricGgxMaterial {
             shading_vertex.front_face,
         );
         let sample = bsdf.sample(wo_local, uc, us)?;
-        let wi = frame.local_to_world(sample.wi);
+        let wi = shading_vertex.frame.local_to_world(sample.wi);
         let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
             2.0 * roughness.clamp(0.0, 1.0)
         } else {
@@ -128,6 +130,10 @@ impl DielectricGgxMaterial {
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
+        if !dielectric_direction_matches_geometric_side(shading_vertex, wi, wi_local) {
+            return Vec3::ZERO;
+        }
+
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
         let bsdf = DielectricGgxBsdf::new(
             self.color_at(shading_vertex),
@@ -146,6 +152,10 @@ impl DielectricGgxMaterial {
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
+        if !dielectric_direction_matches_geometric_side(shading_vertex, wi, wi_local) {
+            return 0.0;
+        }
+
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
         let bsdf = DielectricGgxBsdf::new(
             self.color_at(shading_vertex),
@@ -223,19 +233,6 @@ impl DielectricGgxMaterial {
                 })
                 .unwrap_or(1.0)
     }
-}
-
-fn sample_matches_geometric_side(sample: &MaterialSample, geometric_normal: Vec3) -> bool {
-    let side = sample.wi.dot(geometric_normal);
-    let epsilon = 1.0e-6;
-
-    if sample.flags.contains(BsdfFlags::TRANSMISSION) {
-        return side < -epsilon;
-    }
-    if sample.flags.contains(BsdfFlags::REFLECTION) {
-        return side > epsilon;
-    }
-    true
 }
 
 #[cfg(test)]
@@ -355,6 +352,8 @@ mod tests {
             roughness_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::splat(0.5)])),
             anisotropy: 0.0,
             thin: false,
+            normal_map: None,
+            normal_strength: 1.0,
         };
         let vtx = test_shading_vertex(Vec3::Z);
         let (alpha_x, alpha_y) = material.alpha_xy_at(&vtx);
