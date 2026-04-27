@@ -18,6 +18,14 @@ pub struct DielectricGgxBsdf {
     alpha_y: f32,
     thin: bool,
     front_face: bool,
+    allowed_paths: DielectricGgxAllowedPaths,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DielectricGgxAllowedPaths {
+    Reflection,
+    Transmission,
+    ReflectionAndTransmission,
 }
 
 impl DielectricGgxBsdf {
@@ -29,6 +37,26 @@ impl DielectricGgxBsdf {
         thin: bool,
         front_face: bool,
     ) -> Self {
+        Self::new_with_allowed_paths(
+            color,
+            eta,
+            alpha_x,
+            alpha_y,
+            thin,
+            front_face,
+            DielectricGgxAllowedPaths::ReflectionAndTransmission,
+        )
+    }
+
+    pub fn new_with_allowed_paths(
+        color: Vec3,
+        eta: f32,
+        alpha_x: f32,
+        alpha_y: f32,
+        thin: bool,
+        front_face: bool,
+        allowed_paths: DielectricGgxAllowedPaths,
+    ) -> Self {
         Self {
             color,
             eta,
@@ -36,6 +64,7 @@ impl DielectricGgxBsdf {
             alpha_y: alpha_y.max(MIN_ALPHA),
             thin,
             front_face,
+            allowed_paths,
         }
     }
 
@@ -71,7 +100,7 @@ impl DielectricGgxBsdf {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
 
-        if wo.z * wi.z > 0.0 {
+        if wo.z * wi.z > 0.0 && self.allowed_paths.allows_reflection() {
             // Reflection branch.
             let Some(wm) = reflection_half_vector(wo, wi) else {
                 return Vec3::ZERO;
@@ -95,7 +124,7 @@ impl DielectricGgxBsdf {
             }
             let f = fresnel_dielectric(cos_wo_wm, eta_i, eta_t);
             Vec3::splat(d * g * f / (4.0 * cos_o * cos_i))
-        } else if wo.z * wi.z < 0.0 {
+        } else if wo.z * wi.z < 0.0 && self.allowed_paths.allows_transmission() {
             // Transmission branch. Generalized half vector.
             let wm_unnorm = eta_rel * wo + wi;
             if wm_unnorm.length_squared() < 1.0e-12 {
@@ -151,7 +180,7 @@ impl DielectricGgxBsdf {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
 
-        if wo.z * wi.z > 0.0 {
+        if wo.z * wi.z > 0.0 && self.allowed_paths.allows_reflection() {
             // Reflection.
             let Some(wm) = reflection_half_vector(wo, wi) else {
                 return 0.0;
@@ -165,8 +194,14 @@ impl DielectricGgxBsdf {
             if pdf_wm <= 0.0 {
                 return 0.0;
             }
-            f * pdf_wm / (4.0 * cos_wo_wm)
-        } else if wo.z * wi.z < 0.0 {
+            let branch_probability =
+                if self.allowed_paths == DielectricGgxAllowedPaths::ReflectionAndTransmission {
+                    f
+                } else {
+                    1.0
+                };
+            branch_probability * pdf_wm / (4.0 * cos_wo_wm)
+        } else if wo.z * wi.z < 0.0 && self.allowed_paths.allows_transmission() {
             // Transmission.
             let mut wm_unnorm = eta_rel * wo + wi;
             if wm_unnorm.length_squared() < 1.0e-12 {
@@ -192,7 +227,13 @@ impl DielectricGgxBsdf {
             if pdf_wm <= 0.0 {
                 return 0.0;
             }
-            (1.0 - f) * pdf_wm * cos_wi_wm.abs() / (den * den)
+            let branch_probability =
+                if self.allowed_paths == DielectricGgxAllowedPaths::ReflectionAndTransmission {
+                    1.0 - f
+                } else {
+                    1.0
+                };
+            branch_probability * pdf_wm * cos_wi_wm.abs() / (den * den)
         } else {
             0.0
         }
@@ -226,21 +267,34 @@ impl DielectricGgxBsdf {
         }
 
         let transmittance = (1.0 - reflectance).max(0.0);
-        let (pr, pt) = normalized_probabilities(reflectance, transmittance)?;
+        let mut pr = reflectance.max(0.0);
+        let mut pt = transmittance.max(0.0);
+        if !self.allowed_paths.allows_reflection() {
+            pr = 0.0;
+        }
+        if !self.allowed_paths.allows_transmission() {
+            pt = 0.0;
+        }
+        let probability_sum = pr + pt;
+        if probability_sum <= 0.0 {
+            return None;
+        }
+        pr /= probability_sum;
+        pt /= probability_sum;
 
         let reflect = uc < pr;
         let (wi, pdf, weight, flags) = if reflect {
             (
                 reflected_direction(wo),
                 pr,
-                Vec3::ONE,
+                Vec3::splat(reflectance / pr),
                 BsdfFlags::DELTA | BsdfFlags::REFLECTION,
             )
         } else {
             (
                 -wo,
                 pt,
-                self.color,
+                self.color * (transmittance / pt),
                 BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
             )
         };
@@ -264,11 +318,24 @@ impl DielectricGgxBsdf {
         } else {
             0.0
         };
-        let (pr, pt) = normalized_probabilities(reflectance, transmittance)?;
+        let mut pr = reflectance.max(0.0);
+        let mut pt = transmittance.max(0.0);
+        if !self.allowed_paths.allows_reflection() {
+            pr = 0.0;
+        }
+        if !self.allowed_paths.allows_transmission() {
+            pt = 0.0;
+        }
+        let probability_sum = pr + pt;
+        if probability_sum <= 0.0 {
+            return None;
+        }
+        pr /= probability_sum;
+        pt /= probability_sum;
 
         if uc < pr {
             return Some(BsdfSample {
-                weight: Vec3::ONE,
+                weight: Vec3::splat(reflectance / pr),
                 wi: reflected_direction(wo),
                 pdf: pr,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
@@ -280,7 +347,7 @@ impl DielectricGgxBsdf {
         let radiance_scale = 1.0 / (eta_rel * eta_rel);
 
         Some(BsdfSample {
-            weight: self.color * radiance_scale,
+            weight: self.color * (radiance_scale * transmittance / pt),
             wi,
             pdf: pt,
             flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
@@ -303,7 +370,22 @@ impl DielectricGgxBsdf {
             return None;
         }
 
-        if uc < f {
+        let mut pr = f.max(0.0);
+        let mut pt = (1.0 - f).max(0.0);
+        if !self.allowed_paths.allows_reflection() {
+            pr = 0.0;
+        }
+        if !self.allowed_paths.allows_transmission() {
+            pt = 0.0;
+        }
+        let probability_sum = pr + pt;
+        if probability_sum <= 0.0 {
+            return None;
+        }
+        pr /= probability_sum;
+        pt /= probability_sum;
+
+        if uc < pr {
             // Reflection branch.
             let wi = reflect_local(wo, wm);
             if !is_upper_hemisphere(wi) {
@@ -314,11 +396,11 @@ impl DielectricGgxBsdf {
             if pdf_wm <= 0.0 {
                 return None;
             }
-            let pdf = f * pdf_wm / (4.0 * cos_wo_wm);
+            let pdf = pr * pdf_wm / (4.0 * cos_wo_wm);
             if pdf <= 0.0 {
                 return None;
             }
-            let weight = Vec3::splat(g2 / g1);
+            let weight = Vec3::splat(f * g2 / (pr * g1));
             Some(BsdfSample {
                 weight,
                 wi,
@@ -342,12 +424,12 @@ impl DielectricGgxBsdf {
             if pdf_wm <= 0.0 {
                 return None;
             }
-            let pdf = (1.0 - f) * pdf_wm * cos_wi_wm.abs() / (den * den);
+            let pdf = pt * pdf_wm * cos_wi_wm.abs() / (den * den);
             if pdf <= 0.0 {
                 return None;
             }
             let radiance_scale = 1.0 / (eta_rel * eta_rel);
-            let weight = self.color * (radiance_scale * g2 / g1);
+            let weight = self.color * (radiance_scale * (1.0 - f) * g2 / (pt * g1));
             Some(BsdfSample {
                 weight,
                 wi,
@@ -359,18 +441,18 @@ impl DielectricGgxBsdf {
     }
 }
 
-fn reflected_direction(wo: Vec3) -> Vec3 {
-    Vec3::new(-wo.x, -wo.y, wo.z).normalize_or_zero()
+impl DielectricGgxAllowedPaths {
+    fn allows_reflection(self) -> bool {
+        matches!(self, Self::Reflection | Self::ReflectionAndTransmission)
+    }
+
+    fn allows_transmission(self) -> bool {
+        matches!(self, Self::Transmission | Self::ReflectionAndTransmission)
+    }
 }
 
-fn normalized_probabilities(reflectance: f32, transmittance: f32) -> Option<(f32, f32)> {
-    let reflection = reflectance.max(0.0);
-    let transmission = transmittance.max(0.0);
-    let sum = reflection + transmission;
-    if sum <= 0.0 {
-        return None;
-    }
-    Some((reflection / sum, transmission / sum))
+fn reflected_direction(wo: Vec3) -> Vec3 {
+    Vec3::new(-wo.x, -wo.y, wo.z).normalize_or_zero()
 }
 
 fn refract_about_wm(wo: Vec3, wm: Vec3, eta: f32) -> Option<Vec3> {
@@ -395,7 +477,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
-        bsdf::{BsdfFlags, DielectricGgxBsdf},
+        bsdf::{BsdfFlags, DielectricGgxAllowedPaths, DielectricGgxBsdf},
         math::{fresnel_dielectric, refract},
     };
 
@@ -534,6 +616,62 @@ mod tests {
 
         let f = bsdf.eval(wo, sample.wi);
         let expected = f * (sample.wi.z.abs() / sample.pdf);
+        assert!(sample.weight.abs_diff_eq(expected, 5.0e-4));
+    }
+
+    #[test]
+    fn reflection_path_uses_only_reflection_branch() {
+        let bsdf = DielectricGgxBsdf::new_with_allowed_paths(
+            Vec3::ONE,
+            1.5,
+            0.3,
+            0.2,
+            false,
+            true,
+            DielectricGgxAllowedPaths::Reflection,
+        );
+        let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
+        let transmission_wi = Vec3::new(-0.1, 0.2, -0.9746794).normalize();
+
+        assert_eq!(bsdf.eval(wo, transmission_wi), Vec3::ZERO);
+        assert_eq!(bsdf.pdf(wo, transmission_wi), 0.0);
+
+        let sample = bsdf
+            .sample(wo, 0.999, Vec2::new(0.35, 0.72))
+            .expect("expected a reflection-only sample");
+        let expected = bsdf.eval(wo, sample.wi) * (sample.wi.z / sample.pdf);
+
+        assert!(sample.flags.contains(BsdfFlags::REFLECTION));
+        assert!(!sample.flags.contains(BsdfFlags::TRANSMISSION));
+        assert!(sample.wi.z > 0.0);
+        assert!(sample.weight.abs_diff_eq(expected, 5.0e-4));
+    }
+
+    #[test]
+    fn transmission_path_uses_only_transmission_branch() {
+        let bsdf = DielectricGgxBsdf::new_with_allowed_paths(
+            Vec3::ONE,
+            1.5,
+            0.3,
+            0.2,
+            false,
+            true,
+            DielectricGgxAllowedPaths::Transmission,
+        );
+        let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
+        let reflection_wi = Vec3::new(-0.2, 0.3, 0.9327379).normalize();
+
+        assert_eq!(bsdf.eval(wo, reflection_wi), Vec3::ZERO);
+        assert_eq!(bsdf.pdf(wo, reflection_wi), 0.0);
+
+        let sample = bsdf
+            .sample(wo, 0.0, Vec2::new(0.35, 0.72))
+            .expect("expected a transmission-only sample");
+        let expected = bsdf.eval(wo, sample.wi) * (sample.wi.z.abs() / sample.pdf);
+
+        assert!(sample.flags.contains(BsdfFlags::TRANSMISSION));
+        assert!(!sample.flags.contains(BsdfFlags::REFLECTION));
+        assert!(sample.wi.z < 0.0);
         assert!(sample.weight.abs_diff_eq(expected, 5.0e-4));
     }
 

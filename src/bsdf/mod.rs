@@ -1,5 +1,6 @@
 mod conductor_ggx;
 mod dielectric_ggx;
+mod directional_albedo;
 mod glass;
 mod mirror;
 mod normalized_lambert;
@@ -8,7 +9,10 @@ mod smith_ggx;
 use glam::Vec3;
 
 pub use conductor_ggx::ConductorGgxBsdf;
-pub use dielectric_ggx::DielectricGgxBsdf;
+pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
+pub(crate) use directional_albedo::{
+    DielectricGgxDirectionalAlbedoLut, DirectionalAlbedoCache, sanitize_dielectric_eta,
+};
 pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;

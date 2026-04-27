@@ -5,7 +5,7 @@ use crate::{
     camera::PinholeCamera,
     light::{PointLight, SpotLight},
     material::{ConductorGgxMaterial, Material, NormalizedLambertMaterial},
-    mesh::load_mesh,
+    mesh::load_gltf,
     scene::Scene,
     scenes::{game_rotation_degrees, uniform_scale_for_height},
 };
@@ -37,19 +37,19 @@ pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     )));
 
     // Cornell box walls (no emissive ceiling light).
-    let floor = scene.add_mesh(load_mesh(Path::new("assets/gltf/floor.glb"))?);
+    let floor = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
     scene.add_instance(floor, wall_gray, Mat4::IDENTITY);
-    let ceiling = scene.add_mesh(load_mesh(Path::new("assets/gltf/ceiling.glb"))?);
+    let ceiling = scene.add_mesh(load_gltf(Path::new("assets/gltf/ceiling.glb"))?);
     scene.add_instance(ceiling, wall_gray, Mat4::IDENTITY);
-    let back_wall = scene.add_mesh(load_mesh(Path::new("assets/gltf/back-wall.glb"))?);
+    let back_wall = scene.add_mesh(load_gltf(Path::new("assets/gltf/back-wall.glb"))?);
     scene.add_instance(back_wall, wall_gray, Mat4::IDENTITY);
-    let left_wall = scene.add_mesh(load_mesh(Path::new("assets/gltf/left-wall.glb"))?);
+    let left_wall = scene.add_mesh(load_gltf(Path::new("assets/gltf/left-wall.glb"))?);
     scene.add_instance(left_wall, red, Mat4::IDENTITY);
-    let right_wall = scene.add_mesh(load_mesh(Path::new("assets/gltf/right-wall.glb"))?);
+    let right_wall = scene.add_mesh(load_gltf(Path::new("assets/gltf/right-wall.glb"))?);
     scene.add_instance(right_wall, green, Mat4::IDENTITY);
 
     // Blue lambert bunny at the centre.
-    let bunny = load_mesh(Path::new("assets/gltf/bunny.glb"))?;
+    let bunny = load_gltf(Path::new("assets/gltf/bunny.glb"))?;
     let bunny_scale = uniform_scale_for_height(&bunny, 1.7);
     let bunny_pivot = Vec3::new(
         bunny.bounds.center().x,
@@ -64,7 +64,7 @@ pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     scene.add_instance(bunny_mesh, bunny_blue, bunny_transform);
 
     // Two rough metal spheres flanking the bunny.
-    let sphere = load_mesh(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
     let sphere_scale = uniform_scale_for_height(&sphere, 0.75);
     let sphere_pivot = Vec3::new(
         sphere.bounds.center().x,

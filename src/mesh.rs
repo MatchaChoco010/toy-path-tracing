@@ -1,5 +1,5 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use std::{fmt, path::Path};
+use std::{collections::HashMap, fmt, fs, path::Path};
 
 use crate::bvh::{MeshBvh, build_mesh_bvh};
 
@@ -126,6 +126,11 @@ impl Mesh {
 #[derive(Debug)]
 pub enum LoadMeshError {
     Gltf(gltf::Error),
+    Io(std::io::Error),
+    Obj {
+        line: usize,
+        message: String,
+    },
     EmptyMesh,
     MissingPositions {
         mesh_index: usize,
@@ -147,7 +152,9 @@ impl fmt::Display for LoadMeshError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Gltf(error) => write!(f, "{error}"),
-            Self::EmptyMesh => write!(f, "the glTF asset did not contain any triangle mesh data"),
+            Self::Io(error) => write!(f, "{error}"),
+            Self::Obj { line, message } => write!(f, "OBJ parse error on line {line}: {message}"),
+            Self::EmptyMesh => write!(f, "the mesh asset did not contain any triangle mesh data"),
             Self::MissingPositions {
                 mesh_index,
                 primitive_index,
@@ -179,6 +186,7 @@ impl std::error::Error for LoadMeshError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Gltf(error) => Some(error),
+            Self::Io(error) => Some(error),
             _ => None,
         }
     }
@@ -190,7 +198,13 @@ impl From<gltf::Error> for LoadMeshError {
     }
 }
 
-pub fn load_mesh(path: &Path) -> Result<Mesh, LoadMeshError> {
+impl From<std::io::Error> for LoadMeshError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+pub fn load_gltf(path: &Path) -> Result<Mesh, LoadMeshError> {
     let (document, buffers, _) = gltf::import(path)?;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -216,6 +230,11 @@ pub fn load_mesh(path: &Path) -> Result<Mesh, LoadMeshError> {
     }
 
     Ok(Mesh::new(vertices, indices))
+}
+
+pub fn load_obj(path: &Path) -> Result<Mesh, LoadMeshError> {
+    let source = fs::read_to_string(path)?;
+    parse_obj(&source)
 }
 
 fn append_gltf_node(
@@ -319,6 +338,244 @@ fn append_gltf_mesh(
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ObjVertexKey {
+    position_index: usize,
+    uv_index: Option<usize>,
+    normal_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ObjFaceCorner {
+    position_index: usize,
+    uv_index: Option<usize>,
+    normal_index: Option<usize>,
+}
+
+fn parse_obj(source: &str) -> Result<Mesh, LoadMeshError> {
+    let mut positions = Vec::new();
+    let mut uvs = Vec::new();
+    let mut normals = Vec::new();
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut vertex_map = HashMap::new();
+
+    for (line_index, raw_line) in source.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let mut fields = line.split_whitespace();
+        let directive = fields.next().expect("non-empty line must have a directive");
+
+        match directive {
+            "v" => {
+                positions.push(Vec3::new(
+                    parse_obj_float(&mut fields, line_number, "x position")?,
+                    parse_obj_float(&mut fields, line_number, "y position")?,
+                    parse_obj_float(&mut fields, line_number, "z position")?,
+                ));
+            }
+            "vt" => {
+                let u = parse_obj_float(&mut fields, line_number, "u texture coordinate")?;
+                let v = parse_obj_float(&mut fields, line_number, "v texture coordinate")?;
+                uvs.push(Vec2::new(u, 1.0 - v));
+            }
+            "vn" => {
+                normals.push(
+                    Vec3::new(
+                        parse_obj_float(&mut fields, line_number, "x normal")?,
+                        parse_obj_float(&mut fields, line_number, "y normal")?,
+                        parse_obj_float(&mut fields, line_number, "z normal")?,
+                    )
+                    .normalize_or_zero(),
+                );
+            }
+            "f" => {
+                let mut corners = Vec::new();
+                for token in fields {
+                    corners.push(parse_obj_face_corner(
+                        token,
+                        line_number,
+                        positions.len(),
+                        uvs.len(),
+                        normals.len(),
+                    )?);
+                }
+                if corners.len() < 3 {
+                    return Err(obj_error(
+                        line_number,
+                        "face must reference at least three vertices",
+                    ));
+                }
+
+                for corner_index in 1..corners.len() - 1 {
+                    for corner in [corners[0], corners[corner_index], corners[corner_index + 1]] {
+                        indices.push(append_obj_vertex(
+                            corner,
+                            &positions,
+                            &uvs,
+                            &normals,
+                            &mut vertices,
+                            &mut vertex_map,
+                        )?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if vertices.is_empty() || indices.is_empty() {
+        return Err(LoadMeshError::EmptyMesh);
+    }
+
+    let positions = vertices
+        .iter()
+        .map(|vertex| vertex.position)
+        .collect::<Vec<_>>();
+    let generated_normals = generate_vertex_normals(&positions, &indices);
+    for (vertex, generated_normal) in vertices.iter_mut().zip(generated_normals) {
+        if vertex.normal.length_squared() == 0.0 {
+            vertex.normal = generated_normal;
+        }
+    }
+
+    Ok(Mesh::new(vertices, indices))
+}
+
+fn append_obj_vertex(
+    corner: ObjFaceCorner,
+    positions: &[Vec3],
+    uvs: &[Vec2],
+    normals: &[Vec3],
+    vertices: &mut Vec<Vertex>,
+    vertex_map: &mut HashMap<ObjVertexKey, u32>,
+) -> Result<u32, LoadMeshError> {
+    let key = ObjVertexKey {
+        position_index: corner.position_index,
+        uv_index: corner.uv_index,
+        normal_index: corner.normal_index,
+    };
+    if let Some(index) = vertex_map.get(&key) {
+        return Ok(*index);
+    }
+
+    let index = u32::try_from(vertices.len()).map_err(|_| LoadMeshError::VertexCountOverflow)?;
+    vertices.push(Vertex {
+        position: positions[corner.position_index],
+        normal: corner
+            .normal_index
+            .map(|normal_index| normals[normal_index])
+            .unwrap_or(Vec3::ZERO),
+        uv: corner
+            .uv_index
+            .map(|uv_index| uvs[uv_index])
+            .unwrap_or(Vec2::ZERO),
+    });
+    vertex_map.insert(key, index);
+
+    Ok(index)
+}
+
+fn parse_obj_face_corner(
+    token: &str,
+    line_number: usize,
+    position_count: usize,
+    uv_count: usize,
+    normal_count: usize,
+) -> Result<ObjFaceCorner, LoadMeshError> {
+    let mut parts = token.split('/');
+    let position = parts.next().unwrap_or("");
+    let uv = parts.next();
+    let normal = parts.next();
+    if parts.next().is_some() {
+        return Err(obj_error(
+            line_number,
+            format!("invalid face vertex '{token}'"),
+        ));
+    }
+    if position.is_empty() {
+        return Err(obj_error(
+            line_number,
+            format!("face vertex '{token}' did not include a position index"),
+        ));
+    }
+
+    Ok(ObjFaceCorner {
+        position_index: resolve_obj_index(position, position_count, "position", line_number)?,
+        uv_index: resolve_optional_obj_index(uv, uv_count, "texture coordinate", line_number)?,
+        normal_index: resolve_optional_obj_index(normal, normal_count, "normal", line_number)?,
+    })
+}
+
+fn resolve_optional_obj_index(
+    raw_index: Option<&str>,
+    value_count: usize,
+    label: &str,
+    line_number: usize,
+) -> Result<Option<usize>, LoadMeshError> {
+    match raw_index {
+        Some(raw_index) if !raw_index.is_empty() => {
+            resolve_obj_index(raw_index, value_count, label, line_number).map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
+fn resolve_obj_index(
+    raw_index: &str,
+    value_count: usize,
+    label: &str,
+    line_number: usize,
+) -> Result<usize, LoadMeshError> {
+    let parsed_index = raw_index
+        .parse::<isize>()
+        .map_err(|_| obj_error(line_number, format!("invalid {label} index '{raw_index}'")))?;
+    if parsed_index == 0 {
+        return Err(obj_error(
+            line_number,
+            format!("{label} indices are 1-based and cannot be 0"),
+        ));
+    }
+
+    let resolved_index = if parsed_index > 0 {
+        parsed_index - 1
+    } else {
+        value_count as isize + parsed_index
+    };
+    if resolved_index < 0 || resolved_index >= value_count as isize {
+        return Err(obj_error(
+            line_number,
+            format!("{label} index '{raw_index}' was out of bounds"),
+        ));
+    }
+
+    Ok(resolved_index as usize)
+}
+
+fn parse_obj_float<'a>(
+    fields: &mut impl Iterator<Item = &'a str>,
+    line_number: usize,
+    label: &str,
+) -> Result<f32, LoadMeshError> {
+    let token = fields
+        .next()
+        .ok_or_else(|| obj_error(line_number, format!("missing {label}")))?;
+    token
+        .parse::<f32>()
+        .map_err(|_| obj_error(line_number, format!("invalid {label} '{token}'")))
+}
+
+fn obj_error(line: usize, message: impl Into<String>) -> LoadMeshError {
+    LoadMeshError::Obj {
+        line,
+        message: message.into(),
+    }
+}
+
 fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
     let mut normals = vec![Vec3::ZERO; positions.len()];
 
@@ -363,7 +620,7 @@ fn compute_bounds(vertices: &[Vertex]) -> Option<Bounds> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bounds, Mesh, Vertex};
+    use super::{Bounds, Mesh, Vertex, parse_obj};
     use glam::{Vec2, Vec3};
 
     #[test]
@@ -426,5 +683,46 @@ mod tests {
                 max: Vec3::new(4.0, 1.0, 3.0),
             }
         );
+    }
+
+    #[test]
+    fn load_obj_triangulates_faces_and_generates_normals() {
+        let mesh = parse_obj(
+            "
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
+f 1/1 2/2 3/3 4/4
+",
+        )
+        .expect("OBJ should load");
+
+        assert_eq!(mesh.vertices.len(), 4);
+        assert_eq!(mesh.indices, vec![0, 1, 2, 0, 2, 3]);
+        assert_eq!(mesh.triangle_count(), 2);
+        assert!(mesh.vertices.iter().all(|vertex| vertex.normal == Vec3::Z));
+        assert_eq!(mesh.vertices[2].uv, Vec2::X);
+    }
+
+    #[test]
+    fn load_obj_resolves_negative_indices() {
+        let mesh = parse_obj(
+            "
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f -3 -2 -1
+",
+        )
+        .expect("OBJ should load");
+
+        assert_eq!(mesh.vertices.len(), 3);
+        assert_eq!(mesh.indices, vec![0, 1, 2]);
+        assert_eq!(mesh.triangle_normals(0), [Vec3::Z; 3]);
     }
 }

@@ -2,6 +2,7 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::fmt;
 
 use crate::{
+    bsdf::DirectionalAlbedoCache,
     bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
     light::{
         DirectionalLight, DirectionalLightIndex, EnvironmentLight, LightSampler, PointLight,
@@ -77,6 +78,7 @@ pub struct SceneHit {
 pub struct Scene {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
+    directional_albedo_cache: DirectionalAlbedoCache,
     pub instances: Vec<Instance>,
     pub triangles: Vec<TriangleRef>,
     pub area_light_triangles: Vec<AreaLightTriangle>,
@@ -123,7 +125,14 @@ impl Scene {
         mesh_index
     }
 
-    pub fn add_material(&mut self, material: Material) -> MaterialIndex {
+    pub fn add_material(&mut self, mut material: Material) -> MaterialIndex {
+        if let Material::SimplePBR(simple_pbr) = &mut material {
+            let lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx(simple_pbr.eta);
+            simple_pbr.install_dielectric_ggx_directional_albedo_lut(lut);
+        }
+
         let material_index = MaterialIndex(self.materials.len());
         self.materials.push(material);
         material_index

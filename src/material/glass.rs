@@ -3,12 +3,11 @@ use std::path::Path;
 use glam::Vec3;
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::GlassBsdf;
+use crate::bsdf::{BsdfFlags, GlassBsdf};
 
 use super::{
-    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
-    normal_map::load_optional_normal_map, sample_matches_geometric_side,
-    texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +64,17 @@ impl GlassMaterial {
         let uc = rng.random::<f32>();
         let sample = self.sample_impl(shading_vertex, uc)?;
 
-        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
+        let wi_side = sample.wi.dot(shading_vertex.ng);
+        if sample.flags.contains(BsdfFlags::REFLECTION) && wi_side <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return None;
+        }
+        if sample.flags.contains(BsdfFlags::TRANSMISSION)
+            && wi_side >= -GEOMETRIC_NORMAL_COS_EPSILON
+        {
+            return None;
+        }
+
+        Some(sample)
     }
 
     fn sample_impl(&self, shading_vertex: &ShadingVertex, uc: f32) -> Option<MaterialSample> {
