@@ -5,3 +5,5 @@
 # External assets fetched via assets/download.sh
 /assets/san_miguel_2.0/*
 !/assets/san_miguel_2.0/.gitkeep
+/assets/bistro/*
+!/assets/bistro/.gitkeep

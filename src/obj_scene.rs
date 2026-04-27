@@ -340,10 +340,14 @@ fn parse_mtl_source(source: &str, path: &Path) -> Result<Vec<ObjMaterial>, LoadO
                 let material = current.as_mut().ok_or_else(|| {
                     mtl_error(path, line_number, "map_Kd before any newmtl directive")
                 })?;
-                let token = fields.last().ok_or_else(|| {
-                    mtl_error(path, line_number, "map_Kd missing texture path")
-                })?;
-                material.diffuse_texture_path = Some(normalize_obj_path(token));
+                let path_text = line
+                    .split_once(char::is_whitespace)
+                    .map(|(_, rest)| rest.trim())
+                    .unwrap_or("");
+                if path_text.is_empty() {
+                    return Err(mtl_error(path, line_number, "map_Kd missing texture path"));
+                }
+                material.diffuse_texture_path = Some(normalize_obj_path(path_text));
             }
             _ => {}
         }
@@ -377,9 +381,30 @@ fn parse_mtl_scalar<'a>(
     let token = fields
         .next()
         .ok_or_else(|| mtl_error(path, line_number, format!("missing {label}")))?;
-    token
-        .parse::<f32>()
-        .map_err(|_| mtl_error(path, line_number, format!("invalid {label} '{token}'")))
+    if let Ok(value) = token.parse::<f32>() {
+        return Ok(value);
+    }
+    if let Some(value) = parse_leading_f32(token) {
+        return Ok(value);
+    }
+    Err(mtl_error(
+        path,
+        line_number,
+        format!("invalid {label} '{token}'"),
+    ))
+}
+
+fn parse_leading_f32(token: &str) -> Option<f32> {
+    let bytes = token.as_bytes();
+    let mut end = 0usize;
+    let mut best: Option<f32> = None;
+    while end < bytes.len() {
+        end += 1;
+        if let Ok(value) = token[..end].parse::<f32>() {
+            best = Some(value);
+        }
+    }
+    best
 }
 
 fn mtl_error(
@@ -444,6 +469,37 @@ f 1 2 3
         assert_eq!(scene.material_meshes.len(), 1);
         assert!(scene.material_meshes[0].material_name.is_none());
         assert_eq!(scene.material_meshes[0].mesh.triangle_count(), 1);
+    }
+
+    #[test]
+    fn mtl_parses_scalar_with_trailing_garbage_via_leading_prefix() {
+        let source = "
+newmtl wall
+Ns 100.000Textures\\
+Kd 0.4 0.5 0.6
+illum 2
+";
+        let materials = parse_mtl_source(source, Path::new("scene.mtl")).expect("parsed");
+        assert_eq!(materials.len(), 1);
+        assert_eq!(materials[0].specular_exponent, 100.0);
+    }
+
+    #[test]
+    fn mtl_map_kd_supports_paths_with_spaces() {
+        let source = "
+newmtl sign
+Kd 1 1 1
+illum 2
+map_Kd ../PropTextures/Paris_ShopSign_ties shop_diff.png
+";
+        let materials = parse_mtl_source(source, Path::new("scene.mtl")).expect("parsed");
+        assert_eq!(materials.len(), 1);
+        assert_eq!(
+            materials[0].diffuse_texture_path.as_deref(),
+            Some(Path::new(
+                "../PropTextures/Paris_ShopSign_ties shop_diff.png"
+            )),
+        );
     }
 
     #[test]
