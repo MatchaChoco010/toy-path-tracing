@@ -1,7 +1,7 @@
 use std::f32::consts::{PI, TAU};
 use std::path::Path;
 
-use glam::{Vec2, Vec3};
+use glam::{Mat3, Vec2, Vec3};
 
 use super::{LightLiSample, LightType};
 use crate::scene::Scene;
@@ -11,17 +11,27 @@ pub struct EnvironmentLight {
     width: usize,
     height: usize,
     scale: f32,
+    rotate_y: f32,
+    rotation: Mat3,
+    inverse_rotation: Mat3,
     pixels: Vec<Vec3>,
-    distribution: EnvironmentDistribution,
-    mis_compensated_distribution: EnvironmentDistribution,
+    distribution: HierarchicalDistribution,
+    mis_compensated_distribution: HierarchicalDistribution,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct EnvironmentDistribution {
-    texel_weights: Vec<f32>,
-    conditional_cdf: Vec<f32>,
-    marginal_cdf: Vec<f32>,
+struct HierarchicalDistribution {
+    levels: Vec<MipLevel>,
+    padded_width: usize,
+    padded_height: usize,
     total_weight: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MipLevel {
+    width: usize,
+    height: usize,
+    weights: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,7 +43,13 @@ pub struct EnvironmentLightSample {
 }
 
 impl EnvironmentLight {
-    pub fn from_pixels(width: usize, height: usize, pixels: Vec<Vec3>, scale: f32) -> Self {
+    pub fn from_pixels(
+        width: usize,
+        height: usize,
+        pixels: Vec<Vec3>,
+        scale: f32,
+        rotate_y: f32,
+    ) -> Self {
         assert!(width > 0 && height > 0, "environment map must be non-empty");
         assert_eq!(
             pixels.len(),
@@ -49,17 +65,27 @@ impl EnvironmentLight {
             mis_compensated_environment_weights(width, height, &pixels),
         );
 
+        let rotation = Mat3::from_rotation_y(rotate_y);
+        let inverse_rotation = Mat3::from_rotation_y(-rotate_y);
+
         Self {
             width,
             height,
             scale,
+            rotate_y,
+            rotation,
+            inverse_rotation,
             pixels,
             distribution,
             mis_compensated_distribution,
         }
     }
 
-    pub fn from_hdr_file(path: impl AsRef<Path>, scale: f32) -> image::ImageResult<Self> {
+    pub fn from_hdr_file(
+        path: impl AsRef<Path>,
+        scale: f32,
+        rotate_y: f32,
+    ) -> image::ImageResult<Self> {
         let dynamic = image::open(path)?;
         let rgb32f = dynamic.into_rgb32f();
         let width = rgb32f.width() as usize;
@@ -69,7 +95,7 @@ impl EnvironmentLight {
             .map(|p| Vec3::new(p[0], p[1], p[2]))
             .collect();
 
-        Ok(Self::from_pixels(width, height, pixels, scale))
+        Ok(Self::from_pixels(width, height, pixels, scale, rotate_y))
     }
 
     pub fn width(&self) -> usize {
@@ -88,12 +114,17 @@ impl EnvironmentLight {
         self.scale = scale;
     }
 
+    pub fn rotate_y(&self) -> f32 {
+        self.rotate_y
+    }
+
     pub fn pixels(&self) -> &[Vec3] {
         &self.pixels
     }
 
     pub fn radiance(&self, direction: Vec3) -> Vec3 {
-        let uv = direction_to_uv(direction);
+        let local_dir = self.inverse_rotation * direction;
+        let uv = direction_to_uv(local_dir);
         let i = pixel_coord(uv.x, self.width);
         let j = pixel_coord(uv.y, self.height);
         self.scale * self.pixels[j * self.width + i]
@@ -117,20 +148,21 @@ impl EnvironmentLight {
 
     fn pdf_with_distribution(
         &self,
-        distribution: &EnvironmentDistribution,
+        distribution: &HierarchicalDistribution,
         direction: Vec3,
     ) -> f32 {
         if distribution.total_weight <= 0.0 {
             return 0.0;
         }
-        let uv = direction_to_uv(direction);
+        let local_dir = self.inverse_rotation * direction;
+        let uv = direction_to_uv(local_dir);
         let sin_theta = (uv.y * PI).sin();
         if sin_theta <= 0.0 {
             return 0.0;
         }
         let i = pixel_coord(uv.x, self.width);
         let j = pixel_coord(uv.y, self.height);
-        let weight = distribution.texel_weight(i, j, self.width);
+        let weight = distribution.texel_weight(i, j);
         if weight <= 0.0 {
             return 0.0;
         }
@@ -140,29 +172,46 @@ impl EnvironmentLight {
 
     fn sample_with_distribution(
         &self,
-        distribution: &EnvironmentDistribution,
+        distribution: &HierarchicalDistribution,
         us: Vec2,
     ) -> Option<EnvironmentLightSample> {
         if distribution.total_weight <= 0.0 {
             return None;
         }
 
-        let (j, dv) = sample_cdf(&distribution.marginal_cdf, us.y);
-        let row_offset = j * (self.width + 1);
-        let row = &distribution.conditional_cdf[row_offset..row_offset + self.width + 1];
-        let (i, du) = sample_cdf(row, us.x);
+        let mut u = us.x.clamp(0.0, 1.0);
+        let mut v = us.y.clamp(0.0, 1.0);
+        let mut i = 0usize;
+        let mut j = 0usize;
 
-        let u_cont = (i as f32 + du) / self.width as f32;
-        let v_cont = (j as f32 + dv) / self.height as f32;
-        let uv = Vec2::new(u_cont, v_cont);
-        let direction = uv_to_direction(uv);
+        for level_idx in 1..distribution.levels.len() {
+            let parent = &distribution.levels[level_idx - 1];
+            let child = &distribution.levels[level_idx];
+            let (ni, nj, nu, nv) =
+                hsw_step(parent.width, parent.height, child, i, j, u, v)?;
+            i = ni;
+            j = nj;
+            u = nu;
+            v = nv;
+        }
+
+        if i >= self.width || j >= self.height {
+            return None;
+        }
+
+        let weight = distribution.texel_weight(i, j);
+        if weight <= 0.0 {
+            return None;
+        }
+
+        let u_cont = (i as f32 + u) / self.width as f32;
+        let v_cont = (j as f32 + v) / self.height as f32;
+        let uv = Vec2::new(u_cont.clamp(0.0, ONE_MINUS_EPS), v_cont.clamp(0.0, ONE_MINUS_EPS));
+        let local_direction = uv_to_direction(uv);
+        let direction = self.rotation * local_direction;
 
         let sin_theta = (v_cont * PI).sin();
         if sin_theta <= 0.0 {
-            return None;
-        }
-        let weight = distribution.texel_weight(i, j, self.width);
-        if weight <= 0.0 {
             return None;
         }
 
@@ -237,6 +286,8 @@ pub fn infinite_light_le(scene: &Scene, direction: Vec3) -> Vec3 {
         .unwrap_or(Vec3::ZERO)
 }
 
+const ONE_MINUS_EPS: f32 = 1.0 - f32::EPSILON;
+
 fn luminance(v: Vec3) -> f32 {
     0.2126 * v.x + 0.7152 * v.y + 0.0722 * v.z
 }
@@ -270,9 +321,14 @@ fn direction_to_uv(direction: Vec3) -> Vec2 {
     Vec2::new((phi / TAU).clamp(0.0, 1.0), (theta / PI).clamp(0.0, 1.0))
 }
 
-impl EnvironmentDistribution {
-    fn texel_weight(&self, i: usize, j: usize, width: usize) -> f32 {
-        self.texel_weights[j * width + i]
+impl HierarchicalDistribution {
+    fn leaf(&self) -> &MipLevel {
+        self.levels.last().expect("pyramid must have at least one level")
+    }
+
+    fn texel_weight(&self, i: usize, j: usize) -> f32 {
+        let leaf = self.leaf();
+        leaf.weights[j * leaf.width + i]
     }
 }
 
@@ -295,8 +351,6 @@ fn mis_compensated_environment_weights(width: usize, height: usize, pixels: &[Ve
         let sin_theta = row_sin_theta(j, height);
         for i in 0..width {
             let l = positive_luminance(pixels[j * width + i]);
-            // Normal-independent MIS compensation for equal BSDF/env sampling.
-            // The texel-domain CDF still needs the lat-long sin(theta) jacobian.
             let compensated = l - mean_luminance;
             weights[j * width + i] = if compensated > compensation_epsilon {
                 compensated * sin_theta
@@ -332,65 +386,120 @@ fn positive_luminance(v: Vec3) -> f32 {
 fn build_distribution(
     width: usize,
     height: usize,
-    mut texel_weights: Vec<f32>,
-) -> EnvironmentDistribution {
-    assert_eq!(texel_weights.len(), width * height);
-    for weight in &mut texel_weights {
-        *weight = weight.max(0.0);
+    pixel_weights: Vec<f32>,
+) -> HierarchicalDistribution {
+    debug_assert_eq!(pixel_weights.len(), width * height);
+
+    let padded_width = width.next_power_of_two();
+    let padded_height = height.next_power_of_two();
+
+    let mut leaf = vec![0.0f32; padded_width * padded_height];
+    for j in 0..height {
+        for i in 0..width {
+            leaf[j * padded_width + i] = pixel_weights[j * width + i].max(0.0);
+        }
     }
 
-    let mut conditional_cdf = vec![0.0f32; height * (width + 1)];
-    let mut row_integrals = vec![0.0f32; height];
+    let mut levels = Vec::new();
+    levels.push(MipLevel {
+        width: padded_width,
+        height: padded_height,
+        weights: leaf,
+    });
 
-    for j in 0..height {
-        let row_offset = j * (width + 1);
-        for i in 0..width {
-            let weight = texel_weights[j * width + i];
-            conditional_cdf[row_offset + i + 1] = conditional_cdf[row_offset + i] + weight;
-        }
-        let row_sum = conditional_cdf[row_offset + width];
-        row_integrals[j] = row_sum;
-        if row_sum > 0.0 {
-            let inv = 1.0 / row_sum;
-            for k in 0..=width {
-                conditional_cdf[row_offset + k] *= inv;
+    while levels
+        .last()
+        .map(|l| l.width > 1 || l.height > 1)
+        .unwrap_or(false)
+    {
+        let finer = levels.last().unwrap();
+        let scale_i = if finer.width > 1 { 2 } else { 1 };
+        let scale_j = if finer.height > 1 { 2 } else { 1 };
+        let cw = finer.width / scale_i;
+        let ch = finer.height / scale_j;
+        let mut weights = vec![0.0f32; cw * ch];
+        for j in 0..ch {
+            for i in 0..cw {
+                let mut sum = 0.0f32;
+                for dj in 0..scale_j {
+                    for di in 0..scale_i {
+                        let fi = i * scale_i + di;
+                        let fj = j * scale_j + dj;
+                        sum += finer.weights[fj * finer.width + fi];
+                    }
+                }
+                weights[j * cw + i] = sum;
             }
         }
+        levels.push(MipLevel {
+            width: cw,
+            height: ch,
+            weights,
+        });
     }
 
-    let mut marginal_cdf = vec![0.0f32; height + 1];
-    for j in 0..height {
-        marginal_cdf[j + 1] = marginal_cdf[j] + row_integrals[j];
-    }
-    let total = marginal_cdf[height];
-    if total > 0.0 {
-        let inv = 1.0 / total;
-        for entry in marginal_cdf.iter_mut() {
-            *entry *= inv;
-        }
-    }
+    levels.reverse();
+    let total_weight = levels[0].weights[0];
 
-    EnvironmentDistribution {
-        texel_weights,
-        conditional_cdf,
-        marginal_cdf,
-        total_weight: total,
+    HierarchicalDistribution {
+        levels,
+        padded_width,
+        padded_height,
+        total_weight,
     }
 }
 
-fn sample_cdf(cdf: &[f32], u: f32) -> (usize, f32) {
-    debug_assert!(cdf.len() >= 2);
-    let last = cdf.len() - 2;
-    let u = u.clamp(0.0, 1.0);
-    let idx = cdf.partition_point(|&c| c <= u).saturating_sub(1).min(last);
-    let a = cdf[idx];
-    let b = cdf[idx + 1];
-    let du = if b > a {
-        ((u - a) / (b - a)).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    (idx, du)
+fn hsw_step(
+    parent_w: usize,
+    parent_h: usize,
+    child: &MipLevel,
+    parent_i: usize,
+    parent_j: usize,
+    mut u: f32,
+    mut v: f32,
+) -> Option<(usize, usize, f32, f32)> {
+    let scale_i = child.width / parent_w;
+    let scale_j = child.height / parent_h;
+    let mut ci = parent_i * scale_i;
+    let mut cj = parent_j * scale_j;
+
+    if scale_j == 2 {
+        let mut w_top = 0.0f32;
+        let mut w_bot = 0.0f32;
+        for di in 0..scale_i {
+            w_top += child.weights[cj * child.width + ci + di];
+            w_bot += child.weights[(cj + 1) * child.width + ci + di];
+        }
+        let total = w_top + w_bot;
+        if total <= 0.0 {
+            return None;
+        }
+        let p_top = w_top / total;
+        if v < p_top {
+            v = (v / p_top).clamp(0.0, ONE_MINUS_EPS);
+        } else {
+            v = ((v - p_top) / (1.0 - p_top)).clamp(0.0, ONE_MINUS_EPS);
+            cj += 1;
+        }
+    }
+
+    if scale_i == 2 {
+        let w_left = child.weights[cj * child.width + ci];
+        let w_right = child.weights[cj * child.width + ci + 1];
+        let total = w_left + w_right;
+        if total <= 0.0 {
+            return None;
+        }
+        let p_left = w_left / total;
+        if u < p_left {
+            u = (u / p_left).clamp(0.0, ONE_MINUS_EPS);
+        } else {
+            u = ((u - p_left) / (1.0 - p_left)).clamp(0.0, ONE_MINUS_EPS);
+            ci += 1;
+        }
+    }
+
+    Some((ci, cj, u, v))
 }
 
 #[cfg(test)]
@@ -401,14 +510,14 @@ mod tests {
 
     use super::super::{LightKind, LightSampleContext, LightType, sample_light_li};
     use super::{
-        EnvironmentLight, direction_to_uv, infinite_light_le, infinite_light_pdf_li,
-        uv_to_direction,
+        EnvironmentLight, build_distribution, direction_to_uv, infinite_light_le,
+        infinite_light_pdf_li, uv_to_direction,
     };
     use crate::scene::Scene;
 
     fn uniform_environment(width: usize, height: usize, radiance: f32) -> EnvironmentLight {
         let pixels = vec![Vec3::splat(radiance); width * height];
-        EnvironmentLight::from_pixels(width, height, pixels, 1.0)
+        EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0)
     }
 
     #[test]
@@ -453,7 +562,7 @@ mod tests {
     fn sample_pdf_matches_pdf_query() {
         let mut pixels = vec![Vec3::splat(0.05); 16 * 8];
         pixels[3 * 16 + 9] = Vec3::splat(10.0);
-        let env = EnvironmentLight::from_pixels(16, 8, pixels, 1.0);
+        let env = EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0);
 
         for (ux, uy) in [(0.1, 0.1), (0.5, 0.5), (0.8, 0.3), (0.95, 0.85)] {
             let sample = env
@@ -494,7 +603,7 @@ mod tests {
         let bright_i = 10;
         let bright_j = 6;
         pixels[bright_j * width + bright_i] = Vec3::splat(1.0e6);
-        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0);
+        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0);
 
         for (ux, uy) in [(0.1, 0.1), (0.4, 0.4), (0.7, 0.7), (0.95, 0.05)] {
             let sample = env
@@ -516,7 +625,7 @@ mod tests {
         let bright_j = 1;
         let mut pixels = vec![Vec3::splat(1.0); width * height];
         pixels[bright_j * width + bright_i] = Vec3::splat(9.0);
-        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0);
+        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0);
 
         let low_direction = uv_to_direction(Vec2::new(0.125, 0.25));
         let bright_direction = uv_to_direction(Vec2::new(
@@ -546,7 +655,7 @@ mod tests {
         let mut pixels = vec![Vec3::ZERO; width * height];
         pixels[0] = Vec3::splat(4.0);
         pixels[1] = Vec3::splat(1.2);
-        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0);
+        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0);
 
         let high_solid_angle_row_direction = uv_to_direction(Vec2::new(0.5, 0.375));
 
@@ -561,7 +670,7 @@ mod tests {
         let mut pixels = vec![Vec3::splat(0.2); 16 * 8];
         pixels[2 * 16 + 4] = Vec3::splat(8.0);
         pixels[5 * 16 + 11] = Vec3::splat(4.0);
-        let env = EnvironmentLight::from_pixels(16, 8, pixels, 1.0);
+        let env = EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0);
 
         for (ux, uy) in [(0.1, 0.1), (0.5, 0.5), (0.8, 0.3), (0.95, 0.85)] {
             let sample = env
@@ -604,7 +713,7 @@ mod tests {
     fn sample_light_li_for_infinite_returns_environment_sample() {
         let mut scene = Scene::new();
         let pixels = vec![Vec3::splat(1.0); 32 * 16];
-        scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0));
+        scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0));
 
         let ctx = LightSampleContext {
             p: Vec3::ZERO,
@@ -627,5 +736,107 @@ mod tests {
         let scene = Scene::new();
         assert_eq!(infinite_light_le(&scene, Vec3::Z), Vec3::ZERO);
         assert_eq!(infinite_light_pdf_li(&scene, Vec3::Z), 0.0);
+    }
+
+    #[test]
+    fn pyramid_root_holds_total_weight_and_levels_collapse_to_root() {
+        let weights = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let dist = build_distribution(3, 2, weights);
+
+        assert_eq!(dist.padded_width, 4);
+        assert_eq!(dist.padded_height, 2);
+        assert!((dist.total_weight - (1.0 + 2.0 + 3.0 + 4.0 + 5.0 + 6.0)).abs() < 1.0e-5);
+        assert_eq!(dist.levels.first().unwrap().width, 1);
+        assert_eq!(dist.levels.first().unwrap().height, 1);
+        assert_eq!(dist.levels.last().unwrap().width, 4);
+        assert_eq!(dist.levels.last().unwrap().height, 2);
+
+        let leaf = dist.levels.last().unwrap();
+        assert_eq!(leaf.weights[3], 0.0);
+        assert_eq!(leaf.weights[4 + 3], 0.0);
+        assert_eq!(leaf.weights[0], 1.0);
+        assert_eq!(leaf.weights[2], 3.0);
+        assert_eq!(leaf.weights[4 + 2], 6.0);
+    }
+
+    #[test]
+    fn non_power_of_two_uniform_environment_has_inverse_sphere_pdf() {
+        let env = uniform_environment(120, 60, 1.0);
+        let direction = uv_to_direction(Vec2::new(0.31, 0.47));
+        let pdf = env.pdf(direction);
+        let expected = 1.0 / (4.0 * PI);
+
+        assert!(
+            (pdf - expected).abs() < 1.0e-2,
+            "pdf {pdf} deviates from uniform sphere pdf {expected}"
+        );
+    }
+
+    #[test]
+    fn non_power_of_two_environment_sample_lands_in_valid_region() {
+        let width = 5;
+        let height = 3;
+        let mut pixels = vec![Vec3::splat(1.0e-3); width * height];
+        pixels[1 * width + 3] = Vec3::splat(8.0);
+        let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0);
+
+        for (ux, uy) in [(0.05, 0.05), (0.5, 0.5), (0.95, 0.5), (0.5, 0.95)] {
+            let sample = env
+                .sample(Vec2::new(ux, uy))
+                .expect("sample should succeed");
+            let uv = direction_to_uv(sample.direction);
+            let i = (uv.x * width as f32) as usize;
+            let j = (uv.y * height as f32) as usize;
+            assert!(
+                i < width && j < height,
+                "sample fell into padding: i={i}, j={j}"
+            );
+            let queried = env.pdf(sample.direction);
+            assert!(
+                (sample.pdf - queried).abs() / sample.pdf.max(1.0e-6) < 1.0e-3,
+                "pdf mismatch in non-power-of-two env"
+            );
+        }
+    }
+
+    #[test]
+    fn rotate_y_rotates_radiance_and_keeps_pdf_consistent() {
+        let width = 16;
+        let height = 8;
+        let mut pixels = vec![Vec3::splat(0.05); width * height];
+        let bright_i = 4;
+        let bright_j = 3;
+        pixels[bright_j * width + bright_i] = Vec3::splat(20.0);
+
+        let rotation_radians = std::f32::consts::FRAC_PI_2;
+        let rotated_env =
+            EnvironmentLight::from_pixels(width, height, pixels.clone(), 1.0, rotation_radians);
+        let plain_env = EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0);
+
+        let bright_uv = Vec2::new(
+            (bright_i as f32 + 0.5) / width as f32,
+            (bright_j as f32 + 0.5) / height as f32,
+        );
+        let local_dir = uv_to_direction(bright_uv);
+        let rotated_dir = glam::Mat3::from_rotation_y(rotation_radians) * local_dir;
+
+        let plain_radiance = plain_env.radiance(local_dir);
+        let rotated_radiance = rotated_env.radiance(rotated_dir);
+        assert!(
+            (plain_radiance - rotated_radiance).length() < 1.0e-3,
+            "rotated radiance lookup must match plain radiance at the rotated direction"
+        );
+
+        for (ux, uy) in [(0.1, 0.2), (0.4, 0.6), (0.85, 0.55)] {
+            let sample = rotated_env
+                .sample(Vec2::new(ux, uy))
+                .expect("sample should succeed");
+            let queried = rotated_env.pdf(sample.direction);
+            assert!(
+                (sample.pdf - queried).abs() / sample.pdf.max(1.0e-6) < 1.0e-3,
+                "pdf mismatch under rotation"
+            );
+            assert!((sample.direction.length() - 1.0).abs() < 1.0e-5);
+        }
     }
 }

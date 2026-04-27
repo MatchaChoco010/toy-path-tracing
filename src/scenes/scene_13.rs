@@ -44,7 +44,7 @@ pub(super) fn create_sky_bunny_scene(
         * Mat4::from_translation(-bunny_pivot);
     scene.add_instance(bunny_mesh, bunny_material, bunny_transform);
 
-    let env = EnvironmentLight::from_hdr_file(sky_path, sky_scale)?;
+    let env = EnvironmentLight::from_hdr_file(sky_path, sky_scale, 0.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(

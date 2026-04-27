@@ -60,7 +60,7 @@ pub fn create_scene_8() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         scene.add_instance(sphere_mesh_index, glass_material, glass_transform);
     }
 
-    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 2.0)?;
+    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 2.0, 0.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(
