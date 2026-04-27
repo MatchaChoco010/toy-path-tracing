@@ -26,7 +26,7 @@ pub fn trace_radiance(
 
     let initial_hit = scene
         .closest_hit(&initial_ray, rng)
-        .expect("scene.build_bvh() must be called before traversal");
+        .expect("scene.build_qbvh() must be called before traversal");
 
     let Some(initial_hit) = initial_hit else {
         return infinite_light_le(scene, initial_ray.direction);
@@ -78,7 +78,7 @@ pub fn trace_radiance(
         let next_ray = spawn_scattered_ray(&ray, hit_t, &vtx, &sample);
         let next_hit = scene
             .closest_hit(&next_ray, rng)
-            .expect("scene.build_bvh() must be called before traversal");
+            .expect("scene.build_qbvh() must be called before traversal");
 
         match next_hit {
             Some(next_hit) => {
@@ -309,7 +309,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -337,7 +337,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -379,7 +379,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -413,7 +413,7 @@ mod tests {
         let env_radiance = Vec3::splat(2.0);
         let pixels = vec![env_radiance; 32 * 16];
         scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let throughput = Vec3::ONE;
         let direction = Vec3::Y;
@@ -441,7 +441,7 @@ mod tests {
         let env_radiance = Vec3::new(0.1, 0.4, 0.9);
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mut rng = rand::rng();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);
@@ -464,7 +464,7 @@ mod tests {
             Vec3::ONE,
             16.0 * PI,
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -497,7 +497,7 @@ mod tests {
             Vec3::ONE,
             16.0 * PI,
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -523,7 +523,7 @@ mod tests {
             Vec3::ONE,
             2.0,
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -555,7 +555,7 @@ mod tests {
             (30.0_f32).to_radians(),
             (20.0_f32).to_radians(),
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -586,7 +586,7 @@ mod tests {
             (10.0_f32).to_radians(),
             (5.0_f32).to_radians(),
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -615,7 +615,7 @@ mod tests {
         let env_radiance = Vec3::splat(0.2);
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mut rng = rand::rng();
         let mut accumulated = Vec3::ZERO;

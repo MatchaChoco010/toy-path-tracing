@@ -45,9 +45,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let new_scale = env.scale() * args.env_scale;
         env.set_scale(new_scale);
     }
-    let build_bvh_start = Instant::now();
-    scene.build_bvh();
-    println!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
+    let build_qbvh_start = Instant::now();
+    scene.build_qbvh();
+    println!("build_qbvh: {}", format_duration(build_qbvh_start.elapsed()));
 
     let mut pixels = vec![0_u8; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();

@@ -1,7 +1,7 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::{collections::HashMap, fmt, fs, path::Path};
 
-use crate::bvh::{MeshBvh, build_mesh_bvh};
+use crate::qbvh::{Qbvh, build_qbvh};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
@@ -48,7 +48,7 @@ pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub bounds: Bounds,
-    pub bvh: Option<MeshBvh>,
+    pub qbvh: Option<Qbvh>,
 }
 
 impl Mesh {
@@ -59,7 +59,7 @@ impl Mesh {
             vertices,
             indices,
             bounds,
-            bvh: None,
+            qbvh: None,
         }
     }
 
@@ -106,11 +106,11 @@ impl Mesh {
         }
     }
 
-    pub fn build_bvh(&mut self) {
+    pub fn build_qbvh(&mut self) {
         let triangle_bounds = (0..self.triangle_count())
             .map(|triangle_index| self.triangle_bounds(triangle_index))
             .collect::<Vec<_>>();
-        self.bvh = build_mesh_bvh(&triangle_bounds);
+        self.qbvh = build_qbvh(&triangle_bounds);
     }
 
     fn triangle_indices(&self, triangle_index: usize) -> [u32; 3] {

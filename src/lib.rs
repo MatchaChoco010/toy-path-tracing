@@ -1,5 +1,4 @@
 pub mod bsdf;
-pub mod bvh;
 pub mod camera;
 pub mod integrator;
 pub mod light;
@@ -7,6 +6,7 @@ pub mod material;
 pub mod math;
 pub mod mesh;
 pub mod obj_scene;
+pub mod qbvh;
 pub mod ray;
 pub mod scene;
 pub mod scenes;

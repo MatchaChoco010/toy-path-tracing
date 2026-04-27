@@ -229,7 +229,7 @@ pub(super) fn unoccluded_ray(
     let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
     let hit = scene
         .closest_hit(&shadow_ray, rng)
-        .expect("scene.build_bvh() must be called before traversal");
+        .expect("scene.build_qbvh() must be called before traversal");
 
     match hit {
         None => true,
@@ -271,7 +271,7 @@ pub(super) mod test_helpers {
 
         scene.add_instance(mirror_mesh, mirror_material, glam::Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mirror_hit = Vec3::new(0.25, 0.20, 0.0);
         let light_hit = Vec3::new(0.65, 0.20, 1.0);
