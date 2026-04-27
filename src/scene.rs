@@ -1,4 +1,5 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
+use rand::{RngExt, rngs::ThreadRng};
 use std::fmt;
 
 use crate::{
@@ -223,7 +224,11 @@ impl Scene {
         self.bvh = build_scene_bvh(&instance_bounds);
     }
 
-    pub fn closest_hit(&self, ray: &Ray) -> Result<Option<SceneHit>, ClosestHitError> {
+    pub fn closest_hit(
+        &self,
+        ray: &Ray,
+        rng: &mut ThreadRng,
+    ) -> Result<Option<SceneHit>, ClosestHitError> {
         if self.instances.is_empty() {
             return Ok(None);
         }
@@ -249,9 +254,32 @@ impl Scene {
                         let instance = self.instances[instance_index.0];
                         let local_ray = ray.transformed(instance.world_to_local);
                         let mesh = &self.meshes[instance.mesh_index.0];
+                        let material = self.instance_material(instance_index);
+                        let has_alpha_test = material.has_alpha_test();
 
-                        if let Some(mesh_hit) = closest_mesh_hit(mesh, &local_ray, closest_world_t)
-                        {
+                        let mesh_hit = closest_mesh_hit_with_filter(
+                            mesh,
+                            &local_ray,
+                            closest_world_t,
+                            |hit| {
+                                if !has_alpha_test {
+                                    return true;
+                                }
+                                let triangle = TriangleRef {
+                                    instance_index,
+                                    triangle_index: hit.triangle_index,
+                                };
+                                let shading_vertex = self.alpha_test_shading_vertex(
+                                    triangle,
+                                    hit.barycentric,
+                                    ray,
+                                );
+                                let u: f32 = rng.random();
+                                material.any_hit(&shading_vertex, u)
+                            },
+                        );
+
+                        if let Some(mesh_hit) = mesh_hit {
                             closest_world_t = mesh_hit.t;
                             closest_hit = Some(SceneHit {
                                 triangle: TriangleRef {
@@ -299,6 +327,24 @@ impl Scene {
         }
 
         Ok(closest_hit)
+    }
+
+    /// Builds a [`ShadingVertex`] suitable for an `any_hit` query without
+    /// running any material-specific normal-mapping. Use this only inside
+    /// the alpha-test path; downstream shading should still go through
+    /// [`Self::shading_vertex`] so the BSDF sees the prepared vertex.
+    fn alpha_test_shading_vertex(
+        &self,
+        triangle: TriangleRef,
+        barycentric: Vec3,
+        ray: &Ray,
+    ) -> ShadingVertex {
+        self.base_shading_vertex_from_triangle_sample_impl(
+            triangle,
+            barycentric,
+            ray.direction,
+            Some(ray),
+        )
     }
 
     pub fn triangle_normals(&self, triangle: TriangleRef) -> [Vec3; 3] {
@@ -581,7 +627,15 @@ impl Scene {
     }
 }
 
-fn closest_mesh_hit(mesh: &Mesh, ray: &Ray, t_max: f32) -> Option<MeshHit> {
+fn closest_mesh_hit_with_filter<F>(
+    mesh: &Mesh,
+    ray: &Ray,
+    t_max: f32,
+    mut accept: F,
+) -> Option<MeshHit>
+where
+    F: FnMut(&MeshHit) -> bool,
+{
     let bvh = mesh
         .bvh
         .as_ref()
@@ -607,12 +661,15 @@ fn closest_mesh_hit(mesh: &Mesh, ray: &Ray, t_max: f32) -> Option<MeshHit> {
                     let [v0, v1, v2] = mesh.triangle_positions(triangle_index);
 
                     if let Some(hit) = intersect_triangle(ray, closest_t, v0, v1, v2) {
-                        closest_t = hit.t;
-                        closest_hit = Some(MeshHit {
+                        let candidate = MeshHit {
                             triangle_index,
                             t: hit.t,
                             barycentric: hit.barycentric,
-                        });
+                        };
+                        if accept(&candidate) {
+                            closest_t = hit.t;
+                            closest_hit = Some(candidate);
+                        }
                     }
                 }
             }
@@ -941,7 +998,7 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -969,7 +1026,7 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 1.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -985,7 +1042,7 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
         let error = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect_err("expected missing BVH error");
 
         assert_eq!(error, ClosestHitError::BvhNotBuilt);
@@ -1013,7 +1070,9 @@ mod tests {
         scene.build_bvh();
 
         let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
-        let hit = scene.closest_hit(&ray).expect("BVH should be built");
+        let hit = scene
+            .closest_hit(&ray, &mut rand::rng())
+            .expect("BVH should be built");
 
         assert!(hit.is_none());
     }
@@ -1058,12 +1117,47 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect("BVH should be built")
             .expect("expected hit");
 
         assert_eq!(hit.triangle.triangle_index, 0);
         assert!((hit.t - 2.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn closest_hit_skips_zero_opacity_material_and_returns_geometry_behind_it() {
+        use crate::material::SimplePbrMaterial;
+
+        let mut scene = Scene::new();
+        let front_mesh = scene.add_mesh(unit_mesh(0.0));
+        let back_mesh = scene.add_mesh(unit_mesh(-1.0));
+
+        let mut transparent = SimplePbrMaterial::new(Vec3::ONE, 0.0, 0.5, 1.5, 0.0);
+        transparent.opacity = 0.0;
+        let transparent_material = scene.add_material(Material::SimplePBR(transparent));
+        let opaque_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.5)),
+        ));
+
+        scene.add_instance(front_mesh, transparent_material, Mat4::IDENTITY);
+        scene.add_instance(back_mesh, opaque_material, Mat4::IDENTITY);
+        scene.build_bvh();
+
+        let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
+        let hit = scene
+            .closest_hit(&ray, &mut rand::rng())
+            .expect("BVH should be built")
+            .expect("ray must reach the opaque triangle behind the transparent one");
+
+        assert_eq!(
+            hit.triangle,
+            TriangleRef {
+                instance_index: InstanceIndex(1),
+                triangle_index: 0,
+            }
+        );
+        assert!((hit.t - 3.0).abs() < 1.0e-6);
     }
 
     #[test]
@@ -1136,6 +1230,8 @@ mod tests {
                     vec![normal_texel],
                 )))),
                 normal_strength: 1.0,
+                opacity: 1.0,
+                opacity_texture: None,
             }));
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         let hit = SceneHit {

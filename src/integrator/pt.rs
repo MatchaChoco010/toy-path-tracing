@@ -18,7 +18,7 @@ pub fn trace_radiance(
 
     for depth in 0..max_depth {
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, rng)
             .expect("scene.build_bvh() must be called before traversal");
 
         let Some(hit) = hit else {

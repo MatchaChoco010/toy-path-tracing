@@ -26,7 +26,7 @@ pub fn trace_radiance(
 
     for depth in 0..max_depth {
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, rng)
             .expect("scene.build_bvh() must be called before traversal");
 
         let Some(hit) = hit else {
@@ -53,7 +53,15 @@ pub fn trace_radiance(
             let u_aux = rng.random::<f32>();
             let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
             radiance += throughput
-                * direct_light_nee_contribution(scene, material, &vtx, u_light_select, u_aux, us);
+                * direct_light_nee_contribution(
+                    scene,
+                    material,
+                    &vtx,
+                    u_light_select,
+                    u_aux,
+                    us,
+                    rng,
+                );
         }
 
         throughput *= sample.weight;
@@ -84,6 +92,7 @@ pub(super) fn direct_light_nee_contribution(
     u_light_select: f32,
     u_aux: f32,
     us: Vec2,
+    rng: &mut rand::rngs::ThreadRng,
 ) -> Vec3 {
     let Some(sampled_light) = scene.light_sampler.sample(u_light_select) else {
         return Vec3::ZERO;
@@ -108,7 +117,7 @@ pub(super) fn direct_light_nee_contribution(
         return Vec3::ZERO;
     }
 
-    if !unoccluded(scene, vtx, &li) {
+    if !unoccluded(scene, vtx, &li, rng) {
         return Vec3::ZERO;
     }
 
@@ -211,7 +220,7 @@ mod tests {
         // With only a single area light the sampler always selects it (pmf=1),
         // so the estimator reduces to the classic direct-light formula.
         let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5));
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5), &mut rand::rng());
 
         assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-5));
     }
@@ -242,7 +251,7 @@ mod tests {
         );
         let material = scene.instance_material(InstanceIndex(0));
         let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5));
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5), &mut rand::rng());
 
         assert_eq!(radiance, Vec3::ZERO);
     }
@@ -271,7 +280,7 @@ mod tests {
         // cos_theta factor is positive (env uses +Y up, surface normal is +Z
         // via spherical sampling the direction with u=0 and v=0.5 maps to +Z).
         let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.5, 0.0, Vec2::new(0.0, 0.5));
+            direct_light_nee_contribution(&scene, material, &vtx, 0.5, 0.0, Vec2::new(0.0, 0.5), &mut rand::rng());
 
         assert!(radiance.x > 0.0);
         assert!(radiance.y > 0.0);
@@ -299,7 +308,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -325,7 +335,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         let expected = 2.0 * 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -355,7 +366,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -386,7 +398,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         assert_eq!(radiance, Vec3::ZERO);
     }
 

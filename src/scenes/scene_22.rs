@@ -11,11 +11,16 @@ use crate::{
     light::EnvironmentLight,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
-        SimplePbrMaterial, Texture,
+        SimplePbrMaterial, Texture, TextureColorSpace,
     },
     obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
     scene::Scene,
 };
+
+struct DiffuseTextureCacheEntry {
+    color: Arc<Texture>,
+    alpha: Option<Arc<Texture>>,
+}
 
 const SAN_MIGUEL_OBJ: &str = "assets/san_miguel_2.0/san-miguel-low-poly.obj";
 const SAN_MIGUEL_HDR: &str = "assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr";
@@ -39,7 +44,7 @@ pub fn create_scene_22() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
 }
 
 fn add_san_miguel_to_scene(scene: &mut Scene, obj_scene: &ObjScene) {
-    let mut texture_cache: HashMap<PathBuf, Arc<Texture>> = HashMap::new();
+    let mut texture_cache: HashMap<PathBuf, DiffuseTextureCacheEntry> = HashMap::new();
     for slot in &obj_scene.material_meshes {
         let obj_material = slot
             .material_name
@@ -55,7 +60,7 @@ fn add_san_miguel_to_scene(scene: &mut Scene, obj_scene: &ObjScene) {
 fn san_miguel_material(
     obj_material: Option<&ObjMaterial>,
     mtl_dir: &Path,
-    texture_cache: &mut HashMap<PathBuf, Arc<Texture>>,
+    texture_cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
 ) -> Material {
     let Some(material) = obj_material else {
         return Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::splat(0.7)));
@@ -83,7 +88,7 @@ fn san_miguel_material(
         ));
     }
 
-    let base_color_texture = material
+    let textures = material
         .diffuse_texture_path
         .as_deref()
         .and_then(|relative_path| load_diffuse_texture(mtl_dir, relative_path, texture_cache));
@@ -95,24 +100,39 @@ fn san_miguel_material(
         1.5,
         0.0,
     );
-    simple_pbr.base_color_texture = base_color_texture;
+    if let Some(textures) = textures {
+        simple_pbr.base_color_texture = Some(textures.color);
+        simple_pbr.opacity_texture = textures.alpha;
+    }
     Material::SimplePBR(simple_pbr)
 }
 
 fn load_diffuse_texture(
     mtl_dir: &Path,
     relative_path: &Path,
-    cache: &mut HashMap<PathBuf, Arc<Texture>>,
-) -> Option<Arc<Texture>> {
+    cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
+) -> Option<DiffuseTextureCacheEntry> {
     let absolute_path = mtl_dir.join(relative_path);
-    if let Some(texture) = cache.get(&absolute_path) {
-        return Some(Arc::clone(texture));
+    if let Some(entry) = cache.get(&absolute_path) {
+        return Some(DiffuseTextureCacheEntry {
+            color: Arc::clone(&entry.color),
+            alpha: entry.alpha.as_ref().map(Arc::clone),
+        });
     }
-    match Texture::from_srgb_file(&absolute_path) {
-        Ok(texture) => {
-            let arc = Arc::new(texture);
-            cache.insert(absolute_path, Arc::clone(&arc));
-            Some(arc)
+    match Texture::from_file_with_alpha(&absolute_path, TextureColorSpace::Srgb) {
+        Ok((color, alpha)) => {
+            let entry = DiffuseTextureCacheEntry {
+                color: Arc::new(color),
+                alpha: alpha.map(Arc::new),
+            };
+            cache.insert(
+                absolute_path,
+                DiffuseTextureCacheEntry {
+                    color: Arc::clone(&entry.color),
+                    alpha: entry.alpha.as_ref().map(Arc::clone),
+                },
+            );
+            Some(entry)
         }
         Err(error) => {
             eprintln!(

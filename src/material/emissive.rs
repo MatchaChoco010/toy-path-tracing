@@ -1,17 +1,26 @@
+use std::sync::Arc;
+
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use super::{MaterialSample, ShadingVertex};
+use super::{MaterialSample, ShadingVertex, Texture};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EmissiveMaterial {
     pub color: Vec3,
     pub strength: f32,
+    pub opacity: f32,
+    pub opacity_texture: Option<Arc<Texture>>,
 }
 
 impl EmissiveMaterial {
     pub fn new(color: Vec3, strength: f32) -> Self {
-        Self { color, strength }
+        Self {
+            color,
+            strength,
+            opacity: 1.0,
+            opacity_texture: None,
+        }
     }
 
     pub fn sample(
@@ -40,5 +49,29 @@ impl EmissiveMaterial {
 
     pub fn max_emission(&self) -> f32 {
         (self.color * self.strength).max_element().max(0.0)
+    }
+
+    pub fn opacity_at_uv(&self, shading_vertex: &ShadingVertex) -> f32 {
+        let texture_factor = self
+            .opacity_texture
+            .as_ref()
+            .map(|texture| {
+                texture.sample_scalar_filtered(
+                    shading_vertex.uv,
+                    shading_vertex.uv_dx(),
+                    shading_vertex.uv_dy(),
+                )
+            })
+            .unwrap_or(1.0);
+        (self.opacity * texture_factor).clamp(0.0, 1.0)
+    }
+
+    pub fn has_alpha_test(&self) -> bool {
+        self.opacity < 1.0 || self.opacity_texture.is_some()
+    }
+
+    pub fn any_hit(&self, shading_vertex: &ShadingVertex, u: f32) -> bool {
+        let alpha = self.opacity_at_uv(shading_vertex);
+        alpha >= 1.0 || u < alpha
     }
 }

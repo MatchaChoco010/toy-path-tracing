@@ -25,7 +25,7 @@ pub fn trace_radiance(
     let mut throughput = Vec3::ONE;
 
     let initial_hit = scene
-        .closest_hit(&initial_ray)
+        .closest_hit(&initial_ray, rng)
         .expect("scene.build_bvh() must be called before traversal");
 
     let Some(initial_hit) = initial_hit else {
@@ -54,7 +54,15 @@ pub fn trace_radiance(
             let u_aux = rng.random::<f32>();
             let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
             radiance += throughput
-                * direct_light_mis_contribution(scene, material, &vtx, u_light_select, u_aux, us);
+                * direct_light_mis_contribution(
+                    scene,
+                    material,
+                    &vtx,
+                    u_light_select,
+                    u_aux,
+                    us,
+                    rng,
+                );
         }
 
         throughput *= sample.weight;
@@ -69,7 +77,7 @@ pub fn trace_radiance(
 
         let next_ray = spawn_scattered_ray(&ray, hit_t, &vtx, &sample);
         let next_hit = scene
-            .closest_hit(&next_ray)
+            .closest_hit(&next_ray, rng)
             .expect("scene.build_bvh() must be called before traversal");
 
         match next_hit {
@@ -118,6 +126,7 @@ pub(super) fn direct_light_mis_contribution(
     u_light_select: f32,
     u_aux: f32,
     us: Vec2,
+    rng: &mut rand::rngs::ThreadRng,
 ) -> Vec3 {
     let Some(sampled_light) = scene.light_sampler.sample(u_light_select) else {
         return Vec3::ZERO;
@@ -143,7 +152,7 @@ pub(super) fn direct_light_mis_contribution(
         return Vec3::ZERO;
     }
 
-    if !unoccluded(scene, vtx, &li) {
+    if !unoccluded(scene, vtx, &li, rng) {
         return Vec3::ZERO;
     }
 
@@ -310,7 +319,7 @@ mod tests {
         let material = scene.instance_material(InstanceIndex(0));
         // Single area light -> light sampler pmf = 1.
         let radiance =
-            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5));
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5), &mut rand::rng());
         let expected = (4.0 / PI) * (2.0 / (2.0 + 1.0 / PI));
 
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -463,7 +472,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         // Li=1 * lambert eval 0.8/PI * cos=1 / pmf=1 = 0.8/PI.
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -495,7 +505,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         assert_eq!(radiance, Vec3::ZERO);
     }
 
@@ -520,7 +531,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         // Li = color * irradiance = 2; lambert 0.8/PI * cos=1 / pmf=1.
         let expected = 2.0 * 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -551,7 +563,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -581,7 +594,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         assert_eq!(radiance, Vec3::ZERO);
     }
 

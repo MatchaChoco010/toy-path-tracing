@@ -76,7 +76,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `19` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/gltf/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球、roughness `0.4` の Conductor GGX 球、完全鏡面 Mirror 球を配置した normal map 確認用シーンです。 |
 | `20` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/gltf/dragon.obj` と dragon 用の base color / metallic / roughness / normal texture を使う SimplePBR ドラゴンを斜め向きに配置したシーンです。 |
 | `21` | scene 20 の SimplePBR ドラゴンに加えて、roughness `0.4` の金色 Conductor GGX バニー、`Glass` 球、薄青の NormalizedLambert バニーを並べ、同じ puresky 環境で照らすマテリアル比較シーンです。 |
-| `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel (約 561 万 triangles) を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす建築シーンです。OBJ のマテリアルは原則 SimplePBR、`d < 1` か `illum 4` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けて読み込みます。アセットは `bash assets/download.sh` で取得します。 |
+| `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel (約 561 万 triangles) を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす建築シーンです。OBJ のマテリアルは原則 SimplePBR、`d < 1` か `illum 4` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けて読み込みます。`map_Kd` PNG が alpha matte を含む場合はその alpha チャンネルを `opacity_texture` に渡し、植物の葉などをアルファカットアウトで描画します。アセットは `bash assets/download.sh` で取得します。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

@@ -209,8 +209,13 @@ fn differential_is_reasonable(differential: RayDifferential) -> bool {
         && differential.ry_direction.length_squared() <= MAX_DIFFERENTIAL_LENGTH_SQUARED
 }
 
-pub(super) fn unoccluded(scene: &Scene, vtx: &ShadingVertex, li: &LightLiSample) -> bool {
-    unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle)
+pub(super) fn unoccluded(
+    scene: &Scene,
+    vtx: &ShadingVertex,
+    li: &LightLiSample,
+    rng: &mut ThreadRng,
+) -> bool {
+    unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle, rng)
 }
 
 pub(super) fn unoccluded_ray(
@@ -219,10 +224,11 @@ pub(super) fn unoccluded_ray(
     wi: Vec3,
     distance: f32,
     target_triangle: Option<TriangleRef>,
+    rng: &mut ThreadRng,
 ) -> bool {
     let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
     let hit = scene
-        .closest_hit(&shadow_ray)
+        .closest_hit(&shadow_ray, rng)
         .expect("scene.build_bvh() must be called before traversal");
 
     match hit {
