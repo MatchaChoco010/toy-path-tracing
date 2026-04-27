@@ -1,9 +1,9 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
+use rand::{RngExt, rngs::ThreadRng};
 use std::fmt;
 
 use crate::{
     bsdf::DirectionalAlbedoCache,
-    bvh::{LinearBvhNode, SceneBvh, build_scene_bvh, intersect_bounds},
     light::{
         DirectionalLight, DirectionalLightIndex, EnvironmentLight, LightSampler, PointLight,
         PointLightIndex, SpotLight, SpotLightIndex,
@@ -14,6 +14,7 @@ use crate::{
         interpolate_vec2, interpolate_vec3,
     },
     mesh::{Bounds, Mesh},
+    qbvh::{Qbvh, build_qbvh, traverse_qbvh},
     ray::{Ray, intersect_triangle},
 };
 
@@ -83,7 +84,7 @@ pub struct Scene {
     pub triangles: Vec<TriangleRef>,
     pub area_light_triangles: Vec<AreaLightTriangle>,
     pub area_light_weight_sum: f32,
-    pub bvh: Option<SceneBvh>,
+    pub qbvh: Option<Qbvh>,
     pub environment_light: Option<EnvironmentLight>,
     pub point_lights: Vec<PointLight>,
     pub directional_lights: Vec<DirectionalLight>,
@@ -93,13 +94,13 @@ pub struct Scene {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosestHitError {
-    BvhNotBuilt,
+    QbvhNotBuilt,
 }
 
 impl fmt::Display for ClosestHitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BvhNotBuilt => write!(f, "scene BVH has not been built yet"),
+            Self::QbvhNotBuilt => write!(f, "scene QBVH has not been built yet"),
         }
     }
 }
@@ -121,7 +122,7 @@ impl Scene {
     pub fn add_mesh(&mut self, mesh: Mesh) -> MeshIndex {
         let mesh_index = MeshIndex(self.meshes.len());
         self.meshes.push(mesh);
-        self.bvh = None;
+        self.qbvh = None;
         mesh_index
     }
 
@@ -166,7 +167,7 @@ impl Scene {
             }));
         self.register_area_light_triangles(instance_index);
         self.rebuild_light_sampler();
-        self.bvh = None;
+        self.qbvh = None;
 
         instance_index
     }
@@ -210,9 +211,9 @@ impl Scene {
         self.light_sampler = LightSampler::build_from_scene(self);
     }
 
-    pub fn build_bvh(&mut self) {
+    pub fn build_qbvh(&mut self) {
         for mesh in &mut self.meshes {
-            mesh.build_bvh();
+            mesh.build_qbvh();
         }
 
         let instance_bounds = self
@@ -220,85 +221,86 @@ impl Scene {
             .iter()
             .map(|instance| instance.world_bounds)
             .collect::<Vec<_>>();
-        self.bvh = build_scene_bvh(&instance_bounds);
+        self.qbvh = build_qbvh(&instance_bounds);
     }
 
-    pub fn closest_hit(&self, ray: &Ray) -> Result<Option<SceneHit>, ClosestHitError> {
+    pub fn closest_hit(
+        &self,
+        ray: &Ray,
+        rng: &mut ThreadRng,
+    ) -> Result<Option<SceneHit>, ClosestHitError> {
         if self.instances.is_empty() {
             return Ok(None);
         }
-        let bvh = self.bvh.as_ref().ok_or(ClosestHitError::BvhNotBuilt)?;
-        let mut closest_world_t = f32::INFINITY;
-        let mut closest_hit = None;
-        let mut stack = vec![0_usize];
+        let qbvh = self.qbvh.as_ref().ok_or(ClosestHitError::QbvhNotBuilt)?;
+        let mut closest_hit: Option<SceneHit> = None;
 
-        while let Some(node_index) = stack.pop() {
-            let node = bvh.nodes[node_index];
-            if intersect_bounds(ray, closest_world_t, node.bounds()).is_none() {
-                continue;
-            }
+        traverse_qbvh(qbvh, ray, f32::INFINITY, |offset, count, current_t_max| {
+            let mut t_max = current_t_max;
+            for ordered_index in offset..offset + count {
+                let instance_index = InstanceIndex(qbvh.primitive_indices[ordered_index as usize]);
+                let instance = self.instances[instance_index.0];
+                let local_ray = ray.transformed(instance.world_to_local);
+                let mesh = &self.meshes[instance.mesh_index.0];
+                let material = self.instance_material(instance_index);
+                let has_alpha_test = material.has_alpha_test();
 
-            match node {
-                LinearBvhNode::Leaf {
-                    primitive_offset,
-                    primitive_count,
-                    ..
-                } => {
-                    for ordered_index in primitive_offset..primitive_offset + primitive_count {
-                        let instance_index = InstanceIndex(bvh.instance_indices[ordered_index]);
-                        let instance = self.instances[instance_index.0];
-                        let local_ray = ray.transformed(instance.world_to_local);
-                        let mesh = &self.meshes[instance.mesh_index.0];
-
-                        if let Some(mesh_hit) = closest_mesh_hit(mesh, &local_ray, closest_world_t)
-                        {
-                            closest_world_t = mesh_hit.t;
-                            closest_hit = Some(SceneHit {
-                                triangle: TriangleRef {
-                                    instance_index,
-                                    triangle_index: mesh_hit.triangle_index,
-                                },
-                                t: mesh_hit.t,
-                                barycentric: mesh_hit.barycentric,
-                            });
+                let mesh_hit = closest_mesh_hit_with_filter(
+                    mesh,
+                    &local_ray,
+                    t_max,
+                    |hit| {
+                        if !has_alpha_test {
+                            return true;
                         }
-                    }
-                }
-                LinearBvhNode::Interior {
-                    right_child_offset, ..
-                } => {
-                    let left_child_index = node_index + 1;
-                    let right_child_index = right_child_offset;
-                    let left_hit = intersect_bounds(
-                        ray,
-                        closest_world_t,
-                        bvh.nodes[left_child_index].bounds(),
-                    );
-                    let right_hit = intersect_bounds(
-                        ray,
-                        closest_world_t,
-                        bvh.nodes[right_child_index].bounds(),
-                    );
+                        let triangle = TriangleRef {
+                            instance_index,
+                            triangle_index: hit.triangle_index,
+                        };
+                        let shading_vertex = self.alpha_test_shading_vertex(
+                            triangle,
+                            hit.barycentric,
+                            ray,
+                        );
+                        let u: f32 = rng.random();
+                        material.any_hit(&shading_vertex, u)
+                    },
+                );
 
-                    match (left_hit, right_hit) {
-                        (Some(left_t), Some(right_t)) => {
-                            if left_t <= right_t {
-                                stack.push(right_child_index);
-                                stack.push(left_child_index);
-                            } else {
-                                stack.push(left_child_index);
-                                stack.push(right_child_index);
-                            }
-                        }
-                        (Some(_), None) => stack.push(left_child_index),
-                        (None, Some(_)) => stack.push(right_child_index),
-                        (None, None) => {}
-                    }
+                if let Some(mesh_hit) = mesh_hit {
+                    t_max = mesh_hit.t;
+                    closest_hit = Some(SceneHit {
+                        triangle: TriangleRef {
+                            instance_index,
+                            triangle_index: mesh_hit.triangle_index,
+                        },
+                        t: mesh_hit.t,
+                        barycentric: mesh_hit.barycentric,
+                    });
                 }
             }
-        }
+            t_max
+        });
 
         Ok(closest_hit)
+    }
+
+    /// Builds a [`ShadingVertex`] suitable for an `any_hit` query without
+    /// running any material-specific normal-mapping. Use this only inside
+    /// the alpha-test path; downstream shading should still go through
+    /// [`Self::shading_vertex`] so the BSDF sees the prepared vertex.
+    fn alpha_test_shading_vertex(
+        &self,
+        triangle: TriangleRef,
+        barycentric: Vec3,
+        ray: &Ray,
+    ) -> ShadingVertex {
+        self.base_shading_vertex_from_triangle_sample_impl(
+            triangle,
+            barycentric,
+            ray.direction,
+            Some(ray),
+        )
     }
 
     pub fn triangle_normals(&self, triangle: TriangleRef) -> [Vec3; 3] {
@@ -581,68 +583,41 @@ impl Scene {
     }
 }
 
-fn closest_mesh_hit(mesh: &Mesh, ray: &Ray, t_max: f32) -> Option<MeshHit> {
-    let bvh = mesh
-        .bvh
+fn closest_mesh_hit_with_filter<F>(
+    mesh: &Mesh,
+    ray: &Ray,
+    t_max: f32,
+    mut accept: F,
+) -> Option<MeshHit>
+where
+    F: FnMut(&MeshHit) -> bool,
+{
+    let qbvh = mesh
+        .qbvh
         .as_ref()
-        .expect("mesh BVH must be built before traversal");
-    let mut closest_t = t_max;
-    let mut closest_hit = None;
-    let mut stack = vec![0_usize];
+        .expect("mesh QBVH must be built before traversal");
+    let mut closest_hit: Option<MeshHit> = None;
 
-    while let Some(node_index) = stack.pop() {
-        let node = bvh.nodes[node_index];
-        if intersect_bounds(ray, closest_t, node.bounds()).is_none() {
-            continue;
-        }
+    traverse_qbvh(qbvh, ray, t_max, |offset, count, current_t_max| {
+        let mut t_max = current_t_max;
+        for ordered_index in offset..offset + count {
+            let triangle_index = qbvh.primitive_indices[ordered_index as usize];
+            let [v0, v1, v2] = mesh.triangle_positions(triangle_index);
 
-        match node {
-            LinearBvhNode::Leaf {
-                primitive_offset,
-                primitive_count,
-                ..
-            } => {
-                for ordered_index in primitive_offset..primitive_offset + primitive_count {
-                    let triangle_index = bvh.triangle_indices[ordered_index];
-                    let [v0, v1, v2] = mesh.triangle_positions(triangle_index);
-
-                    if let Some(hit) = intersect_triangle(ray, closest_t, v0, v1, v2) {
-                        closest_t = hit.t;
-                        closest_hit = Some(MeshHit {
-                            triangle_index,
-                            t: hit.t,
-                            barycentric: hit.barycentric,
-                        });
-                    }
-                }
-            }
-            LinearBvhNode::Interior {
-                right_child_offset, ..
-            } => {
-                let left_child_index = node_index + 1;
-                let right_child_index = right_child_offset;
-                let left_hit =
-                    intersect_bounds(ray, closest_t, bvh.nodes[left_child_index].bounds());
-                let right_hit =
-                    intersect_bounds(ray, closest_t, bvh.nodes[right_child_index].bounds());
-
-                match (left_hit, right_hit) {
-                    (Some(left_t), Some(right_t)) => {
-                        if left_t <= right_t {
-                            stack.push(right_child_index);
-                            stack.push(left_child_index);
-                        } else {
-                            stack.push(left_child_index);
-                            stack.push(right_child_index);
-                        }
-                    }
-                    (Some(_), None) => stack.push(left_child_index),
-                    (None, Some(_)) => stack.push(right_child_index),
-                    (None, None) => {}
+            if let Some(hit) = intersect_triangle(ray, t_max, v0, v1, v2) {
+                let candidate = MeshHit {
+                    triangle_index,
+                    t: hit.t,
+                    barycentric: hit.barycentric,
+                };
+                if accept(&candidate) {
+                    t_max = hit.t;
+                    closest_hit = Some(candidate);
                 }
             }
         }
-    }
+        t_max
+    });
 
     closest_hit
 }
@@ -818,6 +793,8 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 }
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Mat4, Vec2, Vec3};
 
     use super::{
@@ -935,11 +912,11 @@ mod tests {
             material_index,
             Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0)),
         );
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -963,11 +940,11 @@ mod tests {
             material_index,
             Mat4::from_scale(Vec3::splat(2.0)),
         );
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 1.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -983,23 +960,23 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
         let error = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect_err("expected missing BVH error");
 
-        assert_eq!(error, ClosestHitError::BvhNotBuilt);
+        assert_eq!(error, ClosestHitError::QbvhNotBuilt);
     }
 
     #[test]
-    fn build_bvh_populates_scene_and_mesh_bvhs() {
+    fn build_qbvh_populates_scene_and_mesh_qbvhs() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(stacked_mesh());
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
-        scene.build_bvh();
+        scene.build_qbvh();
 
-        assert!(scene.bvh.is_some());
-        assert!(scene.meshes[mesh_index.0].bvh.is_some());
+        assert!(scene.qbvh.is_some());
+        assert!(scene.meshes[mesh_index.0].qbvh.is_some());
     }
 
     #[test]
@@ -1008,10 +985,12 @@ mod tests {
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
-        let hit = scene.closest_hit(&ray).expect("BVH should be built");
+        let hit = scene
+            .closest_hit(&ray, &mut rand::rng())
+            .expect("BVH should be built");
 
         assert!(hit.is_none());
     }
@@ -1022,7 +1001,7 @@ mod tests {
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         scene.add_instance(
             mesh_index,
@@ -1030,7 +1009,7 @@ mod tests {
             Mat4::from_translation(Vec3::new(1.0, 0.0, 0.0)),
         );
 
-        assert!(scene.bvh.is_none());
+        assert!(scene.qbvh.is_none());
     }
 
     #[test]
@@ -1039,11 +1018,11 @@ mod tests {
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         scene.add_mesh(unit_mesh(-1.0));
 
-        assert!(scene.bvh.is_none());
+        assert!(scene.qbvh.is_none());
     }
 
     #[test]
@@ -1052,16 +1031,51 @@ mod tests {
         let mesh_index = scene.add_mesh(stacked_mesh());
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray)
+            .closest_hit(&ray, &mut rand::rng())
             .expect("BVH should be built")
             .expect("expected hit");
 
         assert_eq!(hit.triangle.triangle_index, 0);
         assert!((hit.t - 2.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn closest_hit_skips_zero_opacity_material_and_returns_geometry_behind_it() {
+        use crate::material::SimplePbrMaterial;
+
+        let mut scene = Scene::new();
+        let front_mesh = scene.add_mesh(unit_mesh(0.0));
+        let back_mesh = scene.add_mesh(unit_mesh(-1.0));
+
+        let mut transparent = SimplePbrMaterial::new(Vec3::ONE, 0.0, 0.5, 1.5, 0.0);
+        transparent.opacity = 0.0;
+        let transparent_material = scene.add_material(Material::SimplePBR(transparent));
+        let opaque_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(0.5)),
+        ));
+
+        scene.add_instance(front_mesh, transparent_material, Mat4::IDENTITY);
+        scene.add_instance(back_mesh, opaque_material, Mat4::IDENTITY);
+        scene.build_qbvh();
+
+        let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
+        let hit = scene
+            .closest_hit(&ray, &mut rand::rng())
+            .expect("BVH should be built")
+            .expect("ray must reach the opaque triangle behind the transparent one");
+
+        assert_eq!(
+            hit.triangle,
+            TriangleRef {
+                instance_index: InstanceIndex(1),
+                triangle_index: 0,
+            }
+        );
+        assert!((hit.t - 3.0).abs() < 1.0e-6);
     }
 
     #[test]
@@ -1128,12 +1142,14 @@ mod tests {
             scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial {
                 rho: Vec3::ONE,
                 rho_texture: None,
-                normal_map: Some(NormalMap::from_texture(Texture::from_pixels(
+                normal_map: Some(NormalMap::from_texture(Arc::new(Texture::from_pixels(
                     1,
                     1,
                     vec![normal_texel],
-                ))),
+                )))),
                 normal_strength: 1.0,
+                opacity: 1.0,
+                opacity_texture: None,
             }));
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         let hit = SceneHit {

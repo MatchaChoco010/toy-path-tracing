@@ -166,6 +166,39 @@ impl Material {
             Self::Emissive(material) => material.max_emission(),
         }
     }
+
+    /// Returns true when this material can ever reject a hit through its
+    /// `any_hit`. Renderers should short-circuit and skip the
+    /// `ShadingVertex` construction whenever this returns false.
+    pub fn has_alpha_test(&self) -> bool {
+        match self {
+            Self::NormalizedLambert(material) => material.has_alpha_test(),
+            Self::Mirror(material) => material.has_alpha_test(),
+            Self::ConductorGgx(material) => material.has_alpha_test(),
+            Self::DielectricGgx(material) => material.has_alpha_test(),
+            Self::Glass(material) => material.has_alpha_test(),
+            Self::SimplePBR(material) => material.has_alpha_test(),
+            Self::Emissive(material) => material.has_alpha_test(),
+        }
+    }
+
+    /// any-hit shader equivalent. The renderer asks "is this surface hit
+    /// accepted?" and the material answers with a single yes/no using the
+    /// supplied uniform sample `u` (in `[0, 1)`). Materials are free to use
+    /// `u` however they like (probabilistic transmission, hard cutoff,
+    /// procedural opacity, ...). Materials that never reject simply return
+    /// true.
+    pub fn any_hit(&self, shading_vertex: &ShadingVertex, u: f32) -> bool {
+        match self {
+            Self::NormalizedLambert(material) => material.any_hit(shading_vertex, u),
+            Self::Mirror(material) => material.any_hit(shading_vertex, u),
+            Self::ConductorGgx(material) => material.any_hit(shading_vertex, u),
+            Self::DielectricGgx(material) => material.any_hit(shading_vertex, u),
+            Self::Glass(material) => material.any_hit(shading_vertex, u),
+            Self::SimplePBR(material) => material.any_hit(shading_vertex, u),
+            Self::Emissive(material) => material.any_hit(shading_vertex, u),
+        }
+    }
 }
 
 #[cfg(test)]

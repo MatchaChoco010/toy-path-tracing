@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 
@@ -66,6 +66,39 @@ impl Texture {
             .collect();
 
         Ok(Self::from_pixels(width, height, pixels))
+    }
+
+    /// Loads an image and returns the decoded color texture together with an
+    /// optional alpha texture. The alpha texture is only returned when the
+    /// source image actually carries non-opaque pixels, so opaque images do
+    /// not pay extra memory for an all-ones alpha pyramid.
+    pub fn from_file_with_alpha(
+        path: impl AsRef<Path>,
+        color_space: TextureColorSpace,
+    ) -> image::ImageResult<(Self, Option<Self>)> {
+        let image = image::open(path)?.into_rgba32f();
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let mut rgb_pixels = Vec::with_capacity(width * height);
+        let mut alpha_pixels = Vec::with_capacity(width * height);
+        let mut has_nontrivial_alpha = false;
+        for pixel in image.pixels() {
+            let rgb = decode_color_space(Vec3::new(pixel[0], pixel[1], pixel[2]), color_space);
+            rgb_pixels.push(rgb);
+            let alpha = pixel[3];
+            if alpha < 1.0 - 1.0e-3 {
+                has_nontrivial_alpha = true;
+            }
+            alpha_pixels.push(Vec3::splat(alpha));
+        }
+        let rgb = Self::from_pixels(width, height, rgb_pixels);
+        let alpha = if has_nontrivial_alpha {
+            Some(Self::from_pixels(width, height, alpha_pixels))
+        } else {
+            None
+        };
+
+        Ok((rgb, alpha))
     }
 
     pub fn width(&self) -> usize {
@@ -302,8 +335,8 @@ fn pixel_wrapped_in_level(level: &TextureLevel, x: isize, y: isize) -> Vec3 {
 pub(super) fn load_optional_texture(
     path: Option<&Path>,
     color_space: TextureColorSpace,
-) -> image::ImageResult<Option<Texture>> {
-    path.map(|path| Texture::from_file_with_color_space(path, color_space))
+) -> image::ImageResult<Option<Arc<Texture>>> {
+    path.map(|path| Texture::from_file_with_color_space(path, color_space).map(Arc::new))
         .transpose()
 }
 

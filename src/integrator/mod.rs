@@ -209,8 +209,13 @@ fn differential_is_reasonable(differential: RayDifferential) -> bool {
         && differential.ry_direction.length_squared() <= MAX_DIFFERENTIAL_LENGTH_SQUARED
 }
 
-pub(super) fn unoccluded(scene: &Scene, vtx: &ShadingVertex, li: &LightLiSample) -> bool {
-    unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle)
+pub(super) fn unoccluded(
+    scene: &Scene,
+    vtx: &ShadingVertex,
+    li: &LightLiSample,
+    rng: &mut ThreadRng,
+) -> bool {
+    unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle, rng)
 }
 
 pub(super) fn unoccluded_ray(
@@ -219,11 +224,12 @@ pub(super) fn unoccluded_ray(
     wi: Vec3,
     distance: f32,
     target_triangle: Option<TriangleRef>,
+    rng: &mut ThreadRng,
 ) -> bool {
     let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
     let hit = scene
-        .closest_hit(&shadow_ray)
-        .expect("scene.build_bvh() must be called before traversal");
+        .closest_hit(&shadow_ray, rng)
+        .expect("scene.build_qbvh() must be called before traversal");
 
     match hit {
         None => true,
@@ -265,7 +271,7 @@ pub(super) mod test_helpers {
 
         scene.add_instance(mirror_mesh, mirror_material, glam::Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mirror_hit = Vec3::new(0.25, 0.20, 0.0);
         let light_hit = Vec3::new(0.65, 0.20, 1.0);

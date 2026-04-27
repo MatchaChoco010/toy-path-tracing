@@ -25,8 +25,8 @@ pub fn trace_radiance(
     let mut throughput = Vec3::ONE;
 
     let initial_hit = scene
-        .closest_hit(&initial_ray)
-        .expect("scene.build_bvh() must be called before traversal");
+        .closest_hit(&initial_ray, rng)
+        .expect("scene.build_qbvh() must be called before traversal");
 
     let Some(initial_hit) = initial_hit else {
         return infinite_light_le(scene, initial_ray.direction);
@@ -54,7 +54,15 @@ pub fn trace_radiance(
             let u_aux = rng.random::<f32>();
             let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
             radiance += throughput
-                * direct_light_mis_contribution(scene, material, &vtx, u_light_select, u_aux, us);
+                * direct_light_mis_contribution(
+                    scene,
+                    material,
+                    &vtx,
+                    u_light_select,
+                    u_aux,
+                    us,
+                    rng,
+                );
         }
 
         throughput *= sample.weight;
@@ -69,8 +77,8 @@ pub fn trace_radiance(
 
         let next_ray = spawn_scattered_ray(&ray, hit_t, &vtx, &sample);
         let next_hit = scene
-            .closest_hit(&next_ray)
-            .expect("scene.build_bvh() must be called before traversal");
+            .closest_hit(&next_ray, rng)
+            .expect("scene.build_qbvh() must be called before traversal");
 
         match next_hit {
             Some(next_hit) => {
@@ -118,6 +126,7 @@ pub(super) fn direct_light_mis_contribution(
     u_light_select: f32,
     u_aux: f32,
     us: Vec2,
+    rng: &mut rand::rngs::ThreadRng,
 ) -> Vec3 {
     let Some(sampled_light) = scene.light_sampler.sample(u_light_select) else {
         return Vec3::ZERO;
@@ -143,7 +152,7 @@ pub(super) fn direct_light_mis_contribution(
         return Vec3::ZERO;
     }
 
-    if !unoccluded(scene, vtx, &li) {
+    if !unoccluded(scene, vtx, &li, rng) {
         return Vec3::ZERO;
     }
 
@@ -300,7 +309,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -310,7 +319,7 @@ mod tests {
         let material = scene.instance_material(InstanceIndex(0));
         // Single area light -> light sampler pmf = 1.
         let radiance =
-            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5));
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5), &mut rand::rng());
         let expected = (4.0 / PI) * (2.0 / (2.0 + 1.0 / PI));
 
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -328,7 +337,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -370,7 +379,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -404,7 +413,7 @@ mod tests {
         let env_radiance = Vec3::splat(2.0);
         let pixels = vec![env_radiance; 32 * 16];
         scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let throughput = Vec3::ONE;
         let direction = Vec3::Y;
@@ -432,7 +441,7 @@ mod tests {
         let env_radiance = Vec3::new(0.1, 0.4, 0.9);
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mut rng = rand::rng();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);
@@ -455,7 +464,7 @@ mod tests {
             Vec3::ONE,
             16.0 * PI,
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -463,7 +472,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         // Li=1 * lambert eval 0.8/PI * cos=1 / pmf=1 = 0.8/PI.
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -487,7 +497,7 @@ mod tests {
             Vec3::ONE,
             16.0 * PI,
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -495,7 +505,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         assert_eq!(radiance, Vec3::ZERO);
     }
 
@@ -512,7 +523,7 @@ mod tests {
             Vec3::ONE,
             2.0,
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -520,7 +531,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         // Li = color * irradiance = 2; lambert 0.8/PI * cos=1 / pmf=1.
         let expected = 2.0 * 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -543,7 +555,7 @@ mod tests {
             (30.0_f32).to_radians(),
             (20.0_f32).to_radians(),
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -551,7 +563,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -573,7 +586,7 @@ mod tests {
             (10.0_f32).to_radians(),
             (5.0_f32).to_radians(),
         ));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -581,7 +594,8 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance = direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO);
+        let radiance =
+            direct_light_mis_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
         assert_eq!(radiance, Vec3::ZERO);
     }
 
@@ -601,7 +615,7 @@ mod tests {
         let env_radiance = Vec3::splat(0.2);
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mut rng = rand::rng();
         let mut accumulated = Vec3::ZERO;

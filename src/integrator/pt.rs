@@ -18,8 +18,8 @@ pub fn trace_radiance(
 
     for depth in 0..max_depth {
         let hit = scene
-            .closest_hit(&ray)
-            .expect("scene.build_bvh() must be called before traversal");
+            .closest_hit(&ray, rng)
+            .expect("scene.build_qbvh() must be called before traversal");
 
         let Some(hit) = hit else {
             radiance += throughput * infinite_light_le(scene, ray.direction);
@@ -77,7 +77,7 @@ mod tests {
         let env_radiance = Vec3::new(0.2, 0.4, 0.8);
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let mut rng = rand::rng();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
@@ -15,14 +15,16 @@ const MIN_ALPHA: f32 = 1.0e-4;
 #[derive(Debug, Clone, PartialEq)]
 pub struct DielectricGgxMaterial {
     pub color: Vec3,
-    pub color_texture: Option<Texture>,
+    pub color_texture: Option<Arc<Texture>>,
     pub eta: f32,
     pub roughness: f32,
-    pub roughness_texture: Option<Texture>,
+    pub roughness_texture: Option<Arc<Texture>>,
     pub anisotropy: f32,
     pub thin: bool,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
+    pub opacity: f32,
+    pub opacity_texture: Option<Arc<Texture>>,
 }
 
 impl DielectricGgxMaterial {
@@ -37,6 +39,8 @@ impl DielectricGgxMaterial {
             thin,
             normal_map: None,
             normal_strength: 1.0,
+            opacity: 1.0,
+            opacity_texture: None,
         }
     }
 
@@ -63,7 +67,33 @@ impl DielectricGgxMaterial {
             thin,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
+            opacity: 1.0,
+            opacity_texture: None,
         })
+    }
+
+    pub fn opacity_at_uv(&self, shading_vertex: &ShadingVertex) -> f32 {
+        let texture_factor = self
+            .opacity_texture
+            .as_ref()
+            .map(|texture| {
+                texture.sample_scalar_filtered(
+                    shading_vertex.uv,
+                    shading_vertex.uv_dx(),
+                    shading_vertex.uv_dy(),
+                )
+            })
+            .unwrap_or(1.0);
+        (self.opacity * texture_factor).clamp(0.0, 1.0)
+    }
+
+    pub fn has_alpha_test(&self) -> bool {
+        self.opacity < 1.0 || self.opacity_texture.is_some()
+    }
+
+    pub fn any_hit(&self, shading_vertex: &ShadingVertex, u: f32) -> bool {
+        let alpha = self.opacity_at_uv(shading_vertex);
+        alpha >= 1.0 || u < alpha
     }
 
     pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
@@ -268,6 +298,8 @@ impl DielectricGgxMaterial {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Vec2, Vec3};
 
     use crate::{
@@ -377,14 +409,24 @@ mod tests {
     fn textures_modulate_color_and_roughness() {
         let material = DielectricGgxMaterial {
             color: Vec3::new(0.5, 0.5, 0.5),
-            color_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            color_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::new(0.2, 0.4, 0.6)],
+            ))),
             eta: 1.5,
             roughness: 0.8,
-            roughness_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::splat(0.5)])),
+            roughness_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::splat(0.5)],
+            ))),
             anisotropy: 0.0,
             thin: false,
             normal_map: None,
             normal_strength: 1.0,
+            opacity: 1.0,
+            opacity_texture: None,
         };
         let vtx = test_shading_vertex(Vec3::Z);
         let (alpha_x, alpha_y) = material.alpha_xy_at(&vtx);

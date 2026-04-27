@@ -74,7 +74,7 @@ mod tests {
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, glam::Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
-        scene.build_bvh();
+        scene.build_qbvh();
 
         let ctx = LightSampleContext {
             p: Vec3::new(0.25, 0.25, 0.0),

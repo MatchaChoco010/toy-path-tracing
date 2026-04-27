@@ -1,7 +1,7 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use std::{collections::HashMap, fmt, fs, path::Path};
 
-use crate::bvh::{MeshBvh, build_mesh_bvh};
+use crate::qbvh::{Qbvh, build_qbvh};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
@@ -48,7 +48,7 @@ pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub bounds: Bounds,
-    pub bvh: Option<MeshBvh>,
+    pub qbvh: Option<Qbvh>,
 }
 
 impl Mesh {
@@ -59,7 +59,7 @@ impl Mesh {
             vertices,
             indices,
             bounds,
-            bvh: None,
+            qbvh: None,
         }
     }
 
@@ -106,11 +106,11 @@ impl Mesh {
         }
     }
 
-    pub fn build_bvh(&mut self) {
+    pub fn build_qbvh(&mut self) {
         let triangle_bounds = (0..self.triangle_count())
             .map(|triangle_index| self.triangle_bounds(triangle_index))
             .collect::<Vec<_>>();
-        self.bvh = build_mesh_bvh(&triangle_bounds);
+        self.qbvh = build_qbvh(&triangle_bounds);
     }
 
     fn triangle_indices(&self, triangle_index: usize) -> [u32; 3] {
@@ -339,17 +339,17 @@ fn append_gltf_mesh(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ObjVertexKey {
-    position_index: usize,
-    uv_index: Option<usize>,
-    normal_index: Option<usize>,
+pub(crate) struct ObjVertexKey {
+    pub position_index: usize,
+    pub uv_index: Option<usize>,
+    pub normal_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ObjFaceCorner {
-    position_index: usize,
-    uv_index: Option<usize>,
-    normal_index: Option<usize>,
+pub(crate) struct ObjFaceCorner {
+    pub position_index: usize,
+    pub uv_index: Option<usize>,
+    pub normal_index: Option<usize>,
 }
 
 fn parse_obj(source: &str) -> Result<Mesh, LoadMeshError> {
@@ -446,7 +446,7 @@ fn parse_obj(source: &str) -> Result<Mesh, LoadMeshError> {
     Ok(Mesh::new(vertices, indices))
 }
 
-fn append_obj_vertex(
+pub(crate) fn append_obj_vertex(
     corner: ObjFaceCorner,
     positions: &[Vec3],
     uvs: &[Vec2],
@@ -480,7 +480,7 @@ fn append_obj_vertex(
     Ok(index)
 }
 
-fn parse_obj_face_corner(
+pub(crate) fn parse_obj_face_corner(
     token: &str,
     line_number: usize,
     position_count: usize,
@@ -556,7 +556,7 @@ fn resolve_obj_index(
     Ok(resolved_index as usize)
 }
 
-fn parse_obj_float<'a>(
+pub(crate) fn parse_obj_float<'a>(
     fields: &mut impl Iterator<Item = &'a str>,
     line_number: usize,
     label: &str,
@@ -569,14 +569,14 @@ fn parse_obj_float<'a>(
         .map_err(|_| obj_error(line_number, format!("invalid {label} '{token}'")))
 }
 
-fn obj_error(line: usize, message: impl Into<String>) -> LoadMeshError {
+pub(crate) fn obj_error(line: usize, message: impl Into<String>) -> LoadMeshError {
     LoadMeshError::Obj {
         line,
         message: message.into(),
     }
 }
 
-fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
+pub(crate) fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
     let mut normals = vec![Vec3::ZERO; positions.len()];
 
     for triangle in indices.chunks_exact(3) {
