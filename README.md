@@ -77,6 +77,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `20` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/gltf/dragon.obj` と dragon 用の base color / metallic / roughness / normal texture を使う SimplePBR ドラゴンを斜め向きに配置したシーンです。 |
 | `21` | scene 20 の SimplePBR ドラゴンに加えて、roughness `0.4` の金色 Conductor GGX バニー、`Glass` 球、薄青の NormalizedLambert バニーを並べ、同じ puresky 環境で照らすマテリアル比較シーンです。 |
 | `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel (約 561 万 triangles) を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす建築シーンです。OBJ のマテリアルは原則 SimplePBR、`d < 1` か `illum 4` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けて読み込みます。`map_Kd` PNG が alpha matte を含む場合はその alpha チャンネルを `opacity_texture` に渡し、植物の葉などをアルファカットアウトで描画します。アセットは `bash assets/download.sh` で取得します。 |
+| `23` | `assets/san_miguel_2.0/san-miguel.obj` の通常版 San Miguel (約 998 万 triangles) を puresky 環境光で照らす建築シーンです。マテリアル割り当てやカメラ設定、アルファカットアウトの扱いは scene 22 と同じ方針ですが、コードは `scene_23.rs` として独立に持ちます。アセットは `bash assets/download.sh` で取得します。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 
