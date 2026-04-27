@@ -339,17 +339,17 @@ fn append_gltf_mesh(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ObjVertexKey {
-    position_index: usize,
-    uv_index: Option<usize>,
-    normal_index: Option<usize>,
+pub(crate) struct ObjVertexKey {
+    pub position_index: usize,
+    pub uv_index: Option<usize>,
+    pub normal_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ObjFaceCorner {
-    position_index: usize,
-    uv_index: Option<usize>,
-    normal_index: Option<usize>,
+pub(crate) struct ObjFaceCorner {
+    pub position_index: usize,
+    pub uv_index: Option<usize>,
+    pub normal_index: Option<usize>,
 }
 
 fn parse_obj(source: &str) -> Result<Mesh, LoadMeshError> {
@@ -446,7 +446,7 @@ fn parse_obj(source: &str) -> Result<Mesh, LoadMeshError> {
     Ok(Mesh::new(vertices, indices))
 }
 
-fn append_obj_vertex(
+pub(crate) fn append_obj_vertex(
     corner: ObjFaceCorner,
     positions: &[Vec3],
     uvs: &[Vec2],
@@ -480,7 +480,7 @@ fn append_obj_vertex(
     Ok(index)
 }
 
-fn parse_obj_face_corner(
+pub(crate) fn parse_obj_face_corner(
     token: &str,
     line_number: usize,
     position_count: usize,
@@ -556,7 +556,7 @@ fn resolve_obj_index(
     Ok(resolved_index as usize)
 }
 
-fn parse_obj_float<'a>(
+pub(crate) fn parse_obj_float<'a>(
     fields: &mut impl Iterator<Item = &'a str>,
     line_number: usize,
     label: &str,
@@ -569,14 +569,14 @@ fn parse_obj_float<'a>(
         .map_err(|_| obj_error(line_number, format!("invalid {label} '{token}'")))
 }
 
-fn obj_error(line: usize, message: impl Into<String>) -> LoadMeshError {
+pub(crate) fn obj_error(line: usize, message: impl Into<String>) -> LoadMeshError {
     LoadMeshError::Obj {
         line,
         message: message.into(),
     }
 }
 
-fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
+pub(crate) fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
     let mut normals = vec![Vec3::ZERO; positions.len()];
 
     for triangle in indices.chunks_exact(3) {

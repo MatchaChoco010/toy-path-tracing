@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
@@ -15,9 +15,9 @@ const MIN_ALPHA: f32 = 1.0e-4;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConductorGgxMaterial {
     pub base_color: Vec3,
-    pub base_color_texture: Option<Texture>,
+    pub base_color_texture: Option<Arc<Texture>>,
     pub roughness: f32,
-    pub roughness_texture: Option<Texture>,
+    pub roughness_texture: Option<Arc<Texture>>,
     pub anisotropy: f32,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
@@ -212,6 +212,8 @@ impl ConductorGgxMaterial {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Vec2, Vec3};
 
     use crate::{
@@ -301,9 +303,17 @@ mod tests {
     fn textures_modulate_base_color_and_roughness() {
         let material = ConductorGgxMaterial {
             base_color: Vec3::new(0.5, 0.5, 0.5),
-            base_color_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            base_color_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::new(0.2, 0.4, 0.6)],
+            ))),
             roughness: 0.8,
-            roughness_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::splat(0.5)])),
+            roughness_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::splat(0.5)],
+            ))),
             anisotropy: 0.0,
             normal_map: None,
             normal_strength: 1.0,

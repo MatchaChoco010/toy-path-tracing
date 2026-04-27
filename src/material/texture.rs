@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 
@@ -302,8 +302,8 @@ fn pixel_wrapped_in_level(level: &TextureLevel, x: isize, y: isize) -> Vec3 {
 pub(super) fn load_optional_texture(
     path: Option<&Path>,
     color_space: TextureColorSpace,
-) -> image::ImageResult<Option<Texture>> {
-    path.map(|path| Texture::from_file_with_color_space(path, color_space))
+) -> image::ImageResult<Option<Arc<Texture>>> {
+    path.map(|path| Texture::from_file_with_color_space(path, color_space).map(Arc::new))
         .transpose()
 }
 

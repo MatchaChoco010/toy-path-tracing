@@ -818,6 +818,8 @@ fn transform_bounds(bounds: Bounds, transform: Mat4) -> Bounds {
 }
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Mat4, Vec2, Vec3};
 
     use super::{
@@ -1128,11 +1130,11 @@ mod tests {
             scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial {
                 rho: Vec3::ONE,
                 rho_texture: None,
-                normal_map: Some(NormalMap::from_texture(Texture::from_pixels(
+                normal_map: Some(NormalMap::from_texture(Arc::new(Texture::from_pixels(
                     1,
                     1,
                     vec![normal_texel],
-                ))),
+                )))),
                 normal_strength: 1.0,
             }));
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);

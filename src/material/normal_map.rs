@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::Vec3;
 
@@ -8,19 +8,18 @@ use super::{ShadingVertex, Texture, TextureColorSpace};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalMap {
-    texture: Texture,
+    texture: Arc<Texture>,
 }
 
 impl NormalMap {
-    pub fn from_texture(texture: Texture) -> Self {
+    pub fn from_texture(texture: Arc<Texture>) -> Self {
         Self { texture }
     }
 
     pub fn from_file(path: impl AsRef<Path>) -> image::ImageResult<Self> {
-        Ok(Self::from_texture(Texture::from_file_with_color_space(
-            path,
-            TextureColorSpace::Linear,
-        )?))
+        Ok(Self::from_texture(Arc::new(
+            Texture::from_file_with_color_space(path, TextureColorSpace::Linear)?,
+        )))
     }
 
     pub fn apply(&self, shading_vertex: &ShadingVertex, strength: f32) -> ShadingVertex {
@@ -67,6 +66,8 @@ pub(super) fn load_optional_normal_map(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Vec2, Vec3};
 
     use crate::{
@@ -105,7 +106,7 @@ mod tests {
     fn normal_map_replaces_shading_normal() {
         let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
         let pixel = 0.5 * (local_normal + Vec3::ONE);
-        let normal_map = NormalMap::from_texture(Texture::from_pixels(1, 1, vec![pixel]));
+        let normal_map = NormalMap::from_texture(Arc::new(Texture::from_pixels(1, 1, vec![pixel])));
         let mapped = normal_map.apply(&test_shading_vertex(), 1.0);
 
         assert!(mapped.ns.abs_diff_eq(local_normal, 1.0e-6));
@@ -117,7 +118,7 @@ mod tests {
     fn strength_scales_tangent_space_xy_components() {
         let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
         let pixel = 0.5 * (local_normal + Vec3::ONE);
-        let normal_map = NormalMap::from_texture(Texture::from_pixels(1, 1, vec![pixel]));
+        let normal_map = NormalMap::from_texture(Arc::new(Texture::from_pixels(1, 1, vec![pixel])));
         let mapped = normal_map.apply(&test_shading_vertex(), 0.5);
         let expected =
             Vec3::new(local_normal.x * 0.5, local_normal.y * 0.5, local_normal.z).normalize();
@@ -130,7 +131,7 @@ mod tests {
     fn zero_strength_returns_flat_shading_normal() {
         let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
         let pixel = 0.5 * (local_normal + Vec3::ONE);
-        let normal_map = NormalMap::from_texture(Texture::from_pixels(1, 1, vec![pixel]));
+        let normal_map = NormalMap::from_texture(Arc::new(Texture::from_pixels(1, 1, vec![pixel])));
         let mapped = normal_map.apply(&test_shading_vertex(), 0.0);
 
         assert!(mapped.ns.abs_diff_eq(Vec3::Z, 1.0e-6));

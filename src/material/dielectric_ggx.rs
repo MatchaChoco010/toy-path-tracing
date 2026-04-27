@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
@@ -15,10 +15,10 @@ const MIN_ALPHA: f32 = 1.0e-4;
 #[derive(Debug, Clone, PartialEq)]
 pub struct DielectricGgxMaterial {
     pub color: Vec3,
-    pub color_texture: Option<Texture>,
+    pub color_texture: Option<Arc<Texture>>,
     pub eta: f32,
     pub roughness: f32,
-    pub roughness_texture: Option<Texture>,
+    pub roughness_texture: Option<Arc<Texture>>,
     pub anisotropy: f32,
     pub thin: bool,
     pub normal_map: Option<NormalMap>,
@@ -268,6 +268,8 @@ impl DielectricGgxMaterial {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Vec2, Vec3};
 
     use crate::{
@@ -377,10 +379,18 @@ mod tests {
     fn textures_modulate_color_and_roughness() {
         let material = DielectricGgxMaterial {
             color: Vec3::new(0.5, 0.5, 0.5),
-            color_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            color_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::new(0.2, 0.4, 0.6)],
+            ))),
             eta: 1.5,
             roughness: 0.8,
-            roughness_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::splat(0.5)])),
+            roughness_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::splat(0.5)],
+            ))),
             anisotropy: 0.0,
             thin: false,
             normal_map: None,

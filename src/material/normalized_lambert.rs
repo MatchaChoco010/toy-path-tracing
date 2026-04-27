@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
@@ -15,7 +15,7 @@ const DIFFUSE_CONE_SPREAD: f32 = 0.5;
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedLambertMaterial {
     pub rho: Vec3,
-    pub rho_texture: Option<Texture>,
+    pub rho_texture: Option<Arc<Texture>>,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
 }
@@ -138,7 +138,7 @@ impl NormalizedLambertMaterial {
 
 #[cfg(test)]
 mod tests {
-    use std::f32::consts::PI;
+    use std::{f32::consts::PI, sync::Arc};
 
     use glam::{Vec2, Vec3};
 
@@ -178,7 +178,11 @@ mod tests {
     fn texture_modulates_rho() {
         let material = NormalizedLambertMaterial {
             rho: Vec3::new(0.5, 0.5, 0.5),
-            rho_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            rho_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::new(0.2, 0.4, 0.6)],
+            ))),
             normal_map: None,
             normal_strength: 1.0,
         };

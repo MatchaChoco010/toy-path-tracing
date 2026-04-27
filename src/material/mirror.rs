@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use glam::Vec3;
 use rand::rngs::ThreadRng;
@@ -13,7 +13,7 @@ use super::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirrorMaterial {
     pub color: Vec3,
-    pub color_texture: Option<Texture>,
+    pub color_texture: Option<Arc<Texture>>,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
 }
@@ -115,6 +115,8 @@ impl MirrorMaterial {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use glam::{Vec2, Vec3};
 
     use crate::{
@@ -153,7 +155,11 @@ mod tests {
     fn texture_modulates_color() {
         let material = MirrorMaterial {
             color: Vec3::new(0.5, 0.5, 0.5),
-            color_texture: Some(Texture::from_pixels(1, 1, vec![Vec3::new(0.2, 0.4, 0.6)])),
+            color_texture: Some(Arc::new(Texture::from_pixels(
+                1,
+                1,
+                vec![Vec3::new(0.2, 0.4, 0.6)],
+            ))),
             normal_map: None,
             normal_strength: 1.0,
         };
