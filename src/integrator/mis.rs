@@ -403,7 +403,7 @@ mod tests {
         let mut scene = Scene::new();
         let env_radiance = Vec3::splat(2.0);
         let pixels = vec![env_radiance; 32 * 16];
-        scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0));
+        scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0));
         scene.build_bvh();
 
         let throughput = Vec3::ONE;
@@ -431,7 +431,7 @@ mod tests {
         let mut scene = Scene::new();
         let env_radiance = Vec3::new(0.1, 0.4, 0.9);
         let pixels = vec![env_radiance; 16 * 8];
-        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0));
+        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
         scene.build_bvh();
 
         let mut rng = rand::rng();
@@ -600,7 +600,7 @@ mod tests {
 
         let env_radiance = Vec3::splat(0.2);
         let pixels = vec![env_radiance; 16 * 8];
-        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0));
+        scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
         scene.build_bvh();
 
         let mut rng = rand::rng();

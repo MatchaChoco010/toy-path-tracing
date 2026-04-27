@@ -58,7 +58,7 @@ pub fn create_scene_9() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         * Mat4::from_translation(-bunny_pivot);
     scene.add_instance(bunny_mesh_index, metal_material, bunny_transform);
 
-    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 1.5)?;
+    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 1.5, 0.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(

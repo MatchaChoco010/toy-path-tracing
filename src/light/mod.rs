@@ -275,7 +275,7 @@ mod test_helpers {
 
     pub fn uniform_environment(radiance: f32) -> EnvironmentLight {
         let pixels = vec![Vec3::splat(radiance); 32 * 16];
-        EnvironmentLight::from_pixels(32, 16, pixels, 1.0)
+        EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0)
     }
 }
 
