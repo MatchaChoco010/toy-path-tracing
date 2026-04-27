@@ -6,9 +6,8 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::{BsdfFlags, ConductorGgxBsdf};
 
 use super::{
-    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
-    normal_map::load_optional_normal_map, sample_matches_geometric_side,
-    texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -77,7 +76,11 @@ impl ConductorGgxMaterial {
         let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
         let sample = self.sample_impl(shading_vertex, us)?;
 
-        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
+        if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return None;
+        }
+
+        Some(sample)
     }
 
     fn sample_impl(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {

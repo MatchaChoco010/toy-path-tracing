@@ -6,9 +6,8 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::{BsdfFlags, DielectricGgxBsdf};
 
 use super::{
-    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
-    dielectric_direction_matches_geometric_side, normal_map::load_optional_normal_map,
-    sample_matches_geometric_side, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -83,7 +82,17 @@ impl DielectricGgxMaterial {
         let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
         let sample = self.sample_impl(shading_vertex, uc, us)?;
 
-        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
+        let wi_side = sample.wi.dot(shading_vertex.ng);
+        if sample.flags.contains(BsdfFlags::REFLECTION) && wi_side <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return None;
+        }
+        if sample.flags.contains(BsdfFlags::TRANSMISSION)
+            && wi_side >= -GEOMETRIC_NORMAL_COS_EPSILON
+        {
+            return None;
+        }
+
+        Some(sample)
     }
 
     fn sample_impl(
@@ -130,7 +139,18 @@ impl DielectricGgxMaterial {
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
-        if !dielectric_direction_matches_geometric_side(shading_vertex, wi, wi_local) {
+        let wo_side = shading_vertex.wo.dot(shading_vertex.ng);
+        let wi_side = wi.dot(shading_vertex.ng);
+        if wo_side <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return Vec3::ZERO;
+        }
+        if wi_local.z > 0.0 && wi_side <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return Vec3::ZERO;
+        }
+        if wi_local.z < 0.0 && wi_side >= -GEOMETRIC_NORMAL_COS_EPSILON {
+            return Vec3::ZERO;
+        }
+        if wi_local.z == 0.0 {
             return Vec3::ZERO;
         }
 
@@ -152,7 +172,18 @@ impl DielectricGgxMaterial {
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
-        if !dielectric_direction_matches_geometric_side(shading_vertex, wi, wi_local) {
+        let wo_side = shading_vertex.wo.dot(shading_vertex.ng);
+        let wi_side = wi.dot(shading_vertex.ng);
+        if wo_side <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return 0.0;
+        }
+        if wi_local.z > 0.0 && wi_side <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return 0.0;
+        }
+        if wi_local.z < 0.0 && wi_side >= -GEOMETRIC_NORMAL_COS_EPSILON {
+            return 0.0;
+        }
+        if wi_local.z == 0.0 {
             return 0.0;
         }
 

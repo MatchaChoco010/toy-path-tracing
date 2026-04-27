@@ -6,9 +6,8 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::NormalizedLambertBsdf;
 
 use super::{
-    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
-    normal_map::load_optional_normal_map, reflection_direction_matches_geometric_side,
-    sample_matches_geometric_side, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
 };
 
 const DIFFUSE_CONE_SPREAD: f32 = 0.5;
@@ -74,11 +73,15 @@ impl NormalizedLambertMaterial {
             cone_spread: DIFFUSE_CONE_SPREAD,
         };
 
-        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
+        if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return None;
+        }
+
+        Some(sample)
     }
 
     pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
-        if !reflection_direction_matches_geometric_side(shading_vertex, wi) {
+        if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
 
@@ -92,7 +95,7 @@ impl NormalizedLambertMaterial {
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
-        if !reflection_direction_matches_geometric_side(shading_vertex, wi) {
+        if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return 0.0;
         }
 

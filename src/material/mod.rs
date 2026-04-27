@@ -5,12 +5,15 @@ mod glass;
 mod mirror;
 mod normal_map;
 mod normalized_lambert;
+mod simple_pbr;
 mod texture;
 
 use glam::{Vec2, Vec3};
 use rand::rngs::ThreadRng;
 
 use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
+
+pub(super) const GEOMETRIC_NORMAL_COS_EPSILON: f32 = 1.0e-6;
 
 pub use conductor_ggx::ConductorGgxMaterial;
 pub use dielectric_ggx::DielectricGgxMaterial;
@@ -19,6 +22,7 @@ pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
 pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
+pub use simple_pbr::SimplePbrMaterial;
 pub use texture::{Texture, TextureColorSpace};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +32,7 @@ pub enum Material {
     ConductorGgx(ConductorGgxMaterial),
     DielectricGgx(DielectricGgxMaterial),
     Glass(GlassMaterial),
+    SimplePBR(SimplePbrMaterial),
     Emissive(EmissiveMaterial),
 }
 
@@ -81,6 +86,7 @@ impl Material {
             Self::ConductorGgx(material) => material.prepare_shading_vertex(shading_vertex),
             Self::DielectricGgx(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Glass(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::SimplePBR(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Emissive(_) => *shading_vertex,
         }
     }
@@ -96,6 +102,7 @@ impl Material {
             Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
             Self::DielectricGgx(material) => material.sample(shading_vertex, rng),
             Self::Glass(material) => material.sample(shading_vertex, rng),
+            Self::SimplePBR(material) => material.sample(shading_vertex, rng),
             Self::Emissive(material) => material.sample(shading_vertex, rng),
         }
     }
@@ -107,6 +114,7 @@ impl Material {
             Self::ConductorGgx(material) => material.le(shading_vertex),
             Self::DielectricGgx(material) => material.le(shading_vertex),
             Self::Glass(material) => material.le(shading_vertex),
+            Self::SimplePBR(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
     }
@@ -118,6 +126,7 @@ impl Material {
             Self::ConductorGgx(material) => material.eval(shading_vertex, wi),
             Self::DielectricGgx(material) => material.eval(shading_vertex, wi),
             Self::Glass(material) => material.eval(shading_vertex, wi),
+            Self::SimplePBR(material) => material.eval(shading_vertex, wi),
             Self::Emissive(material) => material.eval(shading_vertex, wi),
         }
     }
@@ -129,6 +138,7 @@ impl Material {
             Self::ConductorGgx(material) => material.pdf(shading_vertex, wi),
             Self::DielectricGgx(material) => material.pdf(shading_vertex, wi),
             Self::Glass(material) => material.pdf(shading_vertex, wi),
+            Self::SimplePBR(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
         }
     }
@@ -140,6 +150,7 @@ impl Material {
             Self::ConductorGgx(material) => material.may_emit(),
             Self::DielectricGgx(material) => material.may_emit(),
             Self::Glass(material) => material.may_emit(),
+            Self::SimplePBR(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
         }
     }
@@ -151,51 +162,9 @@ impl Material {
             Self::ConductorGgx(material) => material.max_emission(),
             Self::DielectricGgx(material) => material.max_emission(),
             Self::Glass(material) => material.max_emission(),
+            Self::SimplePBR(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
-    }
-}
-
-pub(super) fn sample_matches_geometric_side(
-    sample: &MaterialSample,
-    geometric_normal: Vec3,
-) -> bool {
-    let side = sample.wi.dot(geometric_normal);
-    let epsilon = 1.0e-6;
-
-    if sample.flags.contains(BsdfFlags::TRANSMISSION) {
-        return side < -epsilon;
-    }
-    if sample.flags.contains(BsdfFlags::REFLECTION) {
-        return side > epsilon;
-    }
-
-    true
-}
-
-pub(super) fn reflection_direction_matches_geometric_side(
-    shading_vertex: &ShadingVertex,
-    wi: Vec3,
-) -> bool {
-    shading_vertex.wo.dot(shading_vertex.ng) > 0.0 && wi.dot(shading_vertex.ng) > 0.0
-}
-
-pub(super) fn dielectric_direction_matches_geometric_side(
-    shading_vertex: &ShadingVertex,
-    wi: Vec3,
-    wi_local: Vec3,
-) -> bool {
-    let epsilon = 1.0e-6;
-
-    if shading_vertex.wo.dot(shading_vertex.ng) <= epsilon {
-        return false;
-    }
-    if wi_local.z > 0.0 {
-        wi.dot(shading_vertex.ng) > epsilon
-    } else if wi_local.z < 0.0 {
-        wi.dot(shading_vertex.ng) < -epsilon
-    } else {
-        false
     }
 }
 

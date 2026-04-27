@@ -6,9 +6,8 @@ use rand::rngs::ThreadRng;
 use crate::bsdf::MirrorBsdf;
 
 use super::{
-    MaterialSample, NormalMap, ShadingVertex, Texture, TextureColorSpace,
-    normal_map::load_optional_normal_map, sample_matches_geometric_side,
-    texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +70,11 @@ impl MirrorMaterial {
             cone_spread: 0.0,
         };
 
-        sample_matches_geometric_side(&sample, shading_vertex.ng).then_some(sample)
+        if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return None;
+        }
+
+        Some(sample)
     }
 
     pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3) -> Vec3 {
