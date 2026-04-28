@@ -1,3 +1,16 @@
+[workspace]
+members = [".", "tools/convert_bistro"]
+
+# russimp-sys 2.0.2 published on crates.io only ships headers, so its
+# `static-link` feature cannot build assimp from the registry copy. The
+# upstream build script also fails on Linux x86_64 because cmake installs the
+# assimp library into `lib64/` but only `lib/` is added to the rustc search
+# path. The fork under tools/russimp-sys/ contains a one-line patch on top of
+# the upstream v2.0.2 source so that `[patch.crates-io].russimp-sys` resolves
+# to a working copy.
+[patch.crates-io]
+russimp-sys = { path = "tools/russimp-sys" }
+
 [package]
 name = "toy-path-tracing"
 version = "0.1.0"

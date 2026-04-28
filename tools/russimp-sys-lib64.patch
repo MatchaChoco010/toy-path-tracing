@@ -1,0 +1,14 @@
+--- a/build.rs
++++ b/build.rs
+@@ -105,6 +105,11 @@
+
+     println!(
+         "cargo:rustc-link-search=native={}",
++        cmake_dir.join("lib64").display()
++    );
++
++    println!(
++        "cargo:rustc-link-search=native={}",
+         cmake_dir.join("bin").display()
+     );
+ }

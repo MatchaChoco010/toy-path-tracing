@@ -10,4 +10,5 @@ pub mod obj_scene;
 pub mod qbvh;
 pub mod ray;
 pub mod scene;
+pub mod scene_loader;
 pub mod scenes;
