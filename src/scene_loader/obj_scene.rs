@@ -21,6 +21,7 @@ pub struct ObjMaterial {
     pub transmission_filter: Vec3,
     pub emission: Vec3,
     pub diffuse_texture_path: Option<PathBuf>,
+    pub emission_texture_path: Option<PathBuf>,
 }
 
 impl Default for ObjMaterial {
@@ -34,6 +35,7 @@ impl Default for ObjMaterial {
             transmission_filter: Vec3::ZERO,
             emission: Vec3::ZERO,
             diffuse_texture_path: None,
+            emission_texture_path: None,
         }
     }
 }
@@ -349,6 +351,19 @@ fn parse_mtl_source(source: &str, path: &Path) -> Result<Vec<ObjMaterial>, LoadO
                 }
                 material.diffuse_texture_path = Some(normalize_obj_path(path_text));
             }
+            "map_Ke" => {
+                let material = current.as_mut().ok_or_else(|| {
+                    mtl_error(path, line_number, "map_Ke before any newmtl directive")
+                })?;
+                let path_text = line
+                    .split_once(char::is_whitespace)
+                    .map(|(_, rest)| rest.trim())
+                    .unwrap_or("");
+                if path_text.is_empty() {
+                    return Err(mtl_error(path, line_number, "map_Ke missing texture path"));
+                }
+                material.emission_texture_path = Some(normalize_obj_path(path_text));
+            }
             _ => {}
         }
     }
@@ -499,6 +514,24 @@ map_Kd ../PropTextures/Paris_ShopSign_ties shop_diff.png
             Some(Path::new(
                 "../PropTextures/Paris_ShopSign_ties shop_diff.png"
             )),
+        );
+    }
+
+    #[test]
+    fn mtl_map_ke_records_emission_texture_path() {
+        let source = "
+newmtl lantern
+Kd 1 1 1
+Ns 32
+illum 2
+map_Kd ../PropTextures/Paris_Lantern_01A_diff.png
+map_Ke ..\\PropTextures\\Paris_Lantern_01A_emi.png
+";
+        let materials = parse_mtl_source(source, Path::new("scene.mtl")).expect("parsed");
+        assert_eq!(materials.len(), 1);
+        assert_eq!(
+            materials[0].emission_texture_path.as_deref(),
+            Some(Path::new("../PropTextures/Paris_Lantern_01A_emi.png"))
         );
     }
 

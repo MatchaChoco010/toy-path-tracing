@@ -8,12 +8,13 @@ use std::{
 
 use crate::{
     camera::PinholeCamera,
+    color::srgb_to_linear,
     light::EnvironmentLight,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
         SimplePbrMaterial, Texture, TextureColorSpace,
     },
-    obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
+    scene_loader::obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
     scene::Scene,
 };
 
@@ -68,16 +69,18 @@ fn san_miguel_material(
     };
 
     if material.emission.length_squared() > 0.0 {
-        let strength = material.emission.max_element().max(1.0);
-        let color = (material.emission / strength).clamp(Vec3::ZERO, Vec3::ONE);
+        let ke = material.emission;
+        let strength = ke.max_element().max(1.0);
+        let chroma = (ke / strength).clamp(Vec3::ZERO, Vec3::ONE);
+        let color = srgb_to_linear(chroma);
         return Material::Emissive(EmissiveMaterial::new(color, strength));
     }
 
     if is_transparent(material) {
         let color = if material.transmission_filter.length_squared() > 0.0 {
-            material.transmission_filter
+            srgb_to_linear(material.transmission_filter)
         } else {
-            material.diffuse
+            srgb_to_linear(material.diffuse)
         };
         let color = color.clamp(Vec3::splat(0.05), Vec3::ONE);
         return Material::DielectricGgx(DielectricGgxMaterial::new(
@@ -95,7 +98,7 @@ fn san_miguel_material(
         .and_then(|relative_path| load_diffuse_texture(mtl_dir, relative_path, texture_cache));
 
     let mut simple_pbr = SimplePbrMaterial::new(
-        material.diffuse.clamp(Vec3::ZERO, Vec3::ONE),
+        srgb_to_linear(material.diffuse).clamp(Vec3::ZERO, Vec3::ONE),
         0.0,
         roughness_from_phong_exponent(material.specular_exponent),
         1.5,
@@ -166,7 +169,7 @@ mod tests {
 
     use glam::Vec3;
 
-    use crate::{material::Material, obj_scene::ObjMaterial};
+    use crate::{material::Material, scene_loader::obj_scene::ObjMaterial};
 
     use super::{is_transparent, roughness_from_phong_exponent, san_miguel_material};
 
@@ -180,6 +183,7 @@ mod tests {
             transmission_filter: Vec3::ZERO,
             emission: Vec3::ZERO,
             diffuse_texture_path: None,
+            emission_texture_path: None,
         }
     }
 

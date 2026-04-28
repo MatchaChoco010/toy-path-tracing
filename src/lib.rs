@@ -6,7 +6,6 @@ pub mod light;
 pub mod material;
 pub mod math;
 pub mod mesh;
-pub mod obj_scene;
 pub mod qbvh;
 pub mod ray;
 pub mod scene;
