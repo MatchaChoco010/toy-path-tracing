@@ -60,6 +60,7 @@ pub fn create_scene_0() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn
         Vec3::new(0.0, 1.45, -0.05),
         Vec3::Y,
         38.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

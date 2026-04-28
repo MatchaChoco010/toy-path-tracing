@@ -2,6 +2,8 @@ use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
 
+use crate::color::srgb_to_linear;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Texture {
     levels: Vec<TextureLevel>,
@@ -111,6 +113,14 @@ impl Texture {
 
     pub fn pixels(&self) -> &[Vec3] {
         &self.level(0).pixels
+    }
+
+    pub fn max_rgb_element(&self) -> f32 {
+        self.level(0)
+            .pixels
+            .iter()
+            .map(|pixel| pixel.max_element())
+            .fold(0.0_f32, f32::max)
     }
 
     pub fn sample_rgb(&self, uv: Vec2) -> Vec3 {
@@ -343,19 +353,7 @@ pub(super) fn load_optional_texture(
 fn decode_color_space(rgb: Vec3, color_space: TextureColorSpace) -> Vec3 {
     match color_space {
         TextureColorSpace::Linear => rgb,
-        TextureColorSpace::Srgb => Vec3::new(
-            srgb_channel_to_linear(rgb.x),
-            srgb_channel_to_linear(rgb.y),
-            srgb_channel_to_linear(rgb.z),
-        ),
-    }
-}
-
-fn srgb_channel_to_linear(channel: f32) -> f32 {
-    if channel <= 0.04045 {
-        channel / 12.92
-    } else {
-        ((channel + 0.055) / 1.055).powf(2.4)
+        TextureColorSpace::Srgb => srgb_to_linear(rgb),
     }
 }
 

@@ -1,5 +1,6 @@
 pub mod bsdf;
 pub mod camera;
+pub mod color;
 pub mod integrator;
 pub mod light;
 pub mod material;

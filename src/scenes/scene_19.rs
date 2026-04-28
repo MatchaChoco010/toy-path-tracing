@@ -86,6 +86,7 @@ pub fn create_scene_19() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.0, 0.55, 0.10),
         Vec3::Y,
         40.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

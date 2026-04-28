@@ -52,6 +52,7 @@ pub(super) fn create_sky_bunny_scene(
         Vec3::new(0.0, 1.15, -0.1),
         Vec3::Y,
         38.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))
