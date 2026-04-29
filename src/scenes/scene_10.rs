@@ -56,9 +56,7 @@ pub fn create_scene_10() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let env_width = 64;
     let env_height = 32;
     let env_pixels = vec![Vec3::ONE; env_width * env_height];
-    // Reinhard トーンマップで radiance 1.0 は 0.5 に潰れてしまうため、
-    // 背景が白く読めるように scale を上げている。
-    let env = EnvironmentLight::from_pixels(env_width, env_height, env_pixels, 5.0, 0.0);
+    let env = EnvironmentLight::from_pixels(env_width, env_height, env_pixels, 1.0, 0.0);
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(

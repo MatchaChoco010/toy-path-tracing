@@ -40,7 +40,7 @@ pub fn create_scene_11() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     scene.add_directional_light(DirectionalLight::new(
         Vec3::new(-0.4, -1.0, -0.35),
         Vec3::new(1.0, 0.96, 0.88),
-        6.0,
+        3.0,
     ));
 
     let camera = PinholeCamera::new(

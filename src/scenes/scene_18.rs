@@ -22,7 +22,7 @@ pub fn create_scene_18() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let green = scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial::new(
         Vec3::new(0.14, 0.45, 0.091),
     )));
-    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 20.0)));
+    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
 
     let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
     scene.add_instance(floor_mesh, wall_gray, Mat4::IDENTITY);

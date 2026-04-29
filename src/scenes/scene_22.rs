@@ -31,7 +31,7 @@ pub fn create_scene_22() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let obj_scene = load_obj_scene(Path::new(SAN_MIGUEL_OBJ))?;
     add_san_miguel_to_scene(&mut scene, &obj_scene);
 
-    let env = EnvironmentLight::from_hdr_file(SAN_MIGUEL_HDR, 50.0, 0.0)?;
+    let env = EnvironmentLight::from_hdr_file(SAN_MIGUEL_HDR, 10.0, 0.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(

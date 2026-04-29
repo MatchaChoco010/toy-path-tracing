@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub fn create_scene_13() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
-    create_sky_bunny_scene("assets/sky/brown_photostudio_02_4k.hdr", 2.0)
+    create_sky_bunny_scene("assets/sky/brown_photostudio_02_4k.hdr", 1.0)
 }
 
 pub(super) fn create_sky_bunny_scene(

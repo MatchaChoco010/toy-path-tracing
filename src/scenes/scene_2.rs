@@ -25,7 +25,7 @@ pub fn create_scene_2() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let gold = scene.add_material(Material::Mirror(MirrorMaterial::new(Vec3::new(
         1.00, 0.76, 0.34,
     ))));
-    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 20.0)));
+    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
 
     let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
     scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);

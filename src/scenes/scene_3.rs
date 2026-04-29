@@ -36,7 +36,7 @@ pub fn create_scene_3() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.80, 0.93, 1.00),
         false,
     )));
-    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 20.0)));
+    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
 
     let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
     scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);
