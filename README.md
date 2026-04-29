@@ -45,7 +45,6 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `--spp <SPP>` | `32` | Samples Per Pixel。各ピクセルで何本のパスを積分するかを指定します。`1` 以上のみ指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上のみ指定できます。 |
 | `-i, --integrator <INTEGRATOR>` | `mis` | 使用する integrator を指定します。現在は `mis`、`pt`、`nee` を選べます。存在しない名前を指定するとエラーになります。 |
-| `--env-scale <ENV_SCALE>` | `1.0` | 環境光 (HDRI) の強度倍率です。シーンが環境光を持っている場合、ロード時の scale にこの値を乗算します。環境光が無いシーンでは効果はありません。 |
 | `-h, --help` | なし | ヘルプを表示します。 |
 
 ## 現在のシーン番号
