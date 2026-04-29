@@ -7,6 +7,11 @@ use crate::color::srgb_to_linear;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Texture {
     levels: Vec<TextureLevel>,
+    /// Cached maximum of `pixel.max_element()` over the level-0 image.
+    /// Pre-computed at construction time so callers like the light tree
+    /// builder can ask for it once per emissive material rather than
+    /// re-scanning every pixel per emissive triangle.
+    max_rgb_element: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,6 +40,10 @@ impl Texture {
             "pixel buffer length does not match width * height"
         );
 
+        let max_rgb_element = pixels
+            .iter()
+            .map(|pixel| pixel.max_element())
+            .fold(0.0_f32, f32::max);
         let base_level = TextureLevel {
             width,
             height,
@@ -43,6 +52,7 @@ impl Texture {
 
         Self {
             levels: build_mip_levels(base_level),
+            max_rgb_element,
         }
     }
 
@@ -116,11 +126,7 @@ impl Texture {
     }
 
     pub fn max_rgb_element(&self) -> f32 {
-        self.level(0)
-            .pixels
-            .iter()
-            .map(|pixel| pixel.max_element())
-            .fold(0.0_f32, f32::max)
+        self.max_rgb_element
     }
 
     pub fn sample_rgb(&self, uv: Vec2) -> Vec3 {
