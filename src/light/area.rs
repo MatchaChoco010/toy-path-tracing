@@ -1,15 +1,21 @@
 use glam::Vec2;
 
 use super::{LightLiSample, LightSampleContext, LightType};
-use crate::{material::ShadingVertex, scene::Scene};
+use crate::{
+    material::ShadingVertex,
+    scene::{Scene, TriangleRef},
+};
 
-pub(super) fn sample_li(
+/// Sample direct illumination from a *given* triangle leaf. The triangle is
+/// chosen by the SG light tree; this function only handles the 2-D
+/// barycentric sampling and the area-to-solid-angle conversion.
+pub(super) fn sample_li_for_triangle(
     scene: &Scene,
+    triangle: TriangleRef,
     ctx: &LightSampleContext,
-    u_aux: f32,
     us: Vec2,
 ) -> Option<LightLiSample> {
-    let point = scene.sample_area_light_point(u_aux, us)?;
+    let point = scene.sample_triangle_point(triangle, us);
     if point.pdf_area <= 0.0 {
         return None;
     }
@@ -22,12 +28,12 @@ pub(super) fn sample_li(
     let distance = distance_squared.sqrt();
     let wi = to_light / distance;
 
-    let light_material = scene.instance_material(point.triangle.instance_index);
+    let light_material = scene.instance_material(triangle.instance_index);
     if !light_material.may_emit() {
         return None;
     }
 
-    let lvtx = scene.shading_vertex_from_triangle_sample(point.triangle, point.barycentric, wi);
+    let lvtx = scene.shading_vertex_from_triangle_sample(triangle, point.barycentric, wi);
     let le = light_material.le(&lvtx)?;
 
     let cos_light = lvtx.ng.dot(-wi).max(0.0);
@@ -43,7 +49,7 @@ pub(super) fn sample_li(
         pdf: pdf_solid_angle,
         distance,
         light_type: LightType::Area,
-        target_triangle: Some(point.triangle),
+        target_triangle: Some(triangle),
     })
 }
 
@@ -55,15 +61,16 @@ pub fn area_light_pdf_li(scene: &Scene, vtx: &ShadingVertex, lvtx: &ShadingVerte
 mod tests {
     use glam::{Vec2, Vec3};
 
+    use super::super::LightSampleContext;
     use super::super::test_helpers::unit_mesh;
-    use super::super::{LightKind, LightSampleContext, LightType, sample_light_li};
+    use super::sample_li_for_triangle;
     use crate::{
         material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
-        scene::Scene,
+        scene::{Scene, TriangleRef},
     };
 
     #[test]
-    fn sample_light_li_for_area_matches_solid_angle_pdf() {
+    fn sample_li_for_triangle_matches_solid_angle_pdf() {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
@@ -73,20 +80,22 @@ mod tests {
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
         scene.add_instance(floor_mesh, floor_material, glam::Mat4::IDENTITY);
-        scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
+        let light_instance = scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let ctx = LightSampleContext {
             p: Vec3::new(0.25, 0.25, 0.0),
             ng: Vec3::Z,
             ns: Vec3::Z,
         };
-
-        let li = sample_light_li(&scene, LightKind::Area, &ctx, 0.5, Vec2::new(0.25, 0.5))
+        let triangle = TriangleRef {
+            instance_index: light_instance,
+            triangle_index: 0,
+        };
+        let li = sample_li_for_triangle(&scene, triangle, &ctx, Vec2::new(0.25, 0.5))
             .expect("expected a sample");
 
-        assert_eq!(li.light_type, LightType::Area);
-        assert!(li.target_triangle.is_some());
         assert!((li.pdf - 2.0).abs() < 1.0e-4);
         assert!(li.radiance.abs_diff_eq(Vec3::splat(10.0), 1.0e-5));
         assert!((li.distance - 1.0).abs() < 1.0e-5);

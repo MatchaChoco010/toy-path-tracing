@@ -122,6 +122,14 @@ impl EnvironmentLight {
         &self.pixels
     }
 
+    /// Coarse total radiated power. Used by the top-level light category CDF
+    /// to weigh `EnvironmentLight` against the SG light tree and the
+    /// directional lights. Not radiometrically exact (it ignores the constant
+    /// pre-factor of the texel solid-angle integral) but proportional to it.
+    pub fn total_power(&self) -> f32 {
+        self.distribution.total_weight * self.scale
+    }
+
     pub fn radiance(&self, direction: Vec3) -> Vec3 {
         let local_dir = self.inverse_rotation * direction;
         let uv = direction_to_uv(local_dir);
@@ -187,8 +195,7 @@ impl EnvironmentLight {
         for level_idx in 1..distribution.levels.len() {
             let parent = &distribution.levels[level_idx - 1];
             let child = &distribution.levels[level_idx];
-            let (ni, nj, nu, nv) =
-                hsw_step(parent.width, parent.height, child, i, j, u, v)?;
+            let (ni, nj, nu, nv) = hsw_step(parent.width, parent.height, child, i, j, u, v)?;
             i = ni;
             j = nj;
             u = nu;
@@ -206,7 +213,10 @@ impl EnvironmentLight {
 
         let u_cont = (i as f32 + u) / self.width as f32;
         let v_cont = (j as f32 + v) / self.height as f32;
-        let uv = Vec2::new(u_cont.clamp(0.0, ONE_MINUS_EPS), v_cont.clamp(0.0, ONE_MINUS_EPS));
+        let uv = Vec2::new(
+            u_cont.clamp(0.0, ONE_MINUS_EPS),
+            v_cont.clamp(0.0, ONE_MINUS_EPS),
+        );
         let local_direction = uv_to_direction(uv);
         let direction = self.rotation * local_direction;
 
@@ -323,7 +333,9 @@ fn direction_to_uv(direction: Vec3) -> Vec2 {
 
 impl HierarchicalDistribution {
     fn leaf(&self) -> &MipLevel {
-        self.levels.last().expect("pyramid must have at least one level")
+        self.levels
+            .last()
+            .expect("pyramid must have at least one level")
     }
 
     fn texel_weight(&self, i: usize, j: usize) -> f32 {
@@ -508,10 +520,10 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use super::super::{LightKind, LightSampleContext, LightType, sample_light_li};
+    use super::super::{LightSampleContext, LightType};
     use super::{
         EnvironmentLight, build_distribution, direction_to_uv, infinite_light_le,
-        infinite_light_pdf_li, uv_to_direction,
+        infinite_light_pdf_li, sample_li, uv_to_direction,
     };
     use crate::scene::Scene;
 
@@ -710,19 +722,18 @@ mod tests {
     }
 
     #[test]
-    fn sample_light_li_for_infinite_returns_environment_sample() {
+    fn sample_li_for_infinite_returns_environment_sample() {
         let mut scene = Scene::new();
         let pixels = vec![Vec3::splat(1.0); 32 * 16];
         scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0));
 
-        let ctx = LightSampleContext {
+        let _ = LightSampleContext {
             p: Vec3::ZERO,
             ng: Vec3::Z,
             ns: Vec3::Z,
         };
 
-        let li = sample_light_li(&scene, LightKind::Infinite, &ctx, 0.0, Vec2::new(0.3, 0.6))
-            .expect("expected a sample");
+        let li = sample_li(&scene, Vec2::new(0.3, 0.6)).expect("expected a sample");
 
         assert_eq!(li.light_type, LightType::Infinite);
         assert!(li.target_triangle.is_none());
@@ -777,7 +788,7 @@ mod tests {
         let width = 5;
         let height = 3;
         let mut pixels = vec![Vec3::splat(1.0e-3); width * height];
-        pixels[1 * width + 3] = Vec3::splat(8.0);
+        pixels[width + 3] = Vec3::splat(8.0);
         let env = EnvironmentLight::from_pixels(width, height, pixels, 1.0, 0.0);
 
         for (ux, uy) in [(0.05, 0.05), (0.5, 0.5), (0.95, 0.5), (0.5, 0.95)] {

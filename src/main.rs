@@ -44,6 +44,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     scene.build_qbvh();
     println!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
 
+    let build_light_tree_start = Instant::now();
+    scene.build_light_tree();
+    println!(
+        "build_light_tree: {}",
+        format_duration(build_light_tree_start.elapsed())
+    );
+
     let exposure = camera.exposure;
     let mut pixels = vec![0_u8; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();

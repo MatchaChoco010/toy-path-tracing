@@ -248,6 +248,74 @@ impl DielectricGgxMaterial {
         self.alpha_xy_from_roughness(self.roughness)
     }
 
+    /// Per-shading-point precompute for the hierarchical light tree.
+    /// Dielectric GGX has a glossy reflection lobe and a transmission lobe
+    /// (Tokuyoshi 2024 "Proxy A": treat the rough refraction cone as a
+    /// glossy SG kernel pivoted around the perfect refraction direction).
+    /// Both contribute additively to the importance.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<crate::light_tree::LightTreePrecompute> {
+        let alpha = self.alpha_xy_at(shading_vertex);
+        let cos_o = shading_vertex.wo.dot(shading_vertex.ns).abs().max(1.0e-4);
+        let f_avg = crate::math::fresnel_dielectric(cos_o, 1.0, self.eta);
+        let rho_color = crate::math::sg::luminance(self.color_at(shading_vertex));
+        let rho_refl = rho_color * f_avg;
+        let rho_trans = rho_color * (1.0 - f_avg);
+        let glossy = crate::light_tree::make_glossy_lobe(
+            rho_refl,
+            shading_vertex.frame,
+            shading_vertex.wo,
+            alpha.0,
+            alpha.1,
+        );
+        let btdf = if rho_trans > 0.0 {
+            let eta_rel = if shading_vertex.front_face {
+                1.0 / self.eta
+            } else {
+                self.eta
+            };
+            crate::light_tree::make_btdf_lobe(
+                rho_trans,
+                shading_vertex.frame,
+                shading_vertex.wo,
+                alpha.0,
+                alpha.1,
+                eta_rel,
+            )
+        } else {
+            None
+        };
+        if glossy.is_none() && btdf.is_none() {
+            return None;
+        }
+        Some(crate::light_tree::LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse: None,
+            glossy,
+            btdf,
+        })
+    }
+
+    pub fn light_tree_importance(
+        &self,
+        precompute: &crate::light_tree::LightTreePrecompute,
+        w: f32,
+        lobe: &crate::math::sg::SgLobe,
+    ) -> f32 {
+        let mut imp = 0.0;
+        if let Some(g) = precompute.glossy {
+            imp += crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe);
+        }
+        if let Some(b) = precompute.btdf {
+            imp += crate::light_tree::btdf_importance(b, precompute.frame, precompute.n, w, lobe);
+        }
+        imp.max(0.0)
+    }
+
     fn alpha_xy_at(&self, shading_vertex: &ShadingVertex) -> (f32, f32) {
         self.alpha_xy_from_roughness(self.roughness_at(shading_vertex))
     }

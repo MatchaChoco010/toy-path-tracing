@@ -350,6 +350,94 @@ impl SimplePbrMaterial {
         }
     }
 
+    /// Per-shading-point precompute for the hierarchical light tree.
+    /// SimplePBR layers diffuse + glossy + dielectric BTDF (when not
+    /// metallic). All three lobes contribute additively to the importance,
+    /// in line with the multi-lobe guidance in `light_tree::lobe`.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<crate::light_tree::LightTreePrecompute> {
+        let base = self.base_color_at(shading_vertex);
+        let metallic = self.metallic_at(shading_vertex);
+
+        // Diffuse weight = base * (1 - metallic) (Lambert layer).
+        let rho_d = crate::math::sg::luminance(base * (1.0 - metallic));
+        let diffuse = if rho_d > 0.0 {
+            Some(crate::light_tree::DiffuseLobePrecompute { rho: rho_d })
+        } else {
+            None
+        };
+
+        // Glossy weight = metallic * base + (1 - metallic) * F0(0.04).
+        let rho_s =
+            crate::math::sg::luminance(base * metallic + Vec3::splat(0.04) * (1.0 - metallic));
+        let alpha = alpha_xy_from_roughness(self.roughness_at(shading_vertex), self.anisotropy);
+        let glossy = crate::light_tree::make_glossy_lobe(
+            rho_s,
+            shading_vertex.frame,
+            shading_vertex.wo,
+            alpha.0,
+            alpha.1,
+        );
+
+        // BTDF (only meaningful when not fully metallic).
+        let btdf = if metallic < 0.999 {
+            let lum = crate::math::sg::luminance(base);
+            let rho_t = (1.0 - metallic) * lum * 0.5;
+            if rho_t > 0.0 {
+                let eta_rel = if shading_vertex.front_face {
+                    1.0 / self.eta
+                } else {
+                    self.eta
+                };
+                crate::light_tree::make_btdf_lobe(
+                    rho_t,
+                    shading_vertex.frame,
+                    shading_vertex.wo,
+                    alpha.0,
+                    alpha.1,
+                    eta_rel,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if diffuse.is_none() && glossy.is_none() && btdf.is_none() {
+            return None;
+        }
+        Some(crate::light_tree::LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse,
+            glossy,
+            btdf,
+        })
+    }
+
+    pub fn light_tree_importance(
+        &self,
+        precompute: &crate::light_tree::LightTreePrecompute,
+        w: f32,
+        lobe: &crate::math::sg::SgLobe,
+    ) -> f32 {
+        let mut imp = 0.0;
+        if let Some(d) = precompute.diffuse {
+            imp += crate::light_tree::diffuse_importance(d, precompute.n, w, lobe);
+        }
+        if let Some(g) = precompute.glossy {
+            imp += crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe);
+        }
+        if let Some(b) = precompute.btdf {
+            imp += crate::light_tree::btdf_importance(b, precompute.frame, precompute.n, w, lobe);
+        }
+        imp.max(0.0)
+    }
+
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
         self.base_color
             * self

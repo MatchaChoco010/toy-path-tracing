@@ -272,6 +272,7 @@ pub(super) mod test_helpers {
         scene.add_instance(mirror_mesh, mirror_material, glam::Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let mirror_hit = Vec3::new(0.25, 0.20, 0.0);
         let light_hit = Vec3::new(0.65, 0.20, 1.0);

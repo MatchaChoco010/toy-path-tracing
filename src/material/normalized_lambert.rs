@@ -150,6 +150,39 @@ impl NormalizedLambertMaterial {
         0.0
     }
 
+    /// Per-shading-point precompute for the hierarchical light tree.
+    /// Lambert has only a diffuse lobe, weighted by the (textured) albedo
+    /// luminance.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<crate::light_tree::LightTreePrecompute> {
+        let rho = crate::math::sg::luminance(self.rho_at(shading_vertex));
+        if rho <= 0.0 {
+            return None;
+        }
+        Some(crate::light_tree::LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse: Some(crate::light_tree::DiffuseLobePrecompute { rho }),
+            glossy: None,
+            btdf: None,
+        })
+    }
+
+    /// Convolve the SG light with the diffuse lobe.
+    pub fn light_tree_importance(
+        &self,
+        precompute: &crate::light_tree::LightTreePrecompute,
+        w: f32,
+        lobe: &crate::math::sg::SgLobe,
+    ) -> f32 {
+        precompute.diffuse.map_or(0.0, |d| {
+            crate::light_tree::diffuse_importance(d, precompute.n, w, lobe)
+        })
+    }
+
     fn rho_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
         self.rho
             * self

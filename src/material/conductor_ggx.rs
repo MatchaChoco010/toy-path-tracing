@@ -184,6 +184,42 @@ impl ConductorGgxMaterial {
         0.0
     }
 
+    /// Per-shading-point precompute for the hierarchical light tree.
+    /// Conductor: a single anisotropic glossy lobe; reflectance acts as F0.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<crate::light_tree::LightTreePrecompute> {
+        let rho = crate::math::sg::luminance(self.base_color_at(shading_vertex));
+        let alpha = self.alpha_xy_at(shading_vertex);
+        let glossy = crate::light_tree::make_glossy_lobe(
+            rho,
+            shading_vertex.frame,
+            shading_vertex.wo,
+            alpha.0,
+            alpha.1,
+        )?;
+        Some(crate::light_tree::LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse: None,
+            glossy: Some(glossy),
+            btdf: None,
+        })
+    }
+
+    pub fn light_tree_importance(
+        &self,
+        precompute: &crate::light_tree::LightTreePrecompute,
+        w: f32,
+        lobe: &crate::math::sg::SgLobe,
+    ) -> f32 {
+        precompute.glossy.map_or(0.0, |g| {
+            crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe)
+        })
+    }
+
     #[cfg(test)]
     fn alpha_xy(&self) -> (f32, f32) {
         self.alpha_xy_from_roughness(self.roughness)

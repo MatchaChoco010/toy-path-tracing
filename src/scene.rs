@@ -8,6 +8,7 @@ use crate::{
         DirectionalLight, DirectionalLightIndex, EnvironmentLight, LightSampler, PointLight,
         PointLightIndex, SpotLight, SpotLightIndex,
     },
+    light_tree::{LightTree, build_light_tree},
     material::{Material, ShadingVertex},
     math::{
         OrthonormalBasis, compute_surface_partials, difference_of_products, face_forward,
@@ -27,7 +28,7 @@ pub struct InstanceIndex(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MaterialIndex(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TriangleRef {
     pub instance_index: InstanceIndex,
     pub triangle_index: usize,
@@ -46,15 +47,6 @@ pub struct TrianglePointSample {
     pub triangle: TriangleRef,
     pub barycentric: Vec3,
     pub p: Vec3,
-    pub pdf_area: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AreaLightPointSample {
-    pub triangle: TriangleRef,
-    pub barycentric: Vec3,
-    pub p: Vec3,
-    pub triangle_selection_probability: f32,
     pub pdf_area: f32,
 }
 
@@ -90,6 +82,7 @@ pub struct Scene {
     pub directional_lights: Vec<DirectionalLight>,
     pub spot_lights: Vec<SpotLight>,
     pub light_sampler: LightSampler,
+    pub light_tree: Option<LightTree>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +159,7 @@ impl Scene {
                 triangle_index,
             }));
         self.register_area_light_triangles(instance_index);
+        self.light_tree = None;
         self.rebuild_light_sampler();
         self.qbvh = None;
 
@@ -189,6 +183,7 @@ impl Scene {
     pub fn add_point_light(&mut self, light: PointLight) -> PointLightIndex {
         let index = PointLightIndex(self.point_lights.len());
         self.point_lights.push(light);
+        self.light_tree = None;
         self.rebuild_light_sampler();
         index
     }
@@ -203,12 +198,22 @@ impl Scene {
     pub fn add_spot_light(&mut self, light: SpotLight) -> SpotLightIndex {
         let index = SpotLightIndex(self.spot_lights.len());
         self.spot_lights.push(light);
+        self.light_tree = None;
         self.rebuild_light_sampler();
         index
     }
 
     pub fn rebuild_light_sampler(&mut self) {
         self.light_sampler = LightSampler::build_from_scene(self);
+    }
+
+    /// Build the SG hierarchical light tree
+    /// [Tokuyoshi et al. 2024] from the scene's emissive triangles, point and
+    /// spot lights, then rebuild the top-level `LightSampler` so that its
+    /// `Tree` entry weight reflects the new tree's root flux.
+    pub fn build_light_tree(&mut self) {
+        self.light_tree = build_light_tree(self);
+        self.rebuild_light_sampler();
     }
 
     pub fn build_qbvh(&mut self) {
@@ -245,27 +250,19 @@ impl Scene {
                 let material = self.instance_material(instance_index);
                 let has_alpha_test = material.has_alpha_test();
 
-                let mesh_hit = closest_mesh_hit_with_filter(
-                    mesh,
-                    &local_ray,
-                    t_max,
-                    |hit| {
-                        if !has_alpha_test {
-                            return true;
-                        }
-                        let triangle = TriangleRef {
-                            instance_index,
-                            triangle_index: hit.triangle_index,
-                        };
-                        let shading_vertex = self.alpha_test_shading_vertex(
-                            triangle,
-                            hit.barycentric,
-                            ray,
-                        );
-                        let u: f32 = rng.random();
-                        material.any_hit(&shading_vertex, u)
-                    },
-                );
+                let mesh_hit = closest_mesh_hit_with_filter(mesh, &local_ray, t_max, |hit| {
+                    if !has_alpha_test {
+                        return true;
+                    }
+                    let triangle = TriangleRef {
+                        instance_index,
+                        triangle_index: hit.triangle_index,
+                    };
+                    let shading_vertex =
+                        self.alpha_test_shading_vertex(triangle, hit.barycentric, ray);
+                    let u: f32 = rng.random();
+                    material.any_hit(&shading_vertex, u)
+                });
 
                 if let Some(mesh_hit) = mesh_hit {
                     t_max = mesh_hit.t;
@@ -447,18 +444,29 @@ impl Scene {
         Some(area_light.weight / self.area_light_weight_sum)
     }
 
+    /// Area-domain PDF of the *uniform* point sampler within an emissive
+    /// triangle.
+    ///
+    /// Triangle *selection* is the SG light tree's responsibility: NEE picks
+    /// a leaf via the tree's stochastic descent (PMF = `leaf_pmf`), and
+    /// inside the chosen triangle we pick a point uniformly. So the area PDF
+    /// here is simply `1/area`. Any caller computing a total density should
+    /// multiply this by the leaf-selection PMF separately.
+    ///
+    /// Folding the old power-CDF `triangle_selection_probability` in here
+    /// (the previous behaviour) would double-count selection: the forward
+    /// NEE path uses `1/area`, so the MIS reverse PDF must as well.
     pub fn area_light_pdf_area(&self, triangle: TriangleRef) -> Option<f32> {
         let area_light = self
             .area_light_triangles
             .iter()
             .find(|area_light| area_light.triangle == triangle)?;
-        let triangle_selection_probability = self.area_light_triangle_probability(triangle)?;
 
         if area_light.area <= 0.0 {
             return None;
         }
 
-        Some(triangle_selection_probability / area_light.area)
+        Some(1.0 / area_light.area)
     }
 
     pub fn area_light_pdf_solid_angle(
@@ -500,24 +508,6 @@ impl Scene {
             p,
             pdf_area,
         }
-    }
-
-    pub fn sample_area_light_point(
-        &self,
-        u_triangle: f32,
-        us: Vec2,
-    ) -> Option<AreaLightPointSample> {
-        let area_light = self.sample_area_light_triangle(u_triangle)?;
-        let triangle_selection_probability = area_light.weight / self.area_light_weight_sum;
-        let triangle_sample = self.sample_triangle_point(area_light.triangle, us);
-
-        Some(AreaLightPointSample {
-            triangle: triangle_sample.triangle,
-            barycentric: triangle_sample.barycentric,
-            p: triangle_sample.p,
-            triangle_selection_probability,
-            pdf_area: triangle_selection_probability / area_light.area,
-        })
     }
 
     pub fn bounds(&self) -> Option<Bounds> {
@@ -566,20 +556,6 @@ impl Scene {
                 prefix_weight: self.area_light_weight_sum,
             });
         }
-    }
-
-    fn sample_area_light_triangle(&self, u_triangle: f32) -> Option<&AreaLightTriangle> {
-        if self.area_light_weight_sum <= 0.0 {
-            return None;
-        }
-
-        let target_weight = u_triangle.clamp(0.0, 1.0) * self.area_light_weight_sum;
-        let index = self
-            .area_light_triangles
-            .partition_point(|area_light| area_light.prefix_weight < target_weight)
-            .min(self.area_light_triangles.len().checked_sub(1)?);
-
-        self.area_light_triangles.get(index)
     }
 }
 
@@ -913,6 +889,7 @@ mod tests {
             Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0)),
         );
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
@@ -941,6 +918,7 @@ mod tests {
             Mat4::from_scale(Vec3::splat(2.0)),
         );
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 1.0), Vec3::NEG_Z);
         let hit = scene
@@ -974,6 +952,7 @@ mod tests {
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
         scene.build_qbvh();
+        scene.build_light_tree();
 
         assert!(scene.qbvh.is_some());
         assert!(scene.meshes[mesh_index.0].qbvh.is_some());
@@ -986,6 +965,7 @@ mod tests {
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
         let hit = scene
@@ -1002,6 +982,7 @@ mod tests {
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         scene.add_instance(
             mesh_index,
@@ -1019,6 +1000,7 @@ mod tests {
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         scene.add_mesh(unit_mesh(-1.0));
 
@@ -1032,6 +1014,7 @@ mod tests {
         let material_index = default_material(&mut scene);
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
@@ -1061,6 +1044,7 @@ mod tests {
         scene.add_instance(front_mesh, transparent_material, Mat4::IDENTITY);
         scene.add_instance(back_mesh, opaque_material, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
@@ -1285,46 +1269,6 @@ mod tests {
         );
         assert!(sample.p.abs_diff_eq(Vec3::new(0.25, 0.75, 0.0), 1.0e-6));
         assert!((sample.pdf_area - 2.0).abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn sample_area_light_point_uses_triangle_weight_distribution() {
-        let mut scene = Scene::new();
-        let mesh_index = scene.add_mesh(unit_mesh(0.0));
-        let material_index =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
-        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
-        scene.add_instance(
-            mesh_index,
-            material_index,
-            Mat4::from_scale(Vec3::splat(2.0)),
-        );
-
-        let first_sample = scene
-            .sample_area_light_point(0.1, Vec2::new(0.0, 0.0))
-            .expect("expected area light sample");
-        let second_sample = scene
-            .sample_area_light_point(0.9, Vec2::new(0.0, 0.0))
-            .expect("expected area light sample");
-
-        assert_eq!(
-            first_sample.triangle,
-            TriangleRef {
-                instance_index: InstanceIndex(0),
-                triangle_index: 0,
-            }
-        );
-        assert_eq!(
-            second_sample.triangle,
-            TriangleRef {
-                instance_index: InstanceIndex(1),
-                triangle_index: 0,
-            }
-        );
-        assert!((first_sample.triangle_selection_probability - 0.2).abs() < 1.0e-6);
-        assert!((second_sample.triangle_selection_probability - 0.8).abs() < 1.0e-6);
-        assert!((first_sample.pdf_area - 0.4).abs() < 1.0e-6);
-        assert!((second_sample.pdf_area - 0.4).abs() < 1.0e-6);
     }
 
     #[test]
