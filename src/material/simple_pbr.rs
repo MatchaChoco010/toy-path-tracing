@@ -9,8 +9,10 @@ use crate::bsdf::{
 };
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace,
+    normal_map::load_optional_normal_map,
+    texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -23,12 +25,12 @@ pub struct SimplePbrMaterial {
     pub base_color: Vec3,
     pub anisotropy: f32,
     pub base_color_texture: Option<Arc<Texture>>,
-    pub metallic_texture: Option<Arc<Texture>>,
-    pub roughness_texture: Option<Arc<Texture>>,
+    pub metallic_texture: Option<Arc<ScalarTexture>>,
+    pub roughness_texture: Option<Arc<ScalarTexture>>,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
     dielectric_ggx_directional_albedo_lut: Option<Arc<DielectricGgxDirectionalAlbedoLut>>,
 }
 
@@ -68,18 +70,12 @@ impl SimplePbrMaterial {
             eta: sanitize_dielectric_eta(eta),
             base_color,
             anisotropy,
-            base_color_texture: load_optional_texture(
+            base_color_texture: load_optional_color_texture(
                 base_color_texture_path,
                 TextureColorSpace::Srgb,
             )?,
-            metallic_texture: load_optional_texture(
-                metallic_texture_path,
-                TextureColorSpace::Linear,
-            )?,
-            roughness_texture: load_optional_texture(
-                roughness_texture_path,
-                TextureColorSpace::Linear,
-            )?,
+            metallic_texture: load_optional_scalar_texture(metallic_texture_path)?,
+            roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -93,7 +89,7 @@ impl SimplePbrMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -360,7 +356,7 @@ impl SimplePbrMaterial {
                 .base_color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -375,7 +371,7 @@ impl SimplePbrMaterial {
                 .roughness_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -390,7 +386,7 @@ impl SimplePbrMaterial {
                 .metallic_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),

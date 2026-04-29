@@ -9,3 +9,4 @@
 !/assets/bistro/.gitkeep
 
 /tools/russimp-sys/
+/tools/convert_bistro/target/

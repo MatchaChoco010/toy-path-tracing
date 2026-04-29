@@ -12,15 +12,15 @@ use crate::{
     light::EnvironmentLight,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
-        SimplePbrMaterial, Texture, TextureColorSpace,
+        ScalarTexture, SimplePbrMaterial, Texture, TextureColorSpace,
     },
-    scene_loader::obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
     scene::Scene,
+    scene_loader::obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
 };
 
 struct DiffuseTextureCacheEntry {
     color: Arc<Texture>,
-    alpha: Option<Arc<Texture>>,
+    alpha: Option<Arc<ScalarTexture>>,
 }
 
 const SAN_MIGUEL_OBJ: &str = "assets/san_miguel_2.0/san-miguel-low-poly.obj";

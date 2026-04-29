@@ -3,7 +3,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use super::{MaterialSample, ShadingVertex, Texture};
+use super::{MaterialSample, ScalarTexture, ShadingVertex, Texture};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmissiveMaterial {
@@ -11,7 +11,7 @@ pub struct EmissiveMaterial {
     pub strength: f32,
     pub color_texture: Option<Arc<Texture>>,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl EmissiveMaterial {
@@ -46,7 +46,7 @@ impl EmissiveMaterial {
             .color_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_rgb_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -64,7 +64,7 @@ impl EmissiveMaterial {
         let texture_factor = self
             .color_texture
             .as_ref()
-            .map(|texture| texture.max_rgb_element())
+            .map(|texture| texture.max_value())
             .unwrap_or(1.0);
         ((self.color * self.strength).max_element() * texture_factor).max(0.0)
     }
@@ -74,7 +74,7 @@ impl EmissiveMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),

@@ -240,7 +240,9 @@ fn build_material(material: gltf::Material<'_>) -> GltfMaterial {
     GltfMaterial {
         name: material.name().unwrap_or("").to_string(),
         base_color_factor,
-        base_color_texture: pbr.base_color_texture().map(|info| info.texture().source().index()),
+        base_color_texture: pbr
+            .base_color_texture()
+            .map(|info| info.texture().source().index()),
         metallic_factor: pbr.metallic_factor(),
         roughness_factor: pbr.roughness_factor(),
         metallic_roughness_texture: pbr
@@ -268,11 +270,9 @@ fn normalize_image(data: gltf::image::Data) -> Result<GltfImage, LoadGltfSceneEr
         gltf::image::Format::R8G8 => expand_to_rgba(&data.pixels, pixel_count, |chunk| {
             [chunk[0], chunk[1], 0, 255]
         }),
-        gltf::image::Format::R8G8B8 => {
-            expand_to_rgba(&data.pixels, pixel_count, |chunk| {
-                [chunk[0], chunk[1], chunk[2], 255]
-            })
-        }
+        gltf::image::Format::R8G8B8 => expand_to_rgba(&data.pixels, pixel_count, |chunk| {
+            [chunk[0], chunk[1], chunk[2], 255]
+        }),
         gltf::image::Format::R8G8B8A8 => data.pixels,
         gltf::image::Format::R16 => narrow_16_to_rgba(&data.pixels, pixel_count, |chunk| {
             [chunk[0], chunk[0], chunk[0], u16::MAX]
@@ -283,11 +283,12 @@ fn normalize_image(data: gltf::image::Data) -> Result<GltfImage, LoadGltfSceneEr
         gltf::image::Format::R16G16B16 => narrow_16_to_rgba(&data.pixels, pixel_count, |chunk| {
             [chunk[0], chunk[1], chunk[2], u16::MAX]
         }),
-        gltf::image::Format::R16G16B16A16 => narrow_16_to_rgba(&data.pixels, pixel_count, |chunk| {
-            [chunk[0], chunk[1], chunk[2], chunk[3]]
-        }),
-        format @ (gltf::image::Format::R32G32B32FLOAT
-        | gltf::image::Format::R32G32B32A32FLOAT) => {
+        gltf::image::Format::R16G16B16A16 => {
+            narrow_16_to_rgba(&data.pixels, pixel_count, |chunk| {
+                [chunk[0], chunk[1], chunk[2], chunk[3]]
+            })
+        }
+        format @ (gltf::image::Format::R32G32B32FLOAT | gltf::image::Format::R32G32B32A32FLOAT) => {
             return Err(LoadGltfSceneError::UnsupportedImageFormat(format));
         }
     };
@@ -328,8 +329,8 @@ where
             chunk[component] = lo | (hi << 8);
         }
         let normalized = emit(&chunk);
-        for component in 0..4 {
-            output.push((normalized[component] >> 8) as u8);
+        for value in normalized {
+            output.push((value >> 8) as u8);
         }
     }
     output

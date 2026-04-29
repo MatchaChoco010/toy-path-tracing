@@ -6,8 +6,10 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::{BsdfFlags, ConductorGgxBsdf};
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace,
+    normal_map::load_optional_normal_map,
+    texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -17,12 +19,12 @@ pub struct ConductorGgxMaterial {
     pub base_color: Vec3,
     pub base_color_texture: Option<Arc<Texture>>,
     pub roughness: f32,
-    pub roughness_texture: Option<Arc<Texture>>,
+    pub roughness_texture: Option<Arc<ScalarTexture>>,
     pub anisotropy: f32,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl ConductorGgxMaterial {
@@ -50,15 +52,12 @@ impl ConductorGgxMaterial {
     ) -> image::ImageResult<Self> {
         Ok(Self {
             base_color,
-            base_color_texture: load_optional_texture(
+            base_color_texture: load_optional_color_texture(
                 base_color_texture_path,
                 TextureColorSpace::Srgb,
             )?,
             roughness,
-            roughness_texture: load_optional_texture(
-                roughness_texture_path,
-                TextureColorSpace::Linear,
-            )?,
+            roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
             anisotropy,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
@@ -72,7 +71,7 @@ impl ConductorGgxMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -215,7 +214,7 @@ impl ConductorGgxMaterial {
                 .base_color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -230,7 +229,7 @@ impl ConductorGgxMaterial {
                 .roughness_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -253,7 +252,7 @@ mod tests {
     };
 
     use super::ConductorGgxMaterial;
-    use crate::material::{ShadingVertex, Texture};
+    use crate::material::{ScalarTexture, ShadingVertex, Texture};
 
     fn test_shading_vertex(wo: Vec3) -> ShadingVertex {
         ShadingVertex {
@@ -339,11 +338,7 @@ mod tests {
                 vec![Vec3::new(0.2, 0.4, 0.6)],
             ))),
             roughness: 0.8,
-            roughness_texture: Some(Arc::new(Texture::from_pixels(
-                1,
-                1,
-                vec![Vec3::splat(0.5)],
-            ))),
+            roughness_texture: Some(Arc::new(ScalarTexture::from_pixels(1, 1, vec![0.5]))),
             anisotropy: 0.0,
             normal_map: None,
             normal_strength: 1.0,

@@ -6,8 +6,10 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::{BsdfFlags, DielectricGgxBsdf};
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace,
+    normal_map::load_optional_normal_map,
+    texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -18,13 +20,13 @@ pub struct DielectricGgxMaterial {
     pub color_texture: Option<Arc<Texture>>,
     pub eta: f32,
     pub roughness: f32,
-    pub roughness_texture: Option<Arc<Texture>>,
+    pub roughness_texture: Option<Arc<ScalarTexture>>,
     pub anisotropy: f32,
     pub thin: bool,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl DielectricGgxMaterial {
@@ -56,13 +58,13 @@ impl DielectricGgxMaterial {
     ) -> image::ImageResult<Self> {
         Ok(Self {
             color,
-            color_texture: load_optional_texture(color_texture_path, TextureColorSpace::Srgb)?,
+            color_texture: load_optional_color_texture(
+                color_texture_path,
+                TextureColorSpace::Srgb,
+            )?,
             eta,
             roughness,
-            roughness_texture: load_optional_texture(
-                roughness_texture_path,
-                TextureColorSpace::Linear,
-            )?,
+            roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
             anisotropy,
             thin,
             normal_map: load_optional_normal_map(normal_map_path)?,
@@ -77,7 +79,7 @@ impl DielectricGgxMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -271,7 +273,7 @@ impl DielectricGgxMaterial {
                 .color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -286,7 +288,7 @@ impl DielectricGgxMaterial {
                 .roughness_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -304,7 +306,7 @@ mod tests {
 
     use crate::{
         bsdf::BsdfFlags,
-        material::{ShadingVertex, Texture},
+        material::{ScalarTexture, ShadingVertex, Texture},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
     };
@@ -416,11 +418,7 @@ mod tests {
             ))),
             eta: 1.5,
             roughness: 0.8,
-            roughness_texture: Some(Arc::new(Texture::from_pixels(
-                1,
-                1,
-                vec![Vec3::splat(0.5)],
-            ))),
+            roughness_texture: Some(Arc::new(ScalarTexture::from_pixels(1, 1, vec![0.5]))),
             anisotropy: 0.0,
             thin: false,
             normal_map: None,

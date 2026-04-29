@@ -6,8 +6,8 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::NormalizedLambertBsdf;
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_color_texture,
 };
 
 const DIFFUSE_CONE_SPREAD: f32 = 0.5;
@@ -19,7 +19,7 @@ pub struct NormalizedLambertMaterial {
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl NormalizedLambertMaterial {
@@ -41,7 +41,7 @@ impl NormalizedLambertMaterial {
     ) -> image::ImageResult<Self> {
         Ok(Self {
             rho,
-            rho_texture: load_optional_texture(rho_texture_path, TextureColorSpace::Srgb)?,
+            rho_texture: load_optional_color_texture(rho_texture_path, TextureColorSpace::Srgb)?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -54,7 +54,7 @@ impl NormalizedLambertMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -156,7 +156,7 @@ impl NormalizedLambertMaterial {
                 .rho_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),

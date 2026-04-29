@@ -67,9 +67,7 @@ fn run(input: &Path, output_dir: &Path, name: &str) -> Result<(), Box<dyn Error>
         .ok_or("input FBX path has no parent directory")?
         .to_path_buf();
     let scene = Scene::from_file(
-        input
-            .to_str()
-            .ok_or("input FBX path is not valid UTF-8")?,
+        input.to_str().ok_or("input FBX path is not valid UTF-8")?,
         vec![
             PostProcess::Triangulate,
             PostProcess::JoinIdenticalVertices,
@@ -299,7 +297,8 @@ impl GltfDocument {
             self.binary_buffer.extend_from_slice(&i.to_le_bytes());
         }
         let length = self.binary_buffer.len() - start;
-        let buffer_view = self.add_buffer_view(start, length, None, Some(ELEMENT_ARRAY_BUFFER_TARGET));
+        let buffer_view =
+            self.add_buffer_view(start, length, None, Some(ELEMENT_ARRAY_BUFFER_TARGET));
         let accessor = json!({
             "bufferView": buffer_view,
             "componentType": INDEX_COMPONENT_TYPE_U32,
@@ -343,22 +342,51 @@ impl GltfDocument {
             let info = MaterialInfo::from_russimp(material);
             let mut texture_indices = MaterialTextureIndices::default();
 
-            if let Some(filename) = info.texture(TextureType::BaseColor)
+            if let Some(filename) = info
+                .texture(TextureType::BaseColor)
                 .or_else(|| info.texture(TextureType::Diffuse))
             {
                 texture_indices.base_color =
                     self.register_texture_from_filename(filename, textures)?;
             }
-            if let Some(filename) = info.texture(TextureType::EmissionColor)
+            if let Some(filename) = info
+                .texture(TextureType::EmissionColor)
                 .or_else(|| info.texture(TextureType::Emissive))
             {
                 texture_indices.emissive =
                     self.register_texture_from_filename(filename, textures)?;
             }
-            if let Some(filename) = info.texture(TextureType::Normals) {
-                texture_indices.normal =
+            if let Some(filename) = info
+                .texture(TextureType::Normals)
+                .or_else(|| info.texture(TextureType::NormalCamera))
+                .or_else(|| info.texture(TextureType::Height))
+            {
+                texture_indices.normal = self.register_texture_from_filename(filename, textures)?;
+            }
+            // Bistro packs the PBR ORM map into the legacy "Specular" slot:
+            //   R = Occlusion, G = Roughness, B = Metalness
+            // That matches the glTF metallicRoughnessTexture layout (G=rough,
+            // B=metal) directly, so we can reuse the same image for both
+            // metallicRoughnessTexture and occlusionTexture.
+            if let Some(filename) = info
+                .texture(TextureType::Metalness)
+                .or_else(|| info.texture(TextureType::Roughness))
+                .or_else(|| info.texture(TextureType::Specular))
+                .or_else(|| info.texture(TextureType::Shininess))
+            {
+                texture_indices.metallic_roughness =
                     self.register_texture_from_filename(filename, textures)?;
             }
+            if let Some(filename) = info
+                .texture(TextureType::AmbientOcclusion)
+                .or_else(|| info.texture(TextureType::LightMap))
+                .or_else(|| info.texture(TextureType::Specular))
+            {
+                texture_indices.occlusion =
+                    self.register_texture_from_filename(filename, textures)?;
+            }
+
+            let has_metallic_roughness_texture = texture_indices.metallic_roughness.is_some();
 
             let mut pbr = serde_json::Map::new();
             let base_color = info.diffuse.unwrap_or(Vec4::ONE);
@@ -369,8 +397,21 @@ impl GltfDocument {
             if let Some(index) = texture_indices.base_color {
                 pbr.insert("baseColorTexture".into(), json!({ "index": index }));
             }
-            pbr.insert("metallicFactor".into(), json!(info.metallic_factor()));
-            pbr.insert("roughnessFactor".into(), json!(info.roughness_factor()));
+            // When the texture supplies the actual metallic/roughness values we
+            // must not multiply them down with a scalar factor of 0; glTF
+            // computes final = factor * texture, so factor=1 lets the texture
+            // pass through unchanged. Without a texture we fall back to the
+            // FBX-extracted scalar properties.
+            let (metallic_factor, roughness_factor) = if has_metallic_roughness_texture {
+                (1.0_f32, 1.0_f32)
+            } else {
+                (info.metallic_factor(), info.roughness_factor())
+            };
+            pbr.insert("metallicFactor".into(), json!(metallic_factor));
+            pbr.insert("roughnessFactor".into(), json!(roughness_factor));
+            if let Some(index) = texture_indices.metallic_roughness {
+                pbr.insert("metallicRoughnessTexture".into(), json!({ "index": index }));
+            }
 
             let mut material_json = serde_json::Map::new();
             let material_name = info
@@ -389,6 +430,9 @@ impl GltfDocument {
             }
             if let Some(index) = texture_indices.normal {
                 material_json.insert("normalTexture".into(), json!({ "index": index }));
+            }
+            if let Some(index) = texture_indices.occlusion {
+                material_json.insert("occlusionTexture".into(), json!({ "index": index }));
             }
             material_json.insert(
                 "alphaMode".into(),
@@ -459,9 +503,10 @@ impl GltfDocument {
             }
         }
         if !children_indices.is_empty() {
-            json.insert("children".into(), Value::Array(
-                children_indices.into_iter().map(Value::from).collect(),
-            ));
+            json.insert(
+                "children".into(),
+                Value::Array(children_indices.into_iter().map(Value::from).collect()),
+            );
         }
 
         let index = self.nodes_json.len();
@@ -503,10 +548,7 @@ impl GltfDocument {
 
         let mut root = serde_json::Map::new();
         root.insert("asset".into(), asset);
-        root.insert(
-            "scene".into(),
-            Value::from(if scene_nodes.is_empty() { 0 } else { 0 }),
-        );
+        root.insert("scene".into(), Value::from(0));
         root.insert(
             "scenes".into(),
             json!([{
@@ -555,6 +597,8 @@ struct MaterialTextureIndices {
     base_color: Option<usize>,
     emissive: Option<usize>,
     normal: Option<usize>,
+    metallic_roughness: Option<usize>,
+    occlusion: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -644,10 +688,12 @@ impl MaterialInfo {
         }
 
         for prop in &material.properties {
-            if prop.key.as_str() == "$tex.file" {
-                if let PropertyTypeInfo::String(filename) = &prop.data {
-                    textures.entry(prop.semantic).or_insert_with(|| filename.clone());
-                }
+            if prop.key.as_str() == "$tex.file"
+                && let PropertyTypeInfo::String(filename) = &prop.data
+            {
+                textures
+                    .entry(prop.semantic)
+                    .or_insert_with(|| filename.clone());
             }
         }
 
@@ -686,10 +732,7 @@ impl MaterialInfo {
         let alpha = self.diffuse.map(|d| d.w).unwrap_or(1.0);
         if alpha < 0.999 {
             AlphaModeValue::Blend
-        } else if self
-            .textures
-            .contains_key(&TextureType::Opacity)
-        {
+        } else if self.textures.contains_key(&TextureType::Opacity) {
             AlphaModeValue::Mask
         } else {
             AlphaModeValue::Opaque
@@ -828,10 +871,10 @@ fn case_insensitive_lookup(dir: &Path, basename: &str) -> Option<PathBuf> {
     let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let entry_name = entry.file_name();
-        if let Some(name) = entry_name.to_str() {
-            if name.to_lowercase() == target {
-                return Some(entry.path());
-            }
+        if let Some(name) = entry_name.to_str()
+            && name.to_lowercase() == target
+        {
+            return Some(entry.path());
         }
     }
     None
@@ -861,8 +904,8 @@ fn walk_for_basename(root: &Path, basename: &str) -> Option<PathBuf> {
 }
 
 fn decode_dds_to_png(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
-    let mut reader = File::open(source)?;
-    let dds = ddsfile::Dds::read(&mut reader)
+    let reader = File::open(source)?;
+    let dds = ddsfile::Dds::read(reader)
         .map_err(|error| format!("failed to parse {}: {error}", source.display()))?;
     let image = image_dds::image_from_dds(&dds, 0)
         .map_err(|error| format!("failed to decode {}: {error}", source.display()))?;
@@ -903,4 +946,3 @@ fn nearly_identity_rotation(rotation: Quat) -> bool {
 fn nearly_unit_scale(scale: Vec3) -> bool {
     (scale - Vec3::ONE).length_squared() < 1.0e-12
 }
-

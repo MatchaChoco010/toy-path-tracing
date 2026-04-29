@@ -1,4 +1,4 @@
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path, sync::Arc};
 
 use crate::{
@@ -6,7 +6,7 @@ use crate::{
     color::srgb_to_linear,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
-        SimplePbrMaterial, Texture,
+        ScalarTexture, SimplePbrMaterial, Texture,
     },
     scene::Scene,
     scene_loader::gltf_scene::{
@@ -24,7 +24,9 @@ const EMISSIVE_SCALE: f32 = 512.0;
 
 struct ImageCache {
     color: Vec<Option<Arc<Texture>>>,
-    alpha: Vec<Option<Option<Arc<Texture>>>>,
+    alpha: Vec<Option<Option<Arc<ScalarTexture>>>>,
+    metallic: Vec<Option<Arc<ScalarTexture>>>,
+    roughness: Vec<Option<Arc<ScalarTexture>>>,
 }
 
 pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
@@ -107,6 +109,8 @@ impl ImageCache {
         Self {
             color: vec![None; count],
             alpha: vec![None; count],
+            metallic: vec![None; count],
+            roughness: vec![None; count],
         }
     }
 
@@ -119,12 +123,42 @@ impl ImageCache {
         texture
     }
 
-    fn alpha(&mut self, images: &[GltfImage], index: usize) -> Option<Arc<Texture>> {
+    fn alpha(&mut self, images: &[GltfImage], index: usize) -> Option<Arc<ScalarTexture>> {
         if let Some(entry) = &self.alpha[index] {
             return entry.clone();
         }
         let texture = decode_alpha(&images[index]).map(Arc::new);
         self.alpha[index] = Some(texture.clone());
+        texture
+    }
+
+    fn metallic(&mut self, images: &[GltfImage], index: usize) -> Arc<ScalarTexture> {
+        if let Some(texture) = &self.metallic[index] {
+            return Arc::clone(texture);
+        }
+        let image = &images[index];
+        let texture = Arc::new(ScalarTexture::from_rgba_channel(
+            image.width,
+            image.height,
+            &image.rgba,
+            2,
+        ));
+        self.metallic[index] = Some(Arc::clone(&texture));
+        texture
+    }
+
+    fn roughness(&mut self, images: &[GltfImage], index: usize) -> Arc<ScalarTexture> {
+        if let Some(texture) = &self.roughness[index] {
+            return Arc::clone(texture);
+        }
+        let image = &images[index];
+        let texture = Arc::new(ScalarTexture::from_rgba_channel(
+            image.width,
+            image.height,
+            &image.rgba,
+            1,
+        ));
+        self.roughness[index] = Some(Arc::clone(&texture));
         texture
     }
 }
@@ -142,7 +176,7 @@ fn decode_srgb_color(image: &GltfImage) -> Texture {
     Texture::from_pixels(image.width, image.height, pixels)
 }
 
-fn decode_alpha(image: &GltfImage) -> Option<Texture> {
+fn decode_alpha(image: &GltfImage) -> Option<ScalarTexture> {
     let mut pixels = Vec::with_capacity(image.width * image.height);
     let mut nontrivial = false;
     for chunk in image.rgba.chunks_exact(4) {
@@ -150,12 +184,16 @@ fn decode_alpha(image: &GltfImage) -> Option<Texture> {
         if alpha < 1.0 - 1.0e-3 {
             nontrivial = true;
         }
-        pixels.push(Vec3::splat(alpha));
+        pixels.push(alpha);
     }
     if !nontrivial {
         return None;
     }
-    Some(Texture::from_pixels(image.width, image.height, pixels))
+    Some(ScalarTexture::from_pixels(
+        image.width,
+        image.height,
+        pixels,
+    ))
 }
 
 fn build_material(
@@ -210,7 +248,7 @@ fn build_emissive(
 }
 
 fn build_dielectric(material: &GltfMaterial) -> Material {
-    let factor: Vec3 = Vec4::from(material.base_color_factor).truncate();
+    let factor: Vec3 = material.base_color_factor.truncate();
     let color =
         srgb_to_linear(factor.clamp(Vec3::ZERO, Vec3::ONE)).clamp(Vec3::splat(0.05), Vec3::ONE);
     Material::DielectricGgx(DielectricGgxMaterial::new(
@@ -227,19 +265,31 @@ fn build_simple_pbr(
     images: &[GltfImage],
     cache: &mut ImageCache,
 ) -> Material {
-    let factor: Vec3 = Vec4::from(material.base_color_factor).truncate();
+    let factor: Vec3 = material.base_color_factor.truncate();
     let base_color = srgb_to_linear(factor.clamp(Vec3::ZERO, Vec3::ONE));
-    let mut simple_pbr = SimplePbrMaterial::new(
-        base_color,
-        material.metallic_factor.clamp(0.0, 1.0),
-        material.roughness_factor.clamp(0.05, 1.0),
-        1.5,
-        0.0,
-    );
+
+    // glTF metallicRoughness: final = factor * texture_channel. Without a
+    // texture we floor the roughness to keep specular lobes finite; with a
+    // texture we let smooth metals such as chrome trim stay sharp and rely on
+    // SimplePbrMaterial's internal alpha clamp.
+    let metallic_factor = material.metallic_factor.clamp(0.0, 1.0);
+    let roughness_factor = if material.metallic_roughness_texture.is_some() {
+        material.roughness_factor.clamp(0.0, 1.0)
+    } else {
+        material.roughness_factor.clamp(0.05, 1.0)
+    };
+
+    let mut simple_pbr =
+        SimplePbrMaterial::new(base_color, metallic_factor, roughness_factor, 1.5, 0.0);
 
     if let Some(index) = material.base_color_texture {
         simple_pbr.base_color_texture = Some(cache.srgb_color(images, index));
         simple_pbr.opacity_texture = cache.alpha(images, index);
+    }
+
+    if let Some(index) = material.metallic_roughness_texture {
+        simple_pbr.metallic_texture = Some(cache.metallic(images, index));
+        simple_pbr.roughness_texture = Some(cache.roughness(images, index));
     }
 
     Material::SimplePBR(simple_pbr)
@@ -268,7 +318,10 @@ mod tests {
     }
 
     fn build(material: GltfMaterial) -> Material {
-        let images: Vec<GltfImage> = Vec::new();
+        build_with_images(material, Vec::new())
+    }
+
+    fn build_with_images(material: GltfMaterial, images: Vec<GltfImage>) -> Material {
         let gltf_scene = GltfScene {
             material_meshes: Vec::new(),
             materials: vec![material],
@@ -312,9 +365,43 @@ mod tests {
     }
 
     #[test]
-    fn weak_emissive_without_texture_falls_back_to_simple_pbr() {
+    fn nonzero_emissive_factor_without_texture_becomes_emissive_material() {
         let mut material = opaque_gltf_material();
         material.emissive_factor = Vec3::new(0.2, 0.2, 0.2);
-        assert!(matches!(build(material), Material::SimplePBR(_)));
+        assert!(matches!(build(material), Material::Emissive(_)));
+    }
+
+    #[test]
+    fn metallic_roughness_texture_populates_metallic_and_roughness_textures() {
+        // Bistro packs occlusion/roughness/metalness into RGB channels of a
+        // single image. Verify that scene_24 wires the G channel (roughness)
+        // and B channel (metalness) into separate scalar textures and that
+        // they read back the expected values.
+        let mut material = opaque_gltf_material();
+        material.metallic_roughness_texture = Some(0);
+        // Solid colour image: R=10, G=128, B=200, A=255.
+        let image = GltfImage {
+            width: 2,
+            height: 2,
+            rgba: vec![
+                10, 128, 200, 255, 10, 128, 200, 255, 10, 128, 200, 255, 10, 128, 200, 255,
+            ],
+        };
+        let built = build_with_images(material, vec![image]);
+        let Material::SimplePBR(simple_pbr) = built else {
+            panic!("expected SimplePBR material");
+        };
+        let roughness = simple_pbr
+            .roughness_texture
+            .as_ref()
+            .expect("roughness texture should be populated");
+        let metallic = simple_pbr
+            .metallic_texture
+            .as_ref()
+            .expect("metallic texture should be populated");
+        let r = roughness.sample(glam::Vec2::splat(0.5));
+        let m = metallic.sample(glam::Vec2::splat(0.5));
+        assert!((r - 128.0 / 255.0).abs() < 1.0e-5);
+        assert!((m - 200.0 / 255.0).abs() < 1.0e-5);
     }
 }

@@ -115,14 +115,14 @@ impl QbvhNode {
     pub fn child_bounds(&self, slot: usize) -> Bounds {
         Bounds {
             min: Vec3::new(
-                self.min_x.as_array_ref()[slot],
-                self.min_y.as_array_ref()[slot],
-                self.min_z.as_array_ref()[slot],
+                self.min_x.as_array()[slot],
+                self.min_y.as_array()[slot],
+                self.min_z.as_array()[slot],
             ),
             max: Vec3::new(
-                self.max_x.as_array_ref()[slot],
-                self.max_y.as_array_ref()[slot],
-                self.max_z.as_array_ref()[slot],
+                self.max_x.as_array()[slot],
+                self.max_y.as_array()[slot],
+                self.max_z.as_array()[slot],
             ),
         }
     }
@@ -262,10 +262,7 @@ fn split_into_children(primitives: &mut [BuilderPrimitive]) -> Vec<BuildNode> {
     vec![l, r]
 }
 
-fn make_leaf_or_force_split(
-    primitives: &mut [BuilderPrimitive],
-    bounds: Bounds,
-) -> BuildNode {
+fn make_leaf_or_force_split(primitives: &mut [BuilderPrimitive], bounds: Bounds) -> BuildNode {
     if primitives.len() <= MAX_LEAF_PRIMS {
         return BuildNode::Leaf {
             bounds,
@@ -451,8 +448,7 @@ fn evaluate_bins(bins: &[Bin; BIN_COUNT], parent_area: f32) -> Option<(usize, f3
         }
         let al = left_bounds[split].surface_area();
         let ar = right_bounds[split + 1].surface_area();
-        let cost = COST_TRAVERSE
-            + COST_INTERSECT * (al * nl as f32 + ar * nr as f32) / parent_area;
+        let cost = COST_TRAVERSE + COST_INTERSECT * (al * nl as f32 + ar * nr as f32) / parent_area;
         if cost < best_cost {
             best_cost = cost;
             best_split = Some(split);
@@ -576,11 +572,7 @@ impl RaySimd {
 }
 
 fn safe_inv(d: f32) -> f32 {
-    if d == 0.0 {
-        f32::INFINITY
-    } else {
-        1.0 / d
-    }
+    if d == 0.0 { f32::INFINITY } else { 1.0 / d }
 }
 
 fn intersect_4_aabbs(node: &QbvhNode, ray: &RaySimd, t_max: f32) -> (u32, [f32; 4]) {
@@ -602,10 +594,13 @@ fn intersect_4_aabbs(node: &QbvhNode, ray: &RaySimd, t_max: f32) -> (u32, [f32; 
     let t_max_simd = f32x4::splat(t_max);
 
     let tmin = tmin_x.fast_max(tmin_y).fast_max(tmin_z).fast_max(zero);
-    let tmax = tmax_x.fast_min(tmax_y).fast_min(tmax_z).fast_min(t_max_simd);
+    let tmax = tmax_x
+        .fast_min(tmax_y)
+        .fast_min(tmax_z)
+        .fast_min(t_max_simd);
 
-    let mask = tmin.cmp_le(tmax);
-    let hit_bits = (mask.move_mask() as u32) & (node.valid_mask as u32);
+    let mask = tmin.simd_le(tmax);
+    let hit_bits = mask.to_bitmask() & (node.valid_mask as u32);
     let tmin_arr = tmin.to_array();
 
     (hit_bits, tmin_arr)
@@ -644,11 +639,11 @@ where
 
         let mut hits: [(f32, u32); 4] = [(0.0, 0); 4];
         let mut hit_count = 0usize;
-        for slot in 0..4 {
+        for (slot, &tmin) in tmin_arr.iter().enumerate() {
             if hit_bits & (1 << slot) == 0 {
                 continue;
             }
-            hits[hit_count] = (tmin_arr[slot], node.children[slot]);
+            hits[hit_count] = (tmin, node.children[slot]);
             hit_count += 1;
         }
 
@@ -753,10 +748,7 @@ mod tests {
         node.set_child(
             1,
             encode_leaf(1, 1),
-            make_bounds(
-                Vec3::new(0.0, 0.0, -2.0),
-                Vec3::new(1.0, 1.0, -1.0),
-            ),
+            make_bounds(Vec3::new(0.0, 0.0, -2.0), Vec3::new(1.0, 1.0, -1.0)),
         );
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 5.0), Vec3::NEG_Z);
@@ -775,10 +767,7 @@ mod tests {
                 let x = (i % 4) as f32;
                 let y = ((i / 4) % 4) as f32;
                 let z = (i / 16) as f32;
-                make_bounds(
-                    Vec3::new(x, y, z),
-                    Vec3::new(x + 0.5, y + 0.5, z + 0.5),
-                )
+                make_bounds(Vec3::new(x, y, z), Vec3::new(x + 0.5, y + 0.5, z + 0.5))
             })
             .collect();
         let qbvh = build_qbvh(&bounds).expect("expected qbvh");
@@ -803,10 +792,7 @@ mod tests {
                 let x = ((i * 73) % 211) as f32;
                 let y = ((i * 37) % 191) as f32;
                 let z = ((i * 53) % 173) as f32;
-                make_bounds(
-                    Vec3::new(x, y, z),
-                    Vec3::new(x + 0.5, y + 0.5, z + 0.5),
-                )
+                make_bounds(Vec3::new(x, y, z), Vec3::new(x + 0.5, y + 0.5, z + 0.5))
             })
             .collect();
         let qbvh = build_qbvh(&bounds).expect("expected qbvh");
@@ -821,10 +807,7 @@ mod tests {
                 let x = ((i * 19) % 41) as f32;
                 let y = ((i * 11) % 37) as f32;
                 let z = ((i * 7) % 31) as f32;
-                make_bounds(
-                    Vec3::new(x, y, z),
-                    Vec3::new(x + 0.4, y + 0.4, z + 0.4),
-                )
+                make_bounds(Vec3::new(x, y, z), Vec3::new(x + 0.4, y + 0.4, z + 0.4))
             })
             .collect();
         let qbvh = build_qbvh(&bounds).expect("expected qbvh");
@@ -888,10 +871,10 @@ mod tests {
     fn brute_force_closest(bounds: &[Bounds], ray: &Ray) -> Option<(usize, f32)> {
         let mut best: Option<(usize, f32)> = None;
         for (i, b) in bounds.iter().enumerate() {
-            if let Some(t) = slab_intersect_scalar(b, ray, f32::INFINITY) {
-                if best.map_or(true, |(_, bt)| t < bt) {
-                    best = Some((i, t));
-                }
+            if let Some(t) = slab_intersect_scalar(b, ray, f32::INFINITY)
+                && best.is_none_or(|(_, bt)| t < bt)
+            {
+                best = Some((i, t));
             }
         }
         best
@@ -903,11 +886,11 @@ mod tests {
             let mut new_t_max = t_max;
             for k in offset..offset + count {
                 let idx = qbvh.primitive_indices[k as usize];
-                if let Some(t) = slab_intersect_scalar(&bounds[idx], ray, new_t_max) {
-                    if best.is_none_or(|(_, bt)| t < bt) {
-                        best = Some((idx, t));
-                        new_t_max = t;
-                    }
+                if let Some(t) = slab_intersect_scalar(&bounds[idx], ray, new_t_max)
+                    && best.is_none_or(|(_, bt)| t < bt)
+                {
+                    best = Some((idx, t));
+                    new_t_max = t;
                 }
             }
             new_t_max
@@ -922,10 +905,7 @@ mod tests {
                 let x = ((i * 19) % 41) as f32;
                 let y = ((i * 11) % 37) as f32;
                 let z = ((i * 7) % 31) as f32;
-                make_bounds(
-                    Vec3::new(x, y, z),
-                    Vec3::new(x + 0.4, y + 0.4, z + 0.4),
-                )
+                make_bounds(Vec3::new(x, y, z), Vec3::new(x + 0.4, y + 0.4, z + 0.4))
             })
             .collect();
         let qbvh = build_qbvh(&bounds).expect("qbvh");
@@ -992,12 +972,7 @@ mod tests {
     fn traverse_few_primitives_root_leaf_path() {
         for n in 1..=4 {
             let bounds: Vec<Bounds> = (0..n)
-                .map(|i| {
-                    make_bounds(
-                        Vec3::splat(i as f32),
-                        Vec3::splat(i as f32 + 0.5),
-                    )
-                })
+                .map(|i| make_bounds(Vec3::splat(i as f32), Vec3::splat(i as f32 + 0.5)))
                 .collect();
             let qbvh = build_qbvh(&bounds).expect("qbvh");
             assert!(qbvh.nodes.is_empty(), "expected nodes empty for n={}", n);
@@ -1026,10 +1001,7 @@ mod tests {
             .map(|i| {
                 let x = (i % 8) as f32;
                 let y = ((i / 8) % 4) as f32;
-                make_bounds(
-                    Vec3::new(x, y, 0.0),
-                    Vec3::new(x + 0.5, y + 0.5, 0.5),
-                )
+                make_bounds(Vec3::new(x, y, 0.0), Vec3::new(x + 0.5, y + 0.5, 0.5))
             })
             .collect();
         let qbvh = build_qbvh(&bounds).expect("qbvh");
@@ -1080,10 +1052,7 @@ mod tests {
                 let x = t * t * 100.0;
                 let y = (i as f32).sin() * 0.5;
                 let z = (i as f32 * 0.137).cos() * 0.5;
-                make_bounds(
-                    Vec3::new(x, y, z),
-                    Vec3::new(x + 0.2, y + 0.2, z + 0.2),
-                )
+                make_bounds(Vec3::new(x, y, z), Vec3::new(x + 0.2, y + 0.2, z + 0.2))
             })
             .collect();
         let qbvh = build_qbvh(&bounds).expect("qbvh");

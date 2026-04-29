@@ -23,7 +23,7 @@ pub use mirror::MirrorMaterial;
 pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
 pub use simple_pbr::SimplePbrMaterial;
-pub use texture::{Texture, TextureColorSpace};
+pub use texture::{ScalarTexture, Texture, TextureColorSpace};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Material {

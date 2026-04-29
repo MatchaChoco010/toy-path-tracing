@@ -36,9 +36,7 @@ pub fn linear_to_srgb(rgb: Vec3) -> Vec3 {
 mod tests {
     use glam::Vec3;
 
-    use super::{
-        linear_to_srgb, linear_to_srgb_channel, srgb_to_linear, srgb_to_linear_channel,
-    };
+    use super::{linear_to_srgb, linear_to_srgb_channel, srgb_to_linear, srgb_to_linear_channel};
 
     #[test]
     fn srgb_to_linear_channel_at_zero_is_zero() {

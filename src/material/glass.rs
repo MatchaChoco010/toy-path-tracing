@@ -6,8 +6,8 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::{BsdfFlags, GlassBsdf};
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_color_texture,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,7 +19,7 @@ pub struct GlassMaterial {
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl GlassMaterial {
@@ -46,7 +46,10 @@ impl GlassMaterial {
         Ok(Self {
             eta,
             color,
-            color_texture: load_optional_texture(color_texture_path, TextureColorSpace::Srgb)?,
+            color_texture: load_optional_color_texture(
+                color_texture_path,
+                TextureColorSpace::Srgb,
+            )?,
             thin,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
@@ -60,7 +63,7 @@ impl GlassMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -157,7 +160,7 @@ impl GlassMaterial {
                 .color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),

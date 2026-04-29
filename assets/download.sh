@@ -85,14 +85,18 @@ if [ ! -d "$RUSSIMP_SYS_DIR" ]; then
     git clone --quiet --recurse-submodules --depth 1 \
         --branch "$RUSSIMP_SYS_TAG" "$RUSSIMP_SYS_REPO" "$RUSSIMP_SYS_DIR"
 fi
-if ! grep -q 'cmake_dir.join("lib64")' "$RUSSIMP_SYS_DIR/build.rs"; then
-    echo "Applying lib64 link-search patch to russimp-sys/build.rs ..."
+if ! grep -q 'unpredictable_function_pointer_comparisons' "$RUSSIMP_SYS_DIR/src/lib.rs"; then
+    echo "Applying lib64 link-search and lint-suppression patch to russimp-sys ..."
+    # Reset any partial patch state first so `git apply` succeeds even when an
+    # older revision of this script applied an earlier (subset) patch.
+    git -C "$RUSSIMP_SYS_DIR" checkout -- build.rs src/lib.rs
     git -C "$RUSSIMP_SYS_DIR" apply "$RUSSIMP_SYS_PATCH"
 fi
 
 echo "Building convert-bistro helper via cargo (this builds assimp on first run) ..."
-(cd "$REPO_DIR" && cargo build --release -p convert-bistro --quiet)
-CONVERT_BISTRO_BIN="$REPO_DIR/target/release/convert-bistro"
+CONVERT_BISTRO_DIR="$REPO_DIR/tools/convert_bistro"
+(cd "$CONVERT_BISTRO_DIR" && cargo build --release --quiet)
+CONVERT_BISTRO_BIN="$CONVERT_BISTRO_DIR/target/release/convert-bistro"
 if [ ! -x "$CONVERT_BISTRO_BIN" ]; then
     echo "convert-bistro binary was not produced at $CONVERT_BISTRO_BIN" >&2
     exit 1
