@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub fn create_scene_13() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
-    create_sky_bunny_scene("assets/sky/brown_photostudio_02_4k.hdr", 2.0)
+    create_sky_bunny_scene("assets/sky/brown_photostudio_02_4k.hdr", 1.0)
 }
 
 pub(super) fn create_sky_bunny_scene(
@@ -52,6 +52,7 @@ pub(super) fn create_sky_bunny_scene(
         Vec3::new(0.0, 1.15, -0.1),
         Vec3::Y,
         38.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

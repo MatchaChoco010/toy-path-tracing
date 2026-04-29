@@ -8,18 +8,19 @@ use std::{
 
 use crate::{
     camera::PinholeCamera,
+    color::srgb_to_linear,
     light::EnvironmentLight,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
-        SimplePbrMaterial, Texture, TextureColorSpace,
+        ScalarTexture, SimplePbrMaterial, Texture, TextureColorSpace,
     },
-    obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
     scene::Scene,
+    scene_loader::obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
 };
 
 struct DiffuseTextureCacheEntry {
     color: Arc<Texture>,
-    alpha: Option<Arc<Texture>>,
+    alpha: Option<Arc<ScalarTexture>>,
 }
 
 const SAN_MIGUEL_OBJ: &str = "assets/san_miguel_2.0/san-miguel.obj";
@@ -30,7 +31,7 @@ pub fn create_scene_23() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let obj_scene = load_obj_scene(Path::new(SAN_MIGUEL_OBJ))?;
     add_san_miguel_to_scene(&mut scene, &obj_scene);
 
-    let env = EnvironmentLight::from_hdr_file(SAN_MIGUEL_HDR, 50.0, 0.0)?;
+    let env = EnvironmentLight::from_hdr_file(SAN_MIGUEL_HDR, 10.0, 0.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(
@@ -38,6 +39,7 @@ pub fn create_scene_23() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(6.2, 1.78, 1.15),
         Vec3::Y,
         60.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))
@@ -67,16 +69,18 @@ fn san_miguel_material(
     };
 
     if material.emission.length_squared() > 0.0 {
-        let strength = material.emission.max_element().max(1.0);
-        let color = (material.emission / strength).clamp(Vec3::ZERO, Vec3::ONE);
+        let ke = material.emission;
+        let strength = ke.max_element().max(1.0);
+        let chroma = (ke / strength).clamp(Vec3::ZERO, Vec3::ONE);
+        let color = srgb_to_linear(chroma);
         return Material::Emissive(EmissiveMaterial::new(color, strength));
     }
 
     if is_transparent(material) {
         let color = if material.transmission_filter.length_squared() > 0.0 {
-            material.transmission_filter
+            srgb_to_linear(material.transmission_filter)
         } else {
-            material.diffuse
+            srgb_to_linear(material.diffuse)
         };
         let color = color.clamp(Vec3::splat(0.05), Vec3::ONE);
         return Material::DielectricGgx(DielectricGgxMaterial::new(
@@ -94,7 +98,7 @@ fn san_miguel_material(
         .and_then(|relative_path| load_diffuse_texture(mtl_dir, relative_path, texture_cache));
 
     let mut simple_pbr = SimplePbrMaterial::new(
-        material.diffuse.clamp(Vec3::ZERO, Vec3::ONE),
+        srgb_to_linear(material.diffuse).clamp(Vec3::ZERO, Vec3::ONE),
         0.0,
         roughness_from_phong_exponent(material.specular_exponent),
         1.5,
@@ -166,7 +170,7 @@ mod tests {
 
     use glam::Vec3;
 
-    use crate::{material::Material, obj_scene::ObjMaterial};
+    use crate::{material::Material, scene_loader::obj_scene::ObjMaterial};
 
     use super::{is_transparent, roughness_from_phong_exponent, san_miguel_material};
 
@@ -180,6 +184,7 @@ mod tests {
             transmission_filter: Vec3::ZERO,
             emission: Vec3::ZERO,
             diffuse_texture_path: None,
+            emission_texture_path: None,
         }
     }
 

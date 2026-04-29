@@ -1,47 +1,79 @@
 use glam::{Mat4, Vec3};
-use std::{
-    collections::HashMap,
-    error::Error,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{error::Error, path::Path, sync::Arc};
 
 use crate::{
     camera::PinholeCamera,
+    color::srgb_to_linear,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
-        SimplePbrMaterial, Texture, TextureColorSpace,
+        ScalarTexture, SimplePbrMaterial, Texture,
     },
-    obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
     scene::Scene,
+    scene_loader::gltf_scene::{
+        GltfAlphaMode, GltfImage, GltfMaterial, GltfMaterialMesh, GltfScene, load_gltf_scene,
+    },
 };
 
-struct DiffuseTextureCacheEntry {
-    color: Arc<Texture>,
-    alpha: Option<Arc<Texture>>,
-}
+const BISTRO_GLTF_FILES: &[&str] = &[
+    "assets/bistro/gltf/BistroExterior/BistroExterior.gltf",
+    "assets/bistro/gltf/BistroInterior/BistroInterior.gltf",
+    "assets/bistro/gltf/BistroInterior_Wine/BistroInterior_Wine.gltf",
+];
 
-const BISTRO_EXTERIOR_OBJ: &str = "assets/bistro/Exterior/exterior.obj";
-const BISTRO_INTERIOR_OBJ: &str = "assets/bistro/Interior/interior.obj";
-const STRONG_EMISSION_THRESHOLD: f32 = 1.0;
-const STRONG_EMISSIVE_BOOST: f32 = 500.0;
-const WEAK_EMISSIVE_BOOST: f32 = 1.0;
+const EMISSIVE_SCALE: f32 = 512.0;
+
+struct ImageCache {
+    color: Vec<Option<Arc<Texture>>>,
+    alpha: Vec<Option<Option<Arc<ScalarTexture>>>>,
+    metallic: Vec<Option<Arc<ScalarTexture>>>,
+    roughness: Vec<Option<Arc<ScalarTexture>>>,
+}
 
 pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
-    let mut texture_cache: HashMap<PathBuf, DiffuseTextureCacheEntry> = HashMap::new();
-
     let mut total_emissive_meshes = 0usize;
     let mut total_emissive_tris = 0usize;
     let mut total_tris = 0usize;
+    let mut total_simple_pbr_meshes = 0usize;
+    let mut total_dielectric_meshes = 0usize;
+    let mut total_lambert_fallback_meshes = 0usize;
+    let mut found_any_glb = false;
 
-    for obj_path in &[BISTRO_EXTERIOR_OBJ, BISTRO_INTERIOR_OBJ] {
-        let obj_scene = load_obj_scene(Path::new(obj_path))?;
-        let (emissive_meshes, emissive_tris, tris) =
-            add_obj_scene_to_scene(&mut scene, &obj_scene, &mut texture_cache);
-        total_emissive_meshes += emissive_meshes;
-        total_emissive_tris += emissive_tris;
-        total_tris += tris;
+    for path in BISTRO_GLTF_FILES {
+        let glb_path = Path::new(path);
+        if !glb_path.exists() {
+            continue;
+        }
+        found_any_glb = true;
+        let gltf_scene = load_gltf_scene(glb_path)?;
+        let mut cache = ImageCache::new(gltf_scene.images.len());
+
+        for slot in &gltf_scene.material_meshes {
+            let tris = slot.mesh.triangle_count();
+            total_tris += tris;
+            let material = build_material(slot, &gltf_scene, &mut cache);
+            match &material {
+                Material::Emissive(_) => {
+                    total_emissive_meshes += 1;
+                    total_emissive_tris += tris;
+                }
+                Material::SimplePBR(_) => total_simple_pbr_meshes += 1,
+                Material::DielectricGgx(_) => total_dielectric_meshes += 1,
+                Material::NormalizedLambert(_) => total_lambert_fallback_meshes += 1,
+                _ => {}
+            }
+            let material_index = scene.add_material(material);
+            let mesh_index = scene.add_mesh(slot.mesh.clone());
+            scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+        }
+    }
+
+    if !found_any_glb {
+        return Err(format!(
+            "scene 24 expected at least one of {BISTRO_GLTF_FILES:?}; \
+             run `bash assets/download.sh` to fetch and convert the original Bistro asset"
+        )
+        .into());
     }
 
     if total_emissive_meshes == 0 {
@@ -51,275 +83,325 @@ pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     }
 
     eprintln!(
-        "scene 24 (Bistro): {} triangles, {} emissive meshes ({} emissive triangles)",
-        total_tris, total_emissive_meshes, total_emissive_tris,
+        "scene 24 (Bistro original): {} triangles, emissive={} ({} tri), \
+         simple_pbr={}, dielectric_ggx={}, lambert_fallback={}",
+        total_tris,
+        total_emissive_meshes,
+        total_emissive_tris,
+        total_simple_pbr_meshes,
+        total_dielectric_meshes,
+        total_lambert_fallback_meshes,
     );
 
     let camera = PinholeCamera::new(
-        Vec3::new(-1000.0, 250.0, 140.0),
+        Vec3::new(-17.0, 4.5, 2.0),
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::Y,
         60.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))
 }
 
-fn add_obj_scene_to_scene(
-    scene: &mut Scene,
-    obj_scene: &ObjScene,
-    texture_cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
-) -> (usize, usize, usize) {
-    let mut emissive_meshes = 0usize;
-    let mut emissive_tris = 0usize;
-    let mut total_tris = 0usize;
-
-    for slot in &obj_scene.material_meshes {
-        let obj_material = slot
-            .material_name
-            .as_deref()
-            .and_then(|name| obj_scene.material(name));
-        let is_emissive = obj_material
-            .map(|m| m.emission.length_squared() > 0.0)
-            .unwrap_or(false);
-        let tris = slot.mesh.triangle_count();
-        total_tris += tris;
-        if is_emissive {
-            emissive_meshes += 1;
-            emissive_tris += tris;
+impl ImageCache {
+    fn new(count: usize) -> Self {
+        Self {
+            color: vec![None; count],
+            alpha: vec![None; count],
+            metallic: vec![None; count],
+            roughness: vec![None; count],
         }
-        let material = bistro_material(obj_material, &obj_scene.mtl_dir, texture_cache);
-        let material_index = scene.add_material(material);
-        let mesh_index = scene.add_mesh(slot.mesh.clone());
-        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
     }
 
-    (emissive_meshes, emissive_tris, total_tris)
+    fn srgb_color(&mut self, images: &[GltfImage], index: usize) -> Arc<Texture> {
+        if let Some(texture) = &self.color[index] {
+            return Arc::clone(texture);
+        }
+        let texture = Arc::new(decode_srgb_color(&images[index]));
+        self.color[index] = Some(Arc::clone(&texture));
+        texture
+    }
+
+    fn alpha(&mut self, images: &[GltfImage], index: usize) -> Option<Arc<ScalarTexture>> {
+        if let Some(entry) = &self.alpha[index] {
+            return entry.clone();
+        }
+        let texture = decode_alpha(&images[index]).map(Arc::new);
+        self.alpha[index] = Some(texture.clone());
+        texture
+    }
+
+    fn metallic(&mut self, images: &[GltfImage], index: usize) -> Arc<ScalarTexture> {
+        if let Some(texture) = &self.metallic[index] {
+            return Arc::clone(texture);
+        }
+        let image = &images[index];
+        let texture = Arc::new(ScalarTexture::from_rgba_channel(
+            image.width,
+            image.height,
+            &image.rgba,
+            2,
+        ));
+        self.metallic[index] = Some(Arc::clone(&texture));
+        texture
+    }
+
+    fn roughness(&mut self, images: &[GltfImage], index: usize) -> Arc<ScalarTexture> {
+        if let Some(texture) = &self.roughness[index] {
+            return Arc::clone(texture);
+        }
+        let image = &images[index];
+        let texture = Arc::new(ScalarTexture::from_rgba_channel(
+            image.width,
+            image.height,
+            &image.rgba,
+            1,
+        ));
+        self.roughness[index] = Some(Arc::clone(&texture));
+        texture
+    }
 }
 
-fn bistro_material(
-    obj_material: Option<&ObjMaterial>,
-    mtl_dir: &Path,
-    texture_cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
+fn decode_srgb_color(image: &GltfImage) -> Texture {
+    let mut pixels = Vec::with_capacity(image.width * image.height);
+    for chunk in image.rgba.chunks_exact(4) {
+        let rgb = Vec3::new(
+            chunk[0] as f32 / 255.0,
+            chunk[1] as f32 / 255.0,
+            chunk[2] as f32 / 255.0,
+        );
+        pixels.push(srgb_to_linear(rgb));
+    }
+    Texture::from_pixels(image.width, image.height, pixels)
+}
+
+fn decode_alpha(image: &GltfImage) -> Option<ScalarTexture> {
+    let mut pixels = Vec::with_capacity(image.width * image.height);
+    let mut nontrivial = false;
+    for chunk in image.rgba.chunks_exact(4) {
+        let alpha = chunk[3] as f32 / 255.0;
+        if alpha < 1.0 - 1.0e-3 {
+            nontrivial = true;
+        }
+        pixels.push(alpha);
+    }
+    if !nontrivial {
+        return None;
+    }
+    Some(ScalarTexture::from_pixels(
+        image.width,
+        image.height,
+        pixels,
+    ))
+}
+
+fn build_material(
+    slot: &GltfMaterialMesh,
+    gltf_scene: &GltfScene,
+    cache: &mut ImageCache,
 ) -> Material {
-    let Some(material) = obj_material else {
+    let Some(material_index) = slot.material_index else {
+        return Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::splat(0.7)));
+    };
+    let Some(material) = gltf_scene.materials.get(material_index) else {
         return Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::splat(0.7)));
     };
 
-    if material.emission.length_squared() > 0.0 {
-        let boost = if material.emission.max_element() >= STRONG_EMISSION_THRESHOLD {
-            STRONG_EMISSIVE_BOOST
-        } else {
-            WEAK_EMISSIVE_BOOST
-        };
-        let boosted = material.emission * boost;
-        let strength = boosted.max_element().max(1.0);
-        let color = (boosted / strength).clamp(Vec3::ZERO, Vec3::ONE);
-        return Material::Emissive(EmissiveMaterial::new(color, strength));
+    if let Some(emissive) = build_emissive(material, &gltf_scene.images, cache) {
+        return emissive;
     }
 
-    if is_transparent(material) {
-        let color = if material.transmission_filter.length_squared() > 0.0 {
-            material.transmission_filter
-        } else {
-            material.diffuse
-        };
-        let color = color.clamp(Vec3::splat(0.05), Vec3::ONE);
-        return Material::DielectricGgx(DielectricGgxMaterial::new(
-            color,
-            1.5,
-            roughness_from_phong_exponent(material.specular_exponent),
-            0.0,
-            false,
-        ));
+    if matches!(material.alpha_mode, GltfAlphaMode::Blend) {
+        return build_dielectric(material);
     }
 
-    let textures = material
-        .diffuse_texture_path
-        .as_deref()
-        .and_then(|relative_path| load_diffuse_texture(mtl_dir, relative_path, texture_cache));
+    build_simple_pbr(material, &gltf_scene.images, cache)
+}
 
-    let mut simple_pbr = SimplePbrMaterial::new(
-        material.diffuse.clamp(Vec3::ZERO, Vec3::ONE),
-        0.0,
-        roughness_from_phong_exponent(material.specular_exponent),
+fn build_emissive(
+    material: &GltfMaterial,
+    images: &[GltfImage],
+    cache: &mut ImageCache,
+) -> Option<Material> {
+    let factor = material.emissive_factor * material.emissive_strength;
+    let factor_max = factor.max_element();
+    let texture_index = material.emissive_texture;
+
+    if factor_max <= 0.0 && texture_index.is_none() {
+        return None;
+    }
+
+    let (color, strength, texture) = if factor_max > 0.0 {
+        let strength = factor_max;
+        let chroma = (factor / strength).clamp(Vec3::ZERO, Vec3::ONE);
+        let texture = texture_index.map(|index| cache.srgb_color(images, index));
+        (chroma, strength, texture)
+    } else {
+        let index = texture_index?;
+        (Vec3::ONE, 1.0, Some(cache.srgb_color(images, index)))
+    };
+
+    let mut emissive_material = EmissiveMaterial::new(color, strength * EMISSIVE_SCALE);
+    emissive_material.color_texture = texture;
+    Some(Material::Emissive(emissive_material))
+}
+
+fn build_dielectric(material: &GltfMaterial) -> Material {
+    let factor: Vec3 = material.base_color_factor.truncate();
+    let color =
+        srgb_to_linear(factor.clamp(Vec3::ZERO, Vec3::ONE)).clamp(Vec3::splat(0.05), Vec3::ONE);
+    Material::DielectricGgx(DielectricGgxMaterial::new(
+        color,
         1.5,
+        material.roughness_factor.clamp(0.05, 1.0),
         0.0,
-    );
-    if let Some(textures) = textures {
-        simple_pbr.base_color_texture = Some(textures.color);
-        simple_pbr.opacity_texture = textures.alpha;
+        false,
+    ))
+}
+
+fn build_simple_pbr(
+    material: &GltfMaterial,
+    images: &[GltfImage],
+    cache: &mut ImageCache,
+) -> Material {
+    let factor: Vec3 = material.base_color_factor.truncate();
+    let base_color = srgb_to_linear(factor.clamp(Vec3::ZERO, Vec3::ONE));
+
+    // glTF metallicRoughness: final = factor * texture_channel. Without a
+    // texture we floor the roughness to keep specular lobes finite; with a
+    // texture we let smooth metals such as chrome trim stay sharp and rely on
+    // SimplePbrMaterial's internal alpha clamp.
+    let metallic_factor = material.metallic_factor.clamp(0.0, 1.0);
+    let roughness_factor = if material.metallic_roughness_texture.is_some() {
+        material.roughness_factor.clamp(0.0, 1.0)
+    } else {
+        material.roughness_factor.clamp(0.05, 1.0)
+    };
+
+    let mut simple_pbr =
+        SimplePbrMaterial::new(base_color, metallic_factor, roughness_factor, 1.5, 0.0);
+
+    if let Some(index) = material.base_color_texture {
+        simple_pbr.base_color_texture = Some(cache.srgb_color(images, index));
+        simple_pbr.opacity_texture = cache.alpha(images, index);
     }
+
+    if let Some(index) = material.metallic_roughness_texture {
+        simple_pbr.metallic_texture = Some(cache.metallic(images, index));
+        simple_pbr.roughness_texture = Some(cache.roughness(images, index));
+    }
+
     Material::SimplePBR(simple_pbr)
-}
-
-fn load_diffuse_texture(
-    mtl_dir: &Path,
-    relative_path: &Path,
-    cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
-) -> Option<DiffuseTextureCacheEntry> {
-    let absolute_path = mtl_dir.join(relative_path);
-    if let Some(entry) = cache.get(&absolute_path) {
-        return Some(DiffuseTextureCacheEntry {
-            color: Arc::clone(&entry.color),
-            alpha: entry.alpha.as_ref().map(Arc::clone),
-        });
-    }
-    match Texture::from_file_with_alpha(&absolute_path, TextureColorSpace::Srgb) {
-        Ok((color, alpha)) => {
-            let entry = DiffuseTextureCacheEntry {
-                color: Arc::new(color),
-                alpha: alpha.map(Arc::new),
-            };
-            cache.insert(
-                absolute_path,
-                DiffuseTextureCacheEntry {
-                    color: Arc::clone(&entry.color),
-                    alpha: entry.alpha.as_ref().map(Arc::clone),
-                },
-            );
-            Some(entry)
-        }
-        Err(error) => {
-            eprintln!(
-                "warning: failed to load Bistro texture {}: {error}",
-                absolute_path.display()
-            );
-            None
-        }
-    }
-}
-
-fn is_transparent(material: &ObjMaterial) -> bool {
-    if material.dissolve < 0.999 {
-        return true;
-    }
-    if material.illum == 4 || material.illum == 6 || material.illum == 7 || material.illum == 9 {
-        return true;
-    }
-    false
-}
-
-fn roughness_from_phong_exponent(ns: f32) -> f32 {
-    let ns = ns.max(1.0);
-    let alpha = (2.0 / (ns + 2.0)).sqrt();
-    alpha.sqrt().clamp(0.05, 1.0)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, path::Path};
+    use super::*;
+    use glam::Vec4;
 
-    use glam::Vec3;
-
-    use crate::{material::Material, obj_scene::ObjMaterial};
-
-    use crate::material::EmissiveMaterial;
-
-    use super::{
-        STRONG_EMISSIVE_BOOST, WEAK_EMISSIVE_BOOST, bistro_material, is_transparent,
-        roughness_from_phong_exponent,
-    };
-
-    fn emissive_intensity(material: &Material) -> Vec3 {
-        match material {
-            Material::Emissive(EmissiveMaterial {
-                color, strength, ..
-            }) => *color * *strength,
-            _ => panic!("expected emissive material"),
-        }
-    }
-
-    fn opaque_obj_material() -> ObjMaterial {
-        ObjMaterial {
+    fn opaque_gltf_material() -> GltfMaterial {
+        GltfMaterial {
             name: "wall".to_string(),
-            diffuse: Vec3::new(0.8, 0.7, 0.6),
-            specular_exponent: 16.0,
-            dissolve: 1.0,
-            illum: 2,
-            transmission_filter: Vec3::ZERO,
-            emission: Vec3::ZERO,
-            diffuse_texture_path: None,
+            base_color_factor: Vec4::new(0.8, 0.7, 0.6, 1.0),
+            base_color_texture: None,
+            metallic_factor: 0.0,
+            roughness_factor: 0.5,
+            metallic_roughness_texture: None,
+            emissive_factor: Vec3::ZERO,
+            emissive_strength: 1.0,
+            emissive_texture: None,
+            alpha_mode: GltfAlphaMode::Opaque,
+            double_sided: false,
+            unlit: false,
         }
     }
 
-    fn build(material: Option<&ObjMaterial>) -> Material {
-        let mut cache = HashMap::new();
-        bistro_material(material, Path::new("."), &mut cache)
+    fn build(material: GltfMaterial) -> Material {
+        build_with_images(material, Vec::new())
+    }
+
+    fn build_with_images(material: GltfMaterial, images: Vec<GltfImage>) -> Material {
+        let gltf_scene = GltfScene {
+            material_meshes: Vec::new(),
+            materials: vec![material],
+            images: images.clone(),
+        };
+        let mut cache = ImageCache::new(images.len());
+        let slot = GltfMaterialMesh {
+            material_index: Some(0),
+            mesh: crate::mesh::Mesh::new(
+                vec![crate::mesh::Vertex {
+                    position: Vec3::ZERO,
+                    normal: Vec3::Z,
+                    uv: glam::Vec2::ZERO,
+                }],
+                vec![0, 0, 0],
+            ),
+        };
+        build_material(&slot, &gltf_scene, &mut cache)
     }
 
     #[test]
     fn opaque_material_becomes_simple_pbr() {
         assert!(matches!(
-            build(Some(&opaque_obj_material())),
+            build(opaque_gltf_material()),
             Material::SimplePBR(_)
         ));
     }
 
     #[test]
-    fn dissolve_below_one_marks_material_transparent() {
-        let mut obj = opaque_obj_material();
-        obj.dissolve = 0.5;
-        assert!(is_transparent(&obj));
-        assert!(matches!(build(Some(&obj)), Material::DielectricGgx(_)));
+    fn blend_alpha_mode_becomes_dielectric_ggx() {
+        let mut material = opaque_gltf_material();
+        material.alpha_mode = GltfAlphaMode::Blend;
+        assert!(matches!(build(material), Material::DielectricGgx(_)));
     }
 
     #[test]
-    fn illum_seven_marks_material_transparent() {
-        let mut obj = opaque_obj_material();
-        obj.illum = 7;
-        assert!(is_transparent(&obj));
-        assert!(matches!(build(Some(&obj)), Material::DielectricGgx(_)));
+    fn strong_emissive_becomes_emissive_material() {
+        let mut material = opaque_gltf_material();
+        material.emissive_factor = Vec3::new(2.0, 1.0, 0.5);
+        assert!(matches!(build(material), Material::Emissive(_)));
     }
 
     #[test]
-    fn ke_marks_material_emissive() {
-        let mut obj = opaque_obj_material();
-        obj.emission = Vec3::new(2.0, 2.0, 2.0);
-        assert!(matches!(build(Some(&obj)), Material::Emissive(_)));
+    fn nonzero_emissive_factor_without_texture_becomes_emissive_material() {
+        let mut material = opaque_gltf_material();
+        material.emissive_factor = Vec3::new(0.2, 0.2, 0.2);
+        assert!(matches!(build(material), Material::Emissive(_)));
     }
 
     #[test]
-    fn strong_emission_uses_strong_boost() {
-        let mut obj = opaque_obj_material();
-        obj.emission = Vec3::new(2.0, 1.5, 1.0);
-        let intensity = emissive_intensity(&build(Some(&obj)));
-        let expected = obj.emission * STRONG_EMISSIVE_BOOST;
-        assert!((intensity - expected).length() <= 1.0e-3);
-    }
-
-    #[test]
-    fn weak_emission_uses_weak_boost() {
-        let mut obj = opaque_obj_material();
-        obj.emission = Vec3::new(0.2, 0.2, 0.2);
-        let intensity = emissive_intensity(&build(Some(&obj)));
-        let expected = obj.emission * WEAK_EMISSIVE_BOOST;
-        assert!((intensity - expected).length() <= 1.0e-3);
-    }
-
-    #[test]
-    fn emission_at_threshold_is_strong() {
-        let mut obj = opaque_obj_material();
-        obj.emission = Vec3::new(1.0, 0.0, 0.0);
-        let intensity = emissive_intensity(&build(Some(&obj)));
-        let expected = obj.emission * STRONG_EMISSIVE_BOOST;
-        assert!((intensity - expected).length() <= 1.0e-3);
-    }
-
-    #[test]
-    fn missing_obj_material_falls_back_to_lambert() {
-        assert!(matches!(build(None), Material::NormalizedLambert(_)));
-    }
-
-    #[test]
-    fn roughness_decreases_with_increasing_phong_exponent() {
-        let r4 = roughness_from_phong_exponent(4.0);
-        let r16 = roughness_from_phong_exponent(16.0);
-        let r256 = roughness_from_phong_exponent(256.0);
-
-        assert!(r4 > r16);
-        assert!(r16 > r256);
-        assert!(r256 >= 0.05);
-        assert!(r4 <= 1.0);
+    fn metallic_roughness_texture_populates_metallic_and_roughness_textures() {
+        // Bistro packs occlusion/roughness/metalness into RGB channels of a
+        // single image. Verify that scene_24 wires the G channel (roughness)
+        // and B channel (metalness) into separate scalar textures and that
+        // they read back the expected values.
+        let mut material = opaque_gltf_material();
+        material.metallic_roughness_texture = Some(0);
+        // Solid colour image: R=10, G=128, B=200, A=255.
+        let image = GltfImage {
+            width: 2,
+            height: 2,
+            rgba: vec![
+                10, 128, 200, 255, 10, 128, 200, 255, 10, 128, 200, 255, 10, 128, 200, 255,
+            ],
+        };
+        let built = build_with_images(material, vec![image]);
+        let Material::SimplePBR(simple_pbr) = built else {
+            panic!("expected SimplePBR material");
+        };
+        let roughness = simple_pbr
+            .roughness_texture
+            .as_ref()
+            .expect("roughness texture should be populated");
+        let metallic = simple_pbr
+            .metallic_texture
+            .as_ref()
+            .expect("metallic texture should be populated");
+        let r = roughness.sample(glam::Vec2::splat(0.5));
+        let m = metallic.sample(glam::Vec2::splat(0.5));
+        assert!((r - 128.0 / 255.0).abs() < 1.0e-5);
+        assert!((m - 200.0 / 255.0).abs() < 1.0e-5);
     }
 }

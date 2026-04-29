@@ -11,7 +11,12 @@ mod texture;
 use glam::{Vec2, Vec3};
 use rand::rngs::ThreadRng;
 
-use crate::{bsdf::BsdfFlags, math::OrthonormalBasis, scene::TriangleRef};
+use crate::{
+    bsdf::BsdfFlags,
+    light_tree::LightTreePrecompute,
+    math::{OrthonormalBasis, sg::SgLobe},
+    scene::TriangleRef,
+};
 
 pub(super) const GEOMETRIC_NORMAL_COS_EPSILON: f32 = 1.0e-6;
 
@@ -23,7 +28,7 @@ pub use mirror::MirrorMaterial;
 pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
 pub use simple_pbr::SimplePbrMaterial;
-pub use texture::{Texture, TextureColorSpace};
+pub use texture::{ScalarTexture, Texture, TextureColorSpace};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Material {
@@ -197,6 +202,51 @@ impl Material {
             Self::Glass(material) => material.any_hit(shading_vertex, u),
             Self::SimplePBR(material) => material.any_hit(shading_vertex, u),
             Self::Emissive(material) => material.any_hit(shading_vertex, u),
+        }
+    }
+
+    /// Per-shading-point precompute for the hierarchical light tree. Each
+    /// material returns a `LightTreePrecompute` that captures whichever
+    /// lobes (diffuse / glossy / btdf) it needs the tree to favour. Returns
+    /// `None` for delta lobes (mirror / glass) and emissive surfaces -- the
+    /// integrator skips NEE on those anyway, so the tree query never fires.
+    ///
+    /// See `light_tree::lobe` for the shared SG/lobe helpers materials use
+    /// to populate the precompute. See the "MULTI-LOBE NOTES" doc comment
+    /// in that module before adding multi-glossy or multi-BTDF materials.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<LightTreePrecompute> {
+        match self {
+            Self::NormalizedLambert(material) => material.light_tree_precompute(shading_vertex),
+            Self::ConductorGgx(material) => material.light_tree_precompute(shading_vertex),
+            Self::DielectricGgx(material) => material.light_tree_precompute(shading_vertex),
+            Self::SimplePBR(material) => material.light_tree_precompute(shading_vertex),
+            Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => None,
+        }
+    }
+
+    /// Convolve the SG light `W * g(o; xi, kappa)` with this material's
+    /// lobes and return a non-negative importance. The `precompute` is the
+    /// value returned by `light_tree_precompute` at the shading vertex.
+    ///
+    /// Implementations are expected to delegate to the helpers in
+    /// `light_tree::lobe` (see also the multi-lobe guidance there).
+    pub fn light_tree_importance(
+        &self,
+        precompute: &LightTreePrecompute,
+        w: f32,
+        lobe: &SgLobe,
+    ) -> f32 {
+        match self {
+            Self::NormalizedLambert(material) => {
+                material.light_tree_importance(precompute, w, lobe)
+            }
+            Self::ConductorGgx(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::DielectricGgx(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::SimplePBR(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => 0.0,
         }
     }
 }

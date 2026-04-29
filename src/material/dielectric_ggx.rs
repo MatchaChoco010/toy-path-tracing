@@ -6,8 +6,10 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::bsdf::{BsdfFlags, DielectricGgxBsdf};
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace,
+    normal_map::load_optional_normal_map,
+    texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -18,13 +20,13 @@ pub struct DielectricGgxMaterial {
     pub color_texture: Option<Arc<Texture>>,
     pub eta: f32,
     pub roughness: f32,
-    pub roughness_texture: Option<Arc<Texture>>,
+    pub roughness_texture: Option<Arc<ScalarTexture>>,
     pub anisotropy: f32,
     pub thin: bool,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl DielectricGgxMaterial {
@@ -56,13 +58,13 @@ impl DielectricGgxMaterial {
     ) -> image::ImageResult<Self> {
         Ok(Self {
             color,
-            color_texture: load_optional_texture(color_texture_path, TextureColorSpace::Srgb)?,
+            color_texture: load_optional_color_texture(
+                color_texture_path,
+                TextureColorSpace::Srgb,
+            )?,
             eta,
             roughness,
-            roughness_texture: load_optional_texture(
-                roughness_texture_path,
-                TextureColorSpace::Linear,
-            )?,
+            roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
             anisotropy,
             thin,
             normal_map: load_optional_normal_map(normal_map_path)?,
@@ -77,7 +79,7 @@ impl DielectricGgxMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -246,6 +248,74 @@ impl DielectricGgxMaterial {
         self.alpha_xy_from_roughness(self.roughness)
     }
 
+    /// Per-shading-point precompute for the hierarchical light tree.
+    /// Dielectric GGX has a glossy reflection lobe and a transmission lobe
+    /// (Tokuyoshi 2024 "Proxy A": treat the rough refraction cone as a
+    /// glossy SG kernel pivoted around the perfect refraction direction).
+    /// Both contribute additively to the importance.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<crate::light_tree::LightTreePrecompute> {
+        let alpha = self.alpha_xy_at(shading_vertex);
+        let cos_o = shading_vertex.wo.dot(shading_vertex.ns).abs().max(1.0e-4);
+        let f_avg = crate::math::fresnel_dielectric(cos_o, 1.0, self.eta);
+        let rho_color = crate::math::sg::luminance(self.color_at(shading_vertex));
+        let rho_refl = rho_color * f_avg;
+        let rho_trans = rho_color * (1.0 - f_avg);
+        let glossy = crate::light_tree::make_glossy_lobe(
+            rho_refl,
+            shading_vertex.frame,
+            shading_vertex.wo,
+            alpha.0,
+            alpha.1,
+        );
+        let btdf = if rho_trans > 0.0 {
+            let eta_rel = if shading_vertex.front_face {
+                1.0 / self.eta
+            } else {
+                self.eta
+            };
+            crate::light_tree::make_btdf_lobe(
+                rho_trans,
+                shading_vertex.frame,
+                shading_vertex.wo,
+                alpha.0,
+                alpha.1,
+                eta_rel,
+            )
+        } else {
+            None
+        };
+        if glossy.is_none() && btdf.is_none() {
+            return None;
+        }
+        Some(crate::light_tree::LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse: None,
+            glossy,
+            btdf,
+        })
+    }
+
+    pub fn light_tree_importance(
+        &self,
+        precompute: &crate::light_tree::LightTreePrecompute,
+        w: f32,
+        lobe: &crate::math::sg::SgLobe,
+    ) -> f32 {
+        let mut imp = 0.0;
+        if let Some(g) = precompute.glossy {
+            imp += crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe);
+        }
+        if let Some(b) = precompute.btdf {
+            imp += crate::light_tree::btdf_importance(b, precompute.frame, precompute.n, w, lobe);
+        }
+        imp.max(0.0)
+    }
+
     fn alpha_xy_at(&self, shading_vertex: &ShadingVertex) -> (f32, f32) {
         self.alpha_xy_from_roughness(self.roughness_at(shading_vertex))
     }
@@ -271,7 +341,7 @@ impl DielectricGgxMaterial {
                 .color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -286,7 +356,7 @@ impl DielectricGgxMaterial {
                 .roughness_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -304,7 +374,7 @@ mod tests {
 
     use crate::{
         bsdf::BsdfFlags,
-        material::{ShadingVertex, Texture},
+        material::{ScalarTexture, ShadingVertex, Texture},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
     };
@@ -416,11 +486,7 @@ mod tests {
             ))),
             eta: 1.5,
             roughness: 0.8,
-            roughness_texture: Some(Arc::new(Texture::from_pixels(
-                1,
-                1,
-                vec![Vec3::splat(0.5)],
-            ))),
+            roughness_texture: Some(Arc::new(ScalarTexture::from_pixels(1, 1, vec![0.5]))),
             anisotropy: 0.0,
             thin: false,
             normal_map: None,

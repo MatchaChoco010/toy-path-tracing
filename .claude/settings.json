@@ -1,9 +1,4 @@
 {
-  "sandbox": {
-    "enabled": true,
-    "failIfUnavailable": true,
-    "autoAllowBashIfSandboxed": true
-  },
   "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
@@ -28,7 +23,8 @@
       "Bash(git tag:*)",
       "Bash(git remote:*)",
       "Bash(git config:*)",
-      "Bash(git clean:*)"
+      "Bash(git clean:*)",
+      "WebFetch(domain:docs.rs)"
     ],
     "deny": [],
     "ask": [
@@ -36,5 +32,10 @@
       "Bash(git push:*)"
     ]
   },
-  "enableAllProjectMcpServers": true
+  "enableAllProjectMcpServers": true,
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "autoAllowBashIfSandboxed": true
+  }
 }

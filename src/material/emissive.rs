@@ -3,14 +3,15 @@ use std::sync::Arc;
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use super::{MaterialSample, ShadingVertex, Texture};
+use super::{MaterialSample, ScalarTexture, ShadingVertex, Texture};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmissiveMaterial {
     pub color: Vec3,
     pub strength: f32,
+    pub color_texture: Option<Arc<Texture>>,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl EmissiveMaterial {
@@ -18,6 +19,7 @@ impl EmissiveMaterial {
         Self {
             color,
             strength,
+            color_texture: None,
             opacity: 1.0,
             opacity_texture: None,
         }
@@ -39,8 +41,19 @@ impl EmissiveMaterial {
         0.0
     }
 
-    pub fn le(&self, _shading_vertex: &ShadingVertex) -> Option<Vec3> {
-        Some(self.color * self.strength)
+    pub fn le(&self, shading_vertex: &ShadingVertex) -> Option<Vec3> {
+        let texture_factor = self
+            .color_texture
+            .as_ref()
+            .map(|texture| {
+                texture.sample_filtered(
+                    shading_vertex.uv,
+                    shading_vertex.uv_dx(),
+                    shading_vertex.uv_dy(),
+                )
+            })
+            .unwrap_or(Vec3::ONE);
+        Some(self.color * self.strength * texture_factor)
     }
 
     pub fn may_emit(&self) -> bool {
@@ -48,7 +61,12 @@ impl EmissiveMaterial {
     }
 
     pub fn max_emission(&self) -> f32 {
-        (self.color * self.strength).max_element().max(0.0)
+        let texture_factor = self
+            .color_texture
+            .as_ref()
+            .map(|texture| texture.max_value())
+            .unwrap_or(1.0);
+        ((self.color * self.strength).max_element() * texture_factor).max(0.0)
     }
 
     pub fn opacity_at_uv(&self, shading_vertex: &ShadingVertex) -> f32 {
@@ -56,7 +74,7 @@ impl EmissiveMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),

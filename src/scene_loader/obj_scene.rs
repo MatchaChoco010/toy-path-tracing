@@ -21,6 +21,7 @@ pub struct ObjMaterial {
     pub transmission_filter: Vec3,
     pub emission: Vec3,
     pub diffuse_texture_path: Option<PathBuf>,
+    pub emission_texture_path: Option<PathBuf>,
 }
 
 impl Default for ObjMaterial {
@@ -34,6 +35,7 @@ impl Default for ObjMaterial {
             transmission_filter: Vec3::ZERO,
             emission: Vec3::ZERO,
             diffuse_texture_path: None,
+            emission_texture_path: None,
         }
     }
 }
@@ -61,7 +63,11 @@ impl ObjScene {
 pub enum LoadObjSceneError {
     Io(std::io::Error),
     Mesh(LoadMeshError),
-    Mtl { path: PathBuf, line: usize, message: String },
+    Mtl {
+        path: PathBuf,
+        line: usize,
+        message: String,
+    },
 }
 
 impl fmt::Display for LoadObjSceneError {
@@ -69,7 +75,11 @@ impl fmt::Display for LoadObjSceneError {
         match self {
             Self::Io(error) => write!(f, "{error}"),
             Self::Mesh(error) => write!(f, "{error}"),
-            Self::Mtl { path, line, message } => {
+            Self::Mtl {
+                path,
+                line,
+                message,
+            } => {
                 write!(f, "MTL parse error in {path:?} on line {line}: {message}")
             }
         }
@@ -100,10 +110,7 @@ impl From<LoadMeshError> for LoadObjSceneError {
 
 pub fn load_obj_scene(obj_path: &Path) -> Result<ObjScene, LoadObjSceneError> {
     let source = fs::read_to_string(obj_path)?;
-    let dir = obj_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(PathBuf::new);
+    let dir = obj_path.parent().map(Path::to_path_buf).unwrap_or_default();
     let scene = parse_obj_scene_source(&source, &dir)?;
 
     Ok(scene)
@@ -313,9 +320,9 @@ fn parse_mtl_source(source: &str, path: &Path) -> Result<Vec<ObjMaterial>, LoadO
                     parse_mtl_scalar(&mut fields, path, line_number, "Ns")?;
             }
             "d" => {
-                let material = current.as_mut().ok_or_else(|| {
-                    mtl_error(path, line_number, "d before any newmtl directive")
-                })?;
+                let material = current
+                    .as_mut()
+                    .ok_or_else(|| mtl_error(path, line_number, "d before any newmtl directive"))?;
                 material.dissolve = parse_mtl_scalar(&mut fields, path, line_number, "d")?;
             }
             "Tr" => {
@@ -348,6 +355,19 @@ fn parse_mtl_source(source: &str, path: &Path) -> Result<Vec<ObjMaterial>, LoadO
                     return Err(mtl_error(path, line_number, "map_Kd missing texture path"));
                 }
                 material.diffuse_texture_path = Some(normalize_obj_path(path_text));
+            }
+            "map_Ke" => {
+                let material = current.as_mut().ok_or_else(|| {
+                    mtl_error(path, line_number, "map_Ke before any newmtl directive")
+                })?;
+                let path_text = line
+                    .split_once(char::is_whitespace)
+                    .map(|(_, rest)| rest.trim())
+                    .unwrap_or("");
+                if path_text.is_empty() {
+                    return Err(mtl_error(path, line_number, "map_Ke missing texture path"));
+                }
+                material.emission_texture_path = Some(normalize_obj_path(path_text));
             }
             _ => {}
         }
@@ -407,11 +427,7 @@ fn parse_leading_f32(token: &str) -> Option<f32> {
     best
 }
 
-fn mtl_error(
-    path: &Path,
-    line_number: usize,
-    message: impl Into<String>,
-) -> LoadObjSceneError {
+fn mtl_error(path: &Path, line_number: usize, message: impl Into<String>) -> LoadObjSceneError {
     LoadObjSceneError::Mtl {
         path: path.to_path_buf(),
         line: line_number,
@@ -503,6 +519,24 @@ map_Kd ../PropTextures/Paris_ShopSign_ties shop_diff.png
     }
 
     #[test]
+    fn mtl_map_ke_records_emission_texture_path() {
+        let source = "
+newmtl lantern
+Kd 1 1 1
+Ns 32
+illum 2
+map_Kd ../PropTextures/Paris_Lantern_01A_diff.png
+map_Ke ..\\PropTextures\\Paris_Lantern_01A_emi.png
+";
+        let materials = parse_mtl_source(source, Path::new("scene.mtl")).expect("parsed");
+        assert_eq!(materials.len(), 1);
+        assert_eq!(
+            materials[0].emission_texture_path.as_deref(),
+            Some(Path::new("../PropTextures/Paris_Lantern_01A_emi.png"))
+        );
+    }
+
+    #[test]
     fn mtl_parses_kd_dissolve_illum_tf_ke_and_map_kd() {
         let source = "
 newmtl wall
@@ -523,9 +557,11 @@ Ke 0.5 0.5 0.5
         let materials = parse_mtl_source(source, Path::new("scene.mtl")).expect("parsed");
         assert_eq!(materials.len(), 2);
         assert_eq!(materials[0].name, "wall");
-        assert!(materials[0]
-            .diffuse
-            .abs_diff_eq(glam::Vec3::new(0.4, 0.5, 0.6), 1.0e-6));
+        assert!(
+            materials[0]
+                .diffuse
+                .abs_diff_eq(glam::Vec3::new(0.4, 0.5, 0.6), 1.0e-6)
+        );
         assert_eq!(materials[0].specular_exponent, 32.0);
         assert_eq!(materials[0].dissolve, 1.0);
         assert_eq!(materials[0].illum, 2);
@@ -536,12 +572,16 @@ Ke 0.5 0.5 0.5
 
         assert_eq!(materials[1].name, "glass");
         assert_eq!(materials[1].illum, 4);
-        assert!(materials[1]
-            .transmission_filter
-            .abs_diff_eq(glam::Vec3::new(0.1, 0.2, 0.3), 1.0e-6));
-        assert!(materials[1]
-            .emission
-            .abs_diff_eq(glam::Vec3::splat(0.5), 1.0e-6));
+        assert!(
+            materials[1]
+                .transmission_filter
+                .abs_diff_eq(glam::Vec3::new(0.1, 0.2, 0.3), 1.0e-6)
+        );
+        assert!(
+            materials[1]
+                .emission
+                .abs_diff_eq(glam::Vec3::splat(0.5), 1.0e-6)
+        );
         assert!(materials[1].diffuse_texture_path.is_none());
     }
 }

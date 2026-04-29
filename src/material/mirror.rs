@@ -6,8 +6,8 @@ use rand::rngs::ThreadRng;
 use crate::bsdf::MirrorBsdf;
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_color_texture,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,7 +17,7 @@ pub struct MirrorMaterial {
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
 impl MirrorMaterial {
@@ -39,7 +39,10 @@ impl MirrorMaterial {
     ) -> image::ImageResult<Self> {
         Ok(Self {
             color,
-            color_texture: load_optional_texture(color_texture_path, TextureColorSpace::Srgb)?,
+            color_texture: load_optional_color_texture(
+                color_texture_path,
+                TextureColorSpace::Srgb,
+            )?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -52,7 +55,7 @@ impl MirrorMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -133,7 +136,7 @@ impl MirrorMaterial {
                 .color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),

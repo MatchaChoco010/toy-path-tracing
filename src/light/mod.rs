@@ -1,3 +1,25 @@
+// Top-level light selection.
+//
+// Light kinds are partitioned into three top-level categories:
+//   * `LightCategory::Tree` -- the SG light tree from `crate::light_tree`,
+//     which holds emissive triangles, point lights, and spot lights.
+//   * `LightCategory::Environment` -- the IBL environment, treated as one
+//     entry whose internal hierarchical distribution is unchanged.
+//   * `LightCategory::Directional(i)` -- one entry per directional light, kept
+//     out of the tree because directional lights have no spatial mean and
+//     are best sampled with a delta lookup.
+//
+// `LightSampler` is a flat CDF over those categories. Within `Tree` we use
+// the SG light tree's stochastic descent to pick a leaf; within `Environment`
+// we forward to the existing mip-pyramid sampler; for `Directional(i)` the
+// sample is deterministic.
+//
+// `selection_pmf` carried back on every sample multiplies the top-level
+// category pmf and (for `Tree`) the per-leaf pmf coming out of the
+// hierarchical descent. The continuous part of the density (solid-angle PDF
+// for area lights, env PDF for the environment, 1.0 for delta lights) lives
+// on `LightLiSample::pdf`. NEE / MIS just multiplies them.
+
 mod area;
 mod directional;
 mod environment;
@@ -7,7 +29,9 @@ mod spot;
 use glam::{Vec2, Vec3};
 
 use crate::{
+    light_tree::{LightTreeLeafKind, LightTreeQuery, pdf_for_leaf_kind, sample_light_tree},
     material::ShadingVertex,
+    math::sg,
     scene::{Scene, TriangleRef},
 };
 
@@ -32,37 +56,8 @@ impl LightType {
     pub fn is_delta(self) -> bool {
         matches!(self, Self::DeltaPosition | Self::DeltaDirection)
     }
-
     pub fn is_infinite(self) -> bool {
         matches!(self, Self::Infinite | Self::DeltaDirection)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LightKind {
-    Area,
-    Infinite,
-    DeltaPoint(usize),
-    DeltaDirectional(usize),
-    DeltaSpot(usize),
-}
-
-impl LightKind {
-    pub fn light_type(self) -> LightType {
-        match self {
-            Self::Area => LightType::Area,
-            Self::Infinite => LightType::Infinite,
-            Self::DeltaPoint(_) | Self::DeltaSpot(_) => LightType::DeltaPosition,
-            Self::DeltaDirectional(_) => LightType::DeltaDirection,
-        }
-    }
-
-    pub fn is_delta(self) -> bool {
-        self.light_type().is_delta()
-    }
-
-    pub fn is_infinite(self) -> bool {
-        self.light_type().is_infinite()
     }
 }
 
@@ -93,6 +88,13 @@ pub struct LightLiSample {
     pub target_triangle: Option<TriangleRef>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LightCategory {
+    Tree,
+    Environment,
+    Directional(usize),
+}
+
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct LightSampler {
     entries: Vec<LightEntry>,
@@ -102,14 +104,24 @@ pub struct LightSampler {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LightEntry {
-    kind: LightKind,
+    category: LightCategory,
     weight: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SampledLight {
-    pub kind: LightKind,
+pub struct SampledCategory {
+    pub category: LightCategory,
     pub pmf: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SampledLight {
+    pub category: LightCategory,
+    pub leaf: Option<LightTreeLeafKind>,
+    pub sample: LightLiSample,
+    /// Discrete PMF of selecting this exact leaf (top-level * tree-leaf
+    /// internal pmf for `Tree`; top-level only for env/directional).
+    pub selection_pmf: f32,
 }
 
 impl LightSampler {
@@ -117,19 +129,44 @@ impl LightSampler {
         Self::default()
     }
 
-    pub fn from_weighted_kinds(entries: &[(LightKind, f32)]) -> Self {
-        let entries: Vec<LightEntry> = entries
-            .iter()
-            .filter(|(_, w)| *w > 0.0)
-            .map(|(k, w)| LightEntry {
-                kind: *k,
-                weight: *w,
-            })
-            .collect();
+    pub fn build_from_scene(scene: &Scene) -> Self {
+        let mut entries: Vec<LightEntry> = Vec::new();
+
+        let tree_weight = scene
+            .light_tree
+            .as_ref()
+            .map(|t| t.root_flux().max(0.0))
+            .unwrap_or(0.0);
+        if tree_weight > 0.0 {
+            entries.push(LightEntry {
+                category: LightCategory::Tree,
+                weight: tree_weight,
+            });
+        }
+
+        if let Some(env) = scene.environment_light.as_ref() {
+            let w = env.total_power().max(0.0);
+            if w > 0.0 {
+                entries.push(LightEntry {
+                    category: LightCategory::Environment,
+                    weight: w,
+                });
+            }
+        }
+
+        for (i, dir) in scene.directional_lights.iter().enumerate() {
+            let w = (sg::luminance(dir.color) * dir.intensity).max(0.0);
+            if w > 0.0 {
+                entries.push(LightEntry {
+                    category: LightCategory::Directional(i),
+                    weight: w,
+                });
+            }
+        }
 
         let mut cdf = Vec::with_capacity(entries.len() + 1);
-        cdf.push(0.0f32);
-        let mut total = 0.0f32;
+        cdf.push(0.0_f32);
+        let mut total = 0.0_f32;
         for entry in &entries {
             total += entry.weight;
             cdf.push(total);
@@ -148,26 +185,6 @@ impl LightSampler {
         }
     }
 
-    pub fn build_from_scene(scene: &Scene) -> Self {
-        let mut entries = Vec::new();
-        if scene.area_light_weight_sum > 0.0 {
-            entries.push((LightKind::Area, 1.0));
-        }
-        if scene.environment_light.is_some() {
-            entries.push((LightKind::Infinite, 1.0));
-        }
-        for i in 0..scene.point_lights.len() {
-            entries.push((LightKind::DeltaPoint(i), 1.0));
-        }
-        for i in 0..scene.directional_lights.len() {
-            entries.push((LightKind::DeltaDirectional(i), 1.0));
-        }
-        for i in 0..scene.spot_lights.len() {
-            entries.push((LightKind::DeltaSpot(i), 1.0));
-        }
-        Self::from_weighted_kinds(&entries)
-    }
-
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty() || self.total_weight <= 0.0
     }
@@ -176,7 +193,7 @@ impl LightSampler {
         self.entries.len()
     }
 
-    pub fn sample(&self, u: f32) -> Option<SampledLight> {
+    pub fn sample_category(&self, u: f32) -> Option<SampledCategory> {
         if self.is_empty() {
             return None;
         }
@@ -188,59 +205,174 @@ impl LightSampler {
             .saturating_sub(1)
             .min(last);
         let entry = self.entries[idx];
-        Some(SampledLight {
-            kind: entry.kind,
+        Some(SampledCategory {
+            category: entry.category,
             pmf: entry.weight / self.total_weight,
         })
     }
 
-    pub fn pmf(&self, kind: LightKind) -> f32 {
+    pub fn category_pmf(&self, category: LightCategory) -> f32 {
         if self.total_weight <= 0.0 {
             return 0.0;
         }
         self.entries
             .iter()
-            .find(|e| e.kind == kind)
+            .find(|e| e.category == category)
             .map(|e| e.weight / self.total_weight)
             .unwrap_or(0.0)
     }
 
-    pub fn contains(&self, kind: LightKind) -> bool {
-        self.entries.iter().any(|e| e.kind == kind)
+    pub fn contains(&self, category: LightCategory) -> bool {
+        self.entries.iter().any(|e| e.category == category)
     }
 
-    pub fn kinds(&self) -> impl Iterator<Item = LightKind> + '_ {
-        self.entries.iter().map(|e| e.kind)
+    pub fn categories(&self) -> impl Iterator<Item = LightCategory> + '_ {
+        self.entries.iter().map(|e| e.category)
     }
 }
 
-pub fn sample_light_li(
+/// Top-level NEE entry point. Picks a category, then samples a leaf inside.
+///
+/// `tree_query` must be present (and built via `light_tree::build_query`)
+/// when the surface has any non-delta lobe; if the query is `None`, the
+/// `Tree` category is skipped (we still try environment / directional).
+///
+/// Caller supplies four uniform samples:
+///   * `u_root`  — top-level category selection
+///   * `u_tree`  — hierarchical descent (only used by `Tree`; otherwise dead)
+///   * `u_aux`   — area-light triangle selection (only used by `Tree::Triangle`)
+///   * `us`      — 2-D barycentric / environment uv
+///
+/// Returns `None` if no light is selectable (e.g. empty scene or all
+/// importances zero from the shading point's perspective).
+pub fn sample_light(
     scene: &Scene,
-    kind: LightKind,
     ctx: &LightSampleContext,
+    tree_query: Option<&LightTreeQuery>,
+    u_root: f32,
+    u_tree: f32,
     u_aux: f32,
     us: Vec2,
-) -> Option<LightLiSample> {
-    match kind {
-        LightKind::Area => area::sample_li(scene, ctx, u_aux, us),
-        LightKind::Infinite => environment::sample_li(scene, us),
-        LightKind::DeltaPoint(i) => point::sample_li(&scene.point_lights[i], ctx),
-        LightKind::DeltaDirectional(i) => directional::sample_li(&scene.directional_lights[i]),
-        LightKind::DeltaSpot(i) => spot::sample_li(&scene.spot_lights[i], ctx),
+) -> Option<SampledLight> {
+    sample_light_inner(scene, ctx, tree_query, u_root, u_tree, u_aux, us, false)
+}
+
+pub fn sample_light_mis_compensated(
+    scene: &Scene,
+    ctx: &LightSampleContext,
+    tree_query: Option<&LightTreeQuery>,
+    u_root: f32,
+    u_tree: f32,
+    u_aux: f32,
+    us: Vec2,
+) -> Option<SampledLight> {
+    sample_light_inner(scene, ctx, tree_query, u_root, u_tree, u_aux, us, true)
+}
+
+fn sample_light_inner(
+    scene: &Scene,
+    ctx: &LightSampleContext,
+    tree_query: Option<&LightTreeQuery>,
+    u_root: f32,
+    u_tree: f32,
+    u_aux: f32,
+    us: Vec2,
+    mis_compensated: bool,
+) -> Option<SampledLight> {
+    let category = scene.light_sampler.sample_category(u_root)?;
+    match category.category {
+        LightCategory::Tree => {
+            let tree = scene.light_tree.as_ref()?;
+            let query = tree_query?;
+            let leaf = sample_light_tree(tree, query, u_tree)?;
+            let li = sample_li_for_leaf(scene, leaf.leaf, ctx, u_aux, us)?;
+            Some(SampledLight {
+                category: category.category,
+                leaf: Some(leaf.leaf),
+                sample: li,
+                selection_pmf: category.pmf * leaf.pmf,
+            })
+        }
+        LightCategory::Environment => {
+            let li = if mis_compensated {
+                environment::sample_li_mis_compensated(scene, us)?
+            } else {
+                environment::sample_li(scene, us)?
+            };
+            Some(SampledLight {
+                category: category.category,
+                leaf: None,
+                sample: li,
+                selection_pmf: category.pmf,
+            })
+        }
+        LightCategory::Directional(i) => {
+            let li = directional::sample_li(&scene.directional_lights[i])?;
+            Some(SampledLight {
+                category: category.category,
+                leaf: None,
+                sample: li,
+                selection_pmf: category.pmf,
+            })
+        }
     }
 }
 
-pub fn sample_light_li_mis_compensated(
+fn sample_li_for_leaf(
     scene: &Scene,
-    kind: LightKind,
+    leaf: LightTreeLeafKind,
     ctx: &LightSampleContext,
-    u_aux: f32,
+    _u_aux: f32,
     us: Vec2,
 ) -> Option<LightLiSample> {
-    match kind {
-        LightKind::Infinite => environment::sample_li_mis_compensated(scene, us),
-        _ => sample_light_li(scene, kind, ctx, u_aux, us),
+    match leaf {
+        LightTreeLeafKind::Triangle(tri) => area::sample_li_for_triangle(scene, tri, ctx, us),
+        LightTreeLeafKind::Point(PointLightIndex(i)) => {
+            point::sample_li(&scene.point_lights[i], ctx)
+        }
+        LightTreeLeafKind::Spot(SpotLightIndex(i)) => spot::sample_li(&scene.spot_lights[i], ctx),
     }
+}
+
+/// PDF of selecting a leaf via NEE that we *would have produced* at this
+/// shading point. Used by MIS for the BSDF-sampled-light path.
+///
+/// `light_type` is the leaf's logical light kind, needed to figure out the
+/// continuous PDF (solid-angle for area, env PDF for environment).
+pub fn pdf_for_triangle_hit(
+    scene: &Scene,
+    tree_query: Option<&LightTreeQuery>,
+    vtx: &ShadingVertex,
+    lvtx: &ShadingVertex,
+) -> f32 {
+    let Some(tree) = scene.light_tree.as_ref() else {
+        return 0.0;
+    };
+    let Some(query) = tree_query else {
+        return 0.0;
+    };
+    let leaf_pmf = pdf_for_leaf_kind(tree, query, LightTreeLeafKind::Triangle(lvtx.triangle));
+    if leaf_pmf <= 0.0 {
+        return 0.0;
+    }
+    let cat_pmf = scene.light_sampler.category_pmf(LightCategory::Tree);
+    let Some(area_pdf_solid_angle) = scene.area_light_pdf_solid_angle(vtx, lvtx) else {
+        return 0.0;
+    };
+    cat_pmf * leaf_pmf * area_pdf_solid_angle
+}
+
+pub fn pdf_for_environment_hit(scene: &Scene, direction: Vec3, mis_compensated: bool) -> f32 {
+    let cat_pmf = scene.light_sampler.category_pmf(LightCategory::Environment);
+    if cat_pmf <= 0.0 {
+        return 0.0;
+    }
+    let env_pdf = if mis_compensated {
+        infinite_light_pdf_li_mis_compensated(scene, direction)
+    } else {
+        infinite_light_pdf_li(scene, direction)
+    };
+    cat_pmf * env_pdf
 }
 
 #[cfg(test)]
@@ -281,159 +413,65 @@ mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use std::f32::consts::PI;
-
-    use glam::Vec3;
+    use super::*;
+    use crate::material::{EmissiveMaterial, Material};
+    use glam::Mat4;
 
     use super::test_helpers::{uniform_environment, unit_mesh};
-    use super::{DirectionalLight, LightKind, LightSampler, LightType, PointLight, SpotLight};
-    use crate::{
-        material::{EmissiveMaterial, Material},
-        scene::Scene,
-    };
 
     #[test]
-    fn light_type_delta_and_infinite_classification() {
+    fn light_type_classifications() {
         assert!(LightType::DeltaPosition.is_delta());
         assert!(LightType::DeltaDirection.is_delta());
-        assert!(!LightType::Area.is_delta());
-        assert!(!LightType::Infinite.is_delta());
-
-        assert!(!LightType::DeltaPosition.is_infinite());
         assert!(LightType::DeltaDirection.is_infinite());
-        assert!(!LightType::Area.is_infinite());
         assert!(LightType::Infinite.is_infinite());
+        assert!(!LightType::Area.is_delta());
     }
 
     #[test]
-    fn light_kind_maps_to_light_type() {
-        assert_eq!(LightKind::Area.light_type(), LightType::Area);
-        assert_eq!(LightKind::Infinite.light_type(), LightType::Infinite);
-        assert!(!LightKind::Area.is_delta());
-        assert!(LightKind::Infinite.is_infinite());
-    }
-
-    #[test]
-    fn light_kind_classifies_delta_variants_correctly() {
-        assert_eq!(
-            LightKind::DeltaPoint(0).light_type(),
-            LightType::DeltaPosition
-        );
-        assert_eq!(
-            LightKind::DeltaSpot(2).light_type(),
-            LightType::DeltaPosition
-        );
-        assert_eq!(
-            LightKind::DeltaDirectional(1).light_type(),
-            LightType::DeltaDirection
-        );
-
-        assert!(LightKind::DeltaPoint(0).is_delta());
-        assert!(LightKind::DeltaSpot(0).is_delta());
-        assert!(LightKind::DeltaDirectional(0).is_delta());
-        assert!(!LightKind::DeltaPoint(0).is_infinite());
-        assert!(!LightKind::DeltaSpot(0).is_infinite());
-        assert!(LightKind::DeltaDirectional(0).is_infinite());
-    }
-
-    #[test]
-    fn empty_sampler_returns_no_sample() {
+    fn empty_sampler() {
         let sampler = LightSampler::new();
         assert!(sampler.is_empty());
-        assert!(sampler.sample(0.5).is_none());
-        assert_eq!(sampler.pmf(LightKind::Area), 0.0);
+        assert!(sampler.sample_category(0.5).is_none());
+        assert_eq!(sampler.category_pmf(LightCategory::Tree), 0.0);
     }
 
     #[test]
-    fn uniform_sampler_across_two_kinds_returns_equal_pmf() {
-        let sampler = LightSampler::from_weighted_kinds(&[
-            (LightKind::Area, 1.0),
-            (LightKind::Infinite, 1.0),
-        ]);
-
-        assert_eq!(sampler.len(), 2);
-        assert!((sampler.pmf(LightKind::Area) - 0.5).abs() < 1.0e-6);
-        assert!((sampler.pmf(LightKind::Infinite) - 0.5).abs() < 1.0e-6);
-
-        let first = sampler.sample(0.1).unwrap();
-        let second = sampler.sample(0.9).unwrap();
-        assert_ne!(first.kind, second.kind);
-        assert!((first.pmf - 0.5).abs() < 1.0e-6);
-        assert!((second.pmf - 0.5).abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn weighted_sampler_biases_toward_heavy_kind() {
-        let sampler = LightSampler::from_weighted_kinds(&[
-            (LightKind::Area, 9.0),
-            (LightKind::Infinite, 1.0),
-        ]);
-        assert!((sampler.pmf(LightKind::Area) - 0.9).abs() < 1.0e-6);
-        assert!((sampler.pmf(LightKind::Infinite) - 0.1).abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn build_from_scene_includes_only_present_lights() {
+    fn build_from_scene_with_only_environment() {
         let mut scene = Scene::new();
-        let empty = LightSampler::build_from_scene(&scene);
-        assert!(empty.is_empty());
-
         scene.set_environment_light(uniform_environment(1.0));
-        let env_only = LightSampler::build_from_scene(&scene);
-        assert_eq!(env_only.len(), 1);
-        assert!(env_only.contains(LightKind::Infinite));
-        assert!(!env_only.contains(LightKind::Area));
-
-        let light_mesh = scene.add_mesh(unit_mesh(1.0));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 1.0)));
-        scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
-
-        let both = LightSampler::build_from_scene(&scene);
-        assert_eq!(both.len(), 2);
-        assert!(both.contains(LightKind::Area));
-        assert!(both.contains(LightKind::Infinite));
+        scene.build_light_tree();
+        let sampler = LightSampler::build_from_scene(&scene);
+        assert_eq!(sampler.len(), 1);
+        assert!(sampler.contains(LightCategory::Environment));
     }
 
     #[test]
-    fn build_from_scene_lists_each_delta_light_individually() {
+    fn build_from_scene_with_tree_and_env() {
         let mut scene = Scene::new();
-        scene.add_point_light(PointLight::new(Vec3::X, Vec3::ONE, 1.0));
-        scene.add_point_light(PointLight::new(Vec3::Y, Vec3::ONE, 1.0));
+        scene.set_environment_light(uniform_environment(1.0));
+        let mesh = scene.add_mesh(unit_mesh(1.0));
+        let mat = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 1.0)));
+        scene.add_instance(mesh, mat, Mat4::IDENTITY);
+        scene.build_light_tree();
+        let sampler = LightSampler::build_from_scene(&scene);
+        assert!(sampler.contains(LightCategory::Tree));
+        assert!(sampler.contains(LightCategory::Environment));
+    }
+
+    #[test]
+    fn directional_lights_each_get_their_own_entry() {
+        let mut scene = Scene::new();
         scene.add_directional_light(DirectionalLight::new(Vec3::NEG_Z, Vec3::ONE, 1.0));
-        scene.add_spot_light(SpotLight::new(
-            Vec3::ZERO,
-            Vec3::NEG_Z,
-            Vec3::ONE,
-            1.0,
-            PI / 6.0,
-            PI / 8.0,
-        ));
-
+        scene.add_directional_light(DirectionalLight::new(Vec3::NEG_X, Vec3::ONE, 2.0));
+        scene.build_light_tree();
         let sampler = LightSampler::build_from_scene(&scene);
-        assert_eq!(sampler.len(), 4);
-        assert!(sampler.contains(LightKind::DeltaPoint(0)));
-        assert!(sampler.contains(LightKind::DeltaPoint(1)));
-        assert!(sampler.contains(LightKind::DeltaDirectional(0)));
-        assert!(sampler.contains(LightKind::DeltaSpot(0)));
-        assert!((sampler.pmf(LightKind::DeltaPoint(0)) - 0.25).abs() < 1.0e-5);
-        assert!((sampler.pmf(LightKind::DeltaDirectional(0)) - 0.25).abs() < 1.0e-5);
-    }
-
-    #[test]
-    fn build_from_scene_mixes_area_environment_and_delta_lights() {
-        let mut scene = Scene::new();
-        scene.set_environment_light(uniform_environment(1.0));
-        let light_mesh = scene.add_mesh(unit_mesh(1.0));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 1.0)));
-        scene.add_instance(light_mesh, light_material, glam::Mat4::IDENTITY);
-        scene.add_point_light(PointLight::new(Vec3::Y, Vec3::splat(1.0), 2.0));
-
-        let sampler = LightSampler::build_from_scene(&scene);
-        assert_eq!(sampler.len(), 3);
-        assert!(sampler.contains(LightKind::Area));
-        assert!(sampler.contains(LightKind::Infinite));
-        assert!(sampler.contains(LightKind::DeltaPoint(0)));
+        assert_eq!(sampler.len(), 2);
+        assert!(sampler.contains(LightCategory::Directional(0)));
+        assert!(sampler.contains(LightCategory::Directional(1)));
+        // Heavier light has bigger pmf.
+        let p0 = sampler.category_pmf(LightCategory::Directional(0));
+        let p1 = sampler.category_pmf(LightCategory::Directional(1));
+        assert!(p1 > p0);
     }
 }

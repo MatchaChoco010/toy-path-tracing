@@ -24,7 +24,7 @@ pub fn create_scene_1() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn
     let green = scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial::new(
         Vec3::new(0.14, 0.45, 0.091),
     )));
-    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 20.0)));
+    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
 
     let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
     scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);
@@ -78,6 +78,7 @@ pub fn create_scene_1() -> Result<(Scene, crate::camera::PinholeCamera), Box<dyn
         Vec3::new(0.0, 1.40, -0.05),
         Vec3::Y,
         38.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

@@ -11,6 +11,7 @@ pub struct PinholeCamera {
     pub look_at: Vec3,
     pub up: Vec3,
     pub fov_y: f32,
+    pub exposure: f32,
     forward: Vec3,
     right: Vec3,
     image_up: Vec3,
@@ -18,7 +19,7 @@ pub struct PinholeCamera {
 }
 
 impl PinholeCamera {
-    pub fn new(eye: Vec3, look_at: Vec3, up: Vec3, fov_y: f32) -> Self {
+    pub fn new(eye: Vec3, look_at: Vec3, up: Vec3, fov_y: f32, exposure: f32) -> Self {
         let forward = (look_at - eye).normalize();
         let right = forward.cross(up).normalize();
         let image_up = right.cross(forward).normalize();
@@ -29,6 +30,7 @@ impl PinholeCamera {
             look_at,
             up,
             fov_y,
+            exposure,
             forward,
             right,
             image_up,
@@ -106,6 +108,7 @@ mod tests {
             Vec3::ZERO,
             Vec3::Y,
             60.0_f32.to_radians(),
+            1.0,
         );
 
         let ray = camera.generate_ray(UVec2::new(3, 3), UVec2::new(1, 1), Vec2::splat(0.5));
@@ -121,6 +124,7 @@ mod tests {
             Vec3::ZERO,
             Vec3::Y,
             45.0_f32.to_radians(),
+            1.0,
         );
 
         let ray = camera.generate_ray(UVec2::new(512, 512), UVec2::new(0, 0), Vec2::splat(0.5));
@@ -135,6 +139,7 @@ mod tests {
             Vec3::ZERO,
             Vec3::Y,
             45.0_f32.to_radians(),
+            1.0,
         );
 
         let ray = camera.generate_ray_differential(

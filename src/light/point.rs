@@ -30,7 +30,7 @@ impl PointLight {
     }
 }
 
-pub(super) fn sample_li(light: &PointLight, ctx: &LightSampleContext) -> Option<LightLiSample> {
+pub fn sample_li(light: &PointLight, ctx: &LightSampleContext) -> Option<LightLiSample> {
     let to_light = light.position - ctx.p;
     let distance_squared = to_light.length_squared();
     if distance_squared <= 0.0 {
@@ -55,30 +55,24 @@ pub(super) fn sample_li(light: &PointLight, ctx: &LightSampleContext) -> Option<
 mod tests {
     use std::f32::consts::PI;
 
-    use glam::{Vec2, Vec3};
+    use glam::Vec3;
 
-    use super::super::{LightKind, LightSampleContext, LightType, sample_light_li};
+    use super::super::{LightSampleContext, LightType};
     use super::PointLight;
-    use crate::scene::Scene;
+    use super::sample_li;
 
     #[test]
     fn point_light_sample_returns_inverse_square_radiance() {
-        let mut scene = Scene::new();
         // Pick power so the expected Li is numerically simple: at r=2, Li = P / (4π·4).
         // P = 16π -> Li = 1.
-        scene.add_point_light(PointLight::new(
-            Vec3::new(0.0, 0.0, 2.0),
-            Vec3::ONE,
-            16.0 * PI,
-        ));
+        let light = PointLight::new(Vec3::new(0.0, 0.0, 2.0), Vec3::ONE, 16.0 * PI);
 
         let ctx = LightSampleContext {
             p: Vec3::ZERO,
             ng: Vec3::Z,
             ns: Vec3::Z,
         };
-        let li = sample_light_li(&scene, LightKind::DeltaPoint(0), &ctx, 0.0, Vec2::ZERO)
-            .expect("point light must sample");
+        let li = sample_li(&light, &ctx).expect("point light must sample");
 
         assert_eq!(li.light_type, LightType::DeltaPosition);
         assert!(li.target_triangle.is_none());
@@ -90,33 +84,29 @@ mod tests {
 
     #[test]
     fn point_light_sample_scales_by_color() {
-        let mut scene = Scene::new();
-        scene.add_point_light(PointLight::new(
+        let light = PointLight::new(
             Vec3::new(0.0, 0.0, 1.0),
             Vec3::new(1.0, 0.5, 0.25),
-            4.0 * PI, // P chosen so that Li at r=1 equals color.
-        ));
+            4.0 * PI,
+        );
         let ctx = LightSampleContext {
             p: Vec3::ZERO,
             ng: Vec3::Z,
             ns: Vec3::Z,
         };
-        let li = sample_light_li(&scene, LightKind::DeltaPoint(0), &ctx, 0.0, Vec2::ZERO)
-            .expect("point light must sample");
+        let li = sample_li(&light, &ctx).expect("point light must sample");
         assert!(li.radiance.abs_diff_eq(Vec3::new(1.0, 0.5, 0.25), 1.0e-5));
     }
 
     #[test]
     fn point_light_sample_returns_none_when_sharing_position() {
-        let mut scene = Scene::new();
-        scene.add_point_light(PointLight::new(Vec3::ZERO, Vec3::ONE, 4.0));
-
+        let light = PointLight::new(Vec3::ZERO, Vec3::ONE, 4.0);
         let ctx = LightSampleContext {
             p: Vec3::ZERO,
             ng: Vec3::Z,
             ns: Vec3::Z,
         };
-        let li = sample_light_li(&scene, LightKind::DeltaPoint(0), &ctx, 0.0, Vec2::ZERO);
+        let li = sample_li(&light, &ctx);
         assert!(li.is_none());
     }
 }

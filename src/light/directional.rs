@@ -31,7 +31,7 @@ impl DirectionalLight {
     }
 }
 
-pub(super) fn sample_li(light: &DirectionalLight) -> Option<LightLiSample> {
+pub fn sample_li(light: &DirectionalLight) -> Option<LightLiSample> {
     Some(LightLiSample {
         radiance: light.color * light.intensity,
         wi: -light.direction,
@@ -44,34 +44,16 @@ pub(super) fn sample_li(light: &DirectionalLight) -> Option<LightLiSample> {
 
 #[cfg(test)]
 mod tests {
-    use glam::{Vec2, Vec3};
+    use glam::Vec3;
 
-    use super::super::{LightKind, LightSampleContext, LightType, sample_light_li};
+    use super::super::LightType;
     use super::DirectionalLight;
-    use crate::scene::Scene;
+    use super::sample_li;
 
     #[test]
     fn directional_light_sample_returns_irradiance_at_infinity() {
-        let mut scene = Scene::new();
-        scene.add_directional_light(DirectionalLight::new(
-            Vec3::new(0.0, 0.0, -1.0),
-            Vec3::ONE,
-            3.0,
-        ));
-
-        let ctx = LightSampleContext {
-            p: Vec3::new(5.0, 7.0, 11.0),
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-        };
-        let li = sample_light_li(
-            &scene,
-            LightKind::DeltaDirectional(0),
-            &ctx,
-            0.0,
-            Vec2::ZERO,
-        )
-        .expect("directional light must sample");
+        let light = DirectionalLight::new(Vec3::new(0.0, 0.0, -1.0), Vec3::ONE, 3.0);
+        let li = sample_li(&light).expect("directional light must sample");
 
         assert_eq!(li.light_type, LightType::DeltaDirection);
         assert_eq!(li.pdf, 1.0);
@@ -82,25 +64,8 @@ mod tests {
 
     #[test]
     fn directional_light_sample_scales_by_color() {
-        let mut scene = Scene::new();
-        scene.add_directional_light(DirectionalLight::new(
-            Vec3::NEG_Z,
-            Vec3::new(0.2, 0.6, 1.0),
-            5.0,
-        ));
-        let ctx = LightSampleContext {
-            p: Vec3::ZERO,
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-        };
-        let li = sample_light_li(
-            &scene,
-            LightKind::DeltaDirectional(0),
-            &ctx,
-            0.0,
-            Vec2::ZERO,
-        )
-        .expect("directional light must sample");
+        let light = DirectionalLight::new(Vec3::NEG_Z, Vec3::new(0.2, 0.6, 1.0), 5.0);
+        let li = sample_li(&light).expect("directional light must sample");
         assert!(li.radiance.abs_diff_eq(Vec3::new(1.0, 3.0, 5.0), 1.0e-5));
     }
 

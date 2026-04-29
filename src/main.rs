@@ -8,7 +8,9 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use toy_path_tracing::{integrator::IntegratorKind, math::reinhard, scenes::load_scene};
+use toy_path_tracing::{
+    color::linear_to_srgb, integrator::IntegratorKind, math::reinhard, scenes::load_scene,
+};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -32,23 +34,24 @@ struct Args {
 
     #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
-
-    #[arg(long = "env-scale", default_value_t = 1.0)]
-    env_scale: f32,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let resolution = UVec2::new(args.width, args.height);
     let (mut scene, camera) = load_scene(args.scene)?;
-    if let Some(env) = scene.environment_light.as_mut() {
-        let new_scale = env.scale() * args.env_scale;
-        env.set_scale(new_scale);
-    }
-    let build_qbvh_start = Instant::now();
+    let build_bvh_start = Instant::now();
     scene.build_qbvh();
-    println!("build_qbvh: {}", format_duration(build_qbvh_start.elapsed()));
+    println!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
 
+    let build_light_tree_start = Instant::now();
+    scene.build_light_tree();
+    println!(
+        "build_light_tree: {}",
+        format_duration(build_light_tree_start.elapsed())
+    );
+
+    let exposure = camera.exposure;
     let mut pixels = vec![0_u8; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();
     pixels
@@ -68,12 +71,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 color += (sample - color) / sample_count;
             }
 
-            let mapped = reinhard(color);
-            pixel[0] = float_to_u8(mapped.x);
-            pixel[1] = float_to_u8(mapped.y);
-            pixel[2] = float_to_u8(mapped.z);
+            let exposed = color * exposure;
+            let mapped = reinhard(exposed);
+            let encoded = linear_to_srgb(mapped);
+            pixel[0] = float_to_u8(encoded.x);
+            pixel[1] = float_to_u8(encoded.y);
+            pixel[2] = float_to_u8(encoded.z);
         });
-    println!("intersect: {}", format_duration(intersect_start.elapsed()));
+    println!("render: {}", format_duration(intersect_start.elapsed()));
 
     let image = RgbImage::from_raw(resolution.x, resolution.y, pixels)
         .expect("pixel buffer size must match the image resolution");

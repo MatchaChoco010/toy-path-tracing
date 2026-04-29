@@ -99,7 +99,7 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
 
     let env = EnvironmentLight::from_hdr_file(
         "assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr",
-        1.0,
+        0.5,
         1.2,
     )?;
     scene.set_environment_light(env);
@@ -109,6 +109,7 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.0, 0.95, 0.0),
         Vec3::Y,
         50.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

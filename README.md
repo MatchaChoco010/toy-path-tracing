@@ -45,7 +45,6 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `--spp <SPP>` | `32` | Samples Per Pixel。各ピクセルで何本のパスを積分するかを指定します。`1` 以上のみ指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上のみ指定できます。 |
 | `-i, --integrator <INTEGRATOR>` | `mis` | 使用する integrator を指定します。現在は `mis`、`pt`、`nee` を選べます。存在しない名前を指定するとエラーになります。 |
-| `--env-scale <ENV_SCALE>` | `1.0` | 環境光 (HDRI) の強度倍率です。シーンが環境光を持っている場合、ロード時の scale にこの値を乗算します。環境光が無いシーンでは効果はありません。 |
 | `-h, --help` | なし | ヘルプを表示します。 |
 
 ## 現在のシーン番号
@@ -78,7 +77,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `21` | scene 20 の SimplePBR ドラゴンに加えて、roughness `0.4` の金色 Conductor GGX バニー、`Glass` 球、薄青の NormalizedLambert バニーを並べ、同じ puresky 環境で照らすマテリアル比較シーンです。 |
 | `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel (約 561 万 triangles) を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす建築シーンです。OBJ のマテリアルは原則 SimplePBR、`d < 1` か `illum 4` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けて読み込みます。`map_Kd` PNG が alpha matte を含む場合はその alpha チャンネルを `opacity_texture` に渡し、植物の葉などをアルファカットアウトで描画します。アセットは `bash assets/download.sh` で取得します。 |
 | `23` | `assets/san_miguel_2.0/san-miguel.obj` の通常版 San Miguel (約 998 万 triangles) を puresky 環境光で照らす建築シーンです。マテリアル割り当てやカメラ設定、アルファカットアウトの扱いは scene 22 と同じ方針ですが、コードは `scene_23.rs` として独立に持ちます。アセットは `bash assets/download.sh` で取得します。 |
-| `24` | `assets/bistro/Exterior/exterior.obj` と `assets/bistro/Interior/interior.obj` を結合した Amazon Lumberyard Bistro (3,858,116 triangles、うち emissive 14 メッシュ・21,896 triangles) を、Sky 環境光なしでシーン中の emissive ポリゴンだけを光源として描画する夜のビストロシーンです。マテリアルは原則 SimplePBR、`d < 1` か `illum 4/6/7/9` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けます。アセットは `bash assets/download.sh` で取得します。 |
+| `24` | `assets/bistro/Exterior/exterior.obj` と `assets/bistro/Interior/interior.obj` を結合した Amazon Lumberyard Bistro を、Sky 環境光なしでシーン中の emissive ポリゴンだけを光源として描画する夜のビストロシーンです。マテリアルは原則 SimplePBR、`d < 1` か `illum 4/6/7/9` の透明系は DielectricGgx に振り分けます。Emissive は `Ke` の linear 値が `1.0` 以上の場合と、`Ke == 0` でも `map_Ke` が指定されている場合に割り当て、`map_Ke` テクスチャを `EmissiveMaterial` の `color_texture` として使います。窓ガラスのように `Ke` が弱いだけのマテリアルは SimplePBR にフォールバックします。アセットは `bash assets/download.sh` で取得します。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

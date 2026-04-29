@@ -22,7 +22,7 @@ pub fn create_scene_9() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let green = scene.add_material(Material::NormalizedLambert(NormalizedLambertMaterial::new(
         Vec3::new(0.14, 0.45, 0.091),
     )));
-    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 20.0)));
+    let light = scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
 
     let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
     scene.add_instance(floor_mesh_index, wall_gray, Mat4::IDENTITY);
@@ -58,7 +58,7 @@ pub fn create_scene_9() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         * Mat4::from_translation(-bunny_pivot);
     scene.add_instance(bunny_mesh_index, metal_material, bunny_transform);
 
-    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 1.5, 0.0)?;
+    let env = EnvironmentLight::from_hdr_file("assets/sky/brown_photostudio_02_4k.hdr", 1.0, 0.0)?;
     scene.set_environment_light(env);
 
     let camera = PinholeCamera::new(
@@ -66,6 +66,7 @@ pub fn create_scene_9() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.0, 1.60, 0.0),
         Vec3::Y,
         42.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

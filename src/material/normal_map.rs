@@ -41,7 +41,7 @@ impl NormalMap {
     }
 
     fn local_normal_at(&self, shading_vertex: &ShadingVertex, strength: f32) -> Vec3 {
-        let rgb = self.texture.sample_rgb_filtered(
+        let rgb = self.texture.sample_filtered(
             shading_vertex.uv,
             shading_vertex.uv_dx(),
             shading_vertex.uv_dy(),

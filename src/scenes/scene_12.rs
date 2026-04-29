@@ -85,13 +85,13 @@ pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     scene.add_point_light(PointLight::new(
         Vec3::new(-1.3, 2.6, -0.6),
         Vec3::new(1.0, 0.72, 0.45),
-        280.0,
+        140.0,
     ));
     // Cool point light near the upper-right back corner.
     scene.add_point_light(PointLight::new(
         Vec3::new(1.4, 2.6, -0.2),
         Vec3::new(0.65, 0.80, 1.0),
-        220.0,
+        110.0,
     ));
 
     // Magenta spot light aimed at the bunny from the front-left.
@@ -101,7 +101,7 @@ pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         spot_a_pos,
         (bunny_focus - spot_a_pos).normalize(),
         Vec3::new(1.0, 0.4, 0.85),
-        600.0,
+        300.0,
         (26.0_f32).to_radians(),
         (14.0_f32).to_radians(),
     ));
@@ -111,7 +111,7 @@ pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         spot_b_pos,
         (bunny_focus - spot_b_pos).normalize(),
         Vec3::new(0.35, 0.95, 0.85),
-        600.0,
+        300.0,
         (22.0_f32).to_radians(),
         (12.0_f32).to_radians(),
     ));
@@ -121,6 +121,7 @@ pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.0, 1.45, -0.05),
         Vec3::Y,
         38.0_f32.to_radians(),
+        1.0,
     );
 
     Ok((scene, camera))

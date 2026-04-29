@@ -3,7 +3,8 @@ use rand::RngExt;
 
 use crate::{
     bsdf::BsdfFlags,
-    light::{LightSampleContext, infinite_light_le, sample_light_li},
+    light::{LightSampleContext, infinite_light_le, sample_light},
+    light_tree,
     material::{Material, ShadingVertex},
     math::russian_roulette_probability,
     ray::Ray,
@@ -49,18 +50,13 @@ pub fn trace_radiance(
         let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
 
         if should_sample_direct_light(material, sample.flags) {
-            let u_light_select = rng.random::<f32>();
+            let u_root = rng.random::<f32>();
+            let u_tree = rng.random::<f32>();
             let u_aux = rng.random::<f32>();
             let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
             radiance += throughput
                 * direct_light_nee_contribution(
-                    scene,
-                    material,
-                    &vtx,
-                    u_light_select,
-                    u_aux,
-                    us,
-                    rng,
+                    scene, material, &vtx, u_root, u_tree, u_aux, us, rng,
                 );
         }
 
@@ -89,21 +85,22 @@ pub(super) fn direct_light_nee_contribution(
     scene: &Scene,
     material: &Material,
     vtx: &ShadingVertex,
-    u_light_select: f32,
+    u_root: f32,
+    u_tree: f32,
     u_aux: f32,
     us: Vec2,
     rng: &mut rand::rngs::ThreadRng,
 ) -> Vec3 {
-    let Some(sampled_light) = scene.light_sampler.sample(u_light_select) else {
-        return Vec3::ZERO;
-    };
-
     let ctx = LightSampleContext::from_vertex(vtx);
-    let Some(li) = sample_light_li(scene, sampled_light.kind, &ctx, u_aux, us) else {
+    let tree_query = light_tree::build_query(vtx, material);
+
+    let Some(sampled) = sample_light(scene, &ctx, tree_query.as_ref(), u_root, u_tree, u_aux, us)
+    else {
         return Vec3::ZERO;
     };
+    let li = sampled.sample;
 
-    if li.pdf <= 0.0 {
+    if li.pdf <= 0.0 || sampled.selection_pmf <= 0.0 {
         return Vec3::ZERO;
     }
 
@@ -121,7 +118,7 @@ pub(super) fn direct_light_nee_contribution(
         return Vec3::ZERO;
     }
 
-    let pdf_total = sampled_light.pmf * li.pdf;
+    let pdf_total = sampled.selection_pmf * li.pdf;
     if pdf_total <= 0.0 {
         return Vec3::ZERO;
     }
@@ -210,6 +207,7 @@ mod tests {
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -219,8 +217,16 @@ mod tests {
         let material = scene.instance_material(InstanceIndex(0));
         // With only a single area light the sampler always selects it (pmf=1),
         // so the estimator reduces to the classic direct-light formula.
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5), &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.0,
+            0.0,
+            0.5,
+            Vec2::new(0.25, 0.5),
+            &mut rand::rng(),
+        );
 
         assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-5));
     }
@@ -243,6 +249,7 @@ mod tests {
         scene.add_instance(blocker_mesh, blocker_material, Mat4::IDENTITY);
         scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -250,8 +257,16 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.5, Vec2::new(0.25, 0.5), &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.0,
+            0.0,
+            0.5,
+            Vec2::new(0.25, 0.5),
+            &mut rand::rng(),
+        );
 
         assert_eq!(radiance, Vec3::ZERO);
     }
@@ -268,6 +283,7 @@ mod tests {
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -279,8 +295,16 @@ mod tests {
         // selects a direction roughly aligned with the surface normal so the
         // cos_theta factor is positive (env uses +Y up, surface normal is +Z
         // via spherical sampling the direction with u=0 and v=0.5 maps to +Z).
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.5, 0.0, Vec2::new(0.0, 0.5), &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.5,
+            0.0,
+            0.0,
+            Vec2::new(0.0, 0.5),
+            &mut rand::rng(),
+        );
 
         assert!(radiance.x > 0.0);
         assert!(radiance.y > 0.0);
@@ -301,6 +325,7 @@ mod tests {
             16.0 * PI,
         ));
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -308,8 +333,16 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.0,
+            0.0,
+            0.0,
+            Vec2::ZERO,
+            &mut rand::rng(),
+        );
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -328,6 +361,7 @@ mod tests {
             2.0,
         ));
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -335,8 +369,16 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.0,
+            0.0,
+            0.0,
+            Vec2::ZERO,
+            &mut rand::rng(),
+        );
         let expected = 2.0 * 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -359,6 +401,7 @@ mod tests {
             (20.0_f32).to_radians(),
         ));
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -366,8 +409,16 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.0,
+            0.0,
+            0.0,
+            Vec2::ZERO,
+            &mut rand::rng(),
+        );
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
     }
@@ -391,6 +442,7 @@ mod tests {
             2.0,
         ));
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let vtx = scene.shading_vertex_from_triangle_sample(
             triangle_ref(0),
@@ -398,8 +450,16 @@ mod tests {
             Vec3::NEG_Z,
         );
         let material = scene.instance_material(InstanceIndex(0));
-        let radiance =
-            direct_light_nee_contribution(&scene, material, &vtx, 0.0, 0.0, Vec2::ZERO, &mut rand::rng());
+        let radiance = direct_light_nee_contribution(
+            &scene,
+            material,
+            &vtx,
+            0.0,
+            0.0,
+            0.0,
+            Vec2::ZERO,
+            &mut rand::rng(),
+        );
         assert_eq!(radiance, Vec3::ZERO);
     }
 
@@ -410,6 +470,7 @@ mod tests {
         let pixels = vec![env_radiance; 16 * 8];
         scene.set_environment_light(EnvironmentLight::from_pixels(16, 8, pixels, 1.0, 0.0));
         scene.build_qbvh();
+        scene.build_light_tree();
 
         let mut rng = rand::rng();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);

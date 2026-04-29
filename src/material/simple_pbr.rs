@@ -9,8 +9,10 @@ use crate::bsdf::{
 };
 
 use super::{
-    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_texture,
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    TextureColorSpace,
+    normal_map::load_optional_normal_map,
+    texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -23,12 +25,12 @@ pub struct SimplePbrMaterial {
     pub base_color: Vec3,
     pub anisotropy: f32,
     pub base_color_texture: Option<Arc<Texture>>,
-    pub metallic_texture: Option<Arc<Texture>>,
-    pub roughness_texture: Option<Arc<Texture>>,
+    pub metallic_texture: Option<Arc<ScalarTexture>>,
+    pub roughness_texture: Option<Arc<ScalarTexture>>,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
-    pub opacity_texture: Option<Arc<Texture>>,
+    pub opacity_texture: Option<Arc<ScalarTexture>>,
     dielectric_ggx_directional_albedo_lut: Option<Arc<DielectricGgxDirectionalAlbedoLut>>,
 }
 
@@ -68,18 +70,12 @@ impl SimplePbrMaterial {
             eta: sanitize_dielectric_eta(eta),
             base_color,
             anisotropy,
-            base_color_texture: load_optional_texture(
+            base_color_texture: load_optional_color_texture(
                 base_color_texture_path,
                 TextureColorSpace::Srgb,
             )?,
-            metallic_texture: load_optional_texture(
-                metallic_texture_path,
-                TextureColorSpace::Linear,
-            )?,
-            roughness_texture: load_optional_texture(
-                roughness_texture_path,
-                TextureColorSpace::Linear,
-            )?,
+            metallic_texture: load_optional_scalar_texture(metallic_texture_path)?,
+            roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -93,7 +89,7 @@ impl SimplePbrMaterial {
             .opacity_texture
             .as_ref()
             .map(|texture| {
-                texture.sample_scalar_filtered(
+                texture.sample_filtered(
                     shading_vertex.uv,
                     shading_vertex.uv_dx(),
                     shading_vertex.uv_dy(),
@@ -354,13 +350,101 @@ impl SimplePbrMaterial {
         }
     }
 
+    /// Per-shading-point precompute for the hierarchical light tree.
+    /// SimplePBR layers diffuse + glossy + dielectric BTDF (when not
+    /// metallic). All three lobes contribute additively to the importance,
+    /// in line with the multi-lobe guidance in `light_tree::lobe`.
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<crate::light_tree::LightTreePrecompute> {
+        let base = self.base_color_at(shading_vertex);
+        let metallic = self.metallic_at(shading_vertex);
+
+        // Diffuse weight = base * (1 - metallic) (Lambert layer).
+        let rho_d = crate::math::sg::luminance(base * (1.0 - metallic));
+        let diffuse = if rho_d > 0.0 {
+            Some(crate::light_tree::DiffuseLobePrecompute { rho: rho_d })
+        } else {
+            None
+        };
+
+        // Glossy weight = metallic * base + (1 - metallic) * F0(0.04).
+        let rho_s =
+            crate::math::sg::luminance(base * metallic + Vec3::splat(0.04) * (1.0 - metallic));
+        let alpha = alpha_xy_from_roughness(self.roughness_at(shading_vertex), self.anisotropy);
+        let glossy = crate::light_tree::make_glossy_lobe(
+            rho_s,
+            shading_vertex.frame,
+            shading_vertex.wo,
+            alpha.0,
+            alpha.1,
+        );
+
+        // BTDF (only meaningful when not fully metallic).
+        let btdf = if metallic < 0.999 {
+            let lum = crate::math::sg::luminance(base);
+            let rho_t = (1.0 - metallic) * lum * 0.5;
+            if rho_t > 0.0 {
+                let eta_rel = if shading_vertex.front_face {
+                    1.0 / self.eta
+                } else {
+                    self.eta
+                };
+                crate::light_tree::make_btdf_lobe(
+                    rho_t,
+                    shading_vertex.frame,
+                    shading_vertex.wo,
+                    alpha.0,
+                    alpha.1,
+                    eta_rel,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if diffuse.is_none() && glossy.is_none() && btdf.is_none() {
+            return None;
+        }
+        Some(crate::light_tree::LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse,
+            glossy,
+            btdf,
+        })
+    }
+
+    pub fn light_tree_importance(
+        &self,
+        precompute: &crate::light_tree::LightTreePrecompute,
+        w: f32,
+        lobe: &crate::math::sg::SgLobe,
+    ) -> f32 {
+        let mut imp = 0.0;
+        if let Some(d) = precompute.diffuse {
+            imp += crate::light_tree::diffuse_importance(d, precompute.n, w, lobe);
+        }
+        if let Some(g) = precompute.glossy {
+            imp += crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe);
+        }
+        if let Some(b) = precompute.btdf {
+            imp += crate::light_tree::btdf_importance(b, precompute.frame, precompute.n, w, lobe);
+        }
+        imp.max(0.0)
+    }
+
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
         self.base_color
             * self
                 .base_color_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_rgb_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -375,7 +459,7 @@ impl SimplePbrMaterial {
                 .roughness_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
@@ -390,7 +474,7 @@ impl SimplePbrMaterial {
                 .metallic_texture
                 .as_ref()
                 .map(|texture| {
-                    texture.sample_scalar_filtered(
+                    texture.sample_filtered(
                         shading_vertex.uv,
                         shading_vertex.uv_dx(),
                         shading_vertex.uv_dy(),
