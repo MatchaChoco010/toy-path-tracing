@@ -6,6 +6,11 @@ use rand::rngs::ThreadRng;
 use crate::{
     bsdf::{BsdfFlags, DisneyBrdfBsdf},
     color::srgb_to_linear,
+    light_tree::{
+        DiffuseLobePrecompute, LightTreePrecompute, diffuse_importance, glossy_importance,
+        make_glossy_lobe, merge_glossy_roughness,
+    },
+    math::sg,
 };
 
 use super::{
@@ -301,6 +306,107 @@ impl DisneyBrdfMaterial {
         0.0
     }
 
+    pub fn light_tree_precompute(
+        &self,
+        shading_vertex: &ShadingVertex,
+    ) -> Option<LightTreePrecompute> {
+        let base_color = self
+            .base_color_at(shading_vertex)
+            .clamp(Vec3::ZERO, Vec3::ONE);
+        let metallic = self.metallic_at(shading_vertex).clamp(0.0, 1.0);
+        let roughness = self.roughness_at(shading_vertex).clamp(0.0, 1.0);
+        let specular = self.specular.clamp(0.0, 1.0);
+        let specular_tint = self.specular_tint.clamp(0.0, 1.0);
+        let anisotropic = self.anisotropic.clamp(0.0, 1.0);
+        let clearcoat = self.clearcoat.clamp(0.0, 1.0);
+        let clearcoat_gloss = self.clearcoat_gloss.clamp(0.0, 1.0);
+
+        let rho_d = sg::luminance(base_color) * (1.0 - metallic);
+        let diffuse = if rho_d > 0.0 {
+            Some(DiffuseLobePrecompute { rho: rho_d })
+        } else {
+            None
+        };
+
+        let lum = sg::luminance(base_color);
+        let c_tint = if lum > 0.0 {
+            base_color / lum
+        } else {
+            Vec3::ONE
+        };
+        let dielectric_f0 = 0.08 * specular * Vec3::ONE.lerp(c_tint, specular_tint);
+        let c_spec0 = dielectric_f0.lerp(base_color, metallic);
+        let rho_s_primary = sg::luminance(c_spec0).max(0.0);
+        let rho_s_cc = 0.25 * clearcoat * 0.04;
+
+        let alpha = roughness * roughness;
+        let aspect = (1.0 - 0.9 * anisotropic).sqrt();
+        let alpha_primary_x = (alpha / aspect).max(1.0e-3);
+        let alpha_primary_y = (alpha * aspect).max(1.0e-3);
+        let alpha_cc = (0.1 * (1.0 - clearcoat_gloss) + 0.001 * clearcoat_gloss).max(1.0e-3);
+
+        let glossy = match (rho_s_primary > 0.0, rho_s_cc > 0.0) {
+            (true, true) => {
+                let (alpha_x, alpha_y) = merge_glossy_roughness(
+                    rho_s_primary,
+                    (alpha_primary_x, alpha_primary_y),
+                    rho_s_cc,
+                    (alpha_cc, alpha_cc),
+                );
+                make_glossy_lobe(
+                    rho_s_primary + rho_s_cc,
+                    shading_vertex.frame,
+                    shading_vertex.wo,
+                    alpha_x,
+                    alpha_y,
+                )
+            }
+            (true, false) => make_glossy_lobe(
+                rho_s_primary,
+                shading_vertex.frame,
+                shading_vertex.wo,
+                alpha_primary_x,
+                alpha_primary_y,
+            ),
+            (false, true) => make_glossy_lobe(
+                rho_s_cc,
+                shading_vertex.frame,
+                shading_vertex.wo,
+                alpha_cc,
+                alpha_cc,
+            ),
+            (false, false) => None,
+        };
+
+        if diffuse.is_none() && glossy.is_none() {
+            return None;
+        }
+        Some(LightTreePrecompute {
+            p: shading_vertex.p,
+            n: shading_vertex.ns,
+            frame: shading_vertex.frame,
+            diffuse,
+            glossy,
+            btdf: None,
+        })
+    }
+
+    pub fn light_tree_importance(
+        &self,
+        precompute: &LightTreePrecompute,
+        w: f32,
+        lobe: &sg::SgLobe,
+    ) -> f32 {
+        let mut imp = 0.0;
+        if let Some(d) = precompute.diffuse {
+            imp += diffuse_importance(d, precompute.n, w, lobe);
+        }
+        if let Some(g) = precompute.glossy {
+            imp += glossy_importance(g, precompute.frame, precompute.n, w, lobe);
+        }
+        imp.max(0.0)
+    }
+
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
         srgb_to_linear(self.base_color)
             * self
@@ -408,4 +514,28 @@ mod tests {
         assert!(f.length() > 0.0);
     }
 
+    #[test]
+    fn light_tree_precompute_is_some_for_default() {
+        let material = DisneyBrdfMaterial::new(Vec3::new(0.82, 0.67, 0.16));
+        let vtx = test_shading_vertex(Vec3::Z);
+        let pre = material.light_tree_precompute(&vtx);
+        assert!(pre.is_some());
+        let pre = pre.unwrap();
+        assert!(pre.diffuse.is_some());
+        assert!(pre.glossy.is_some());
+        assert!(pre.btdf.is_none());
+    }
+
+    #[test]
+    fn light_tree_precompute_pure_metallic_drops_diffuse() {
+        let material = DisneyBrdfMaterial::new(Vec3::new(0.95, 0.78, 0.35))
+            .with_metallic(1.0)
+            .with_roughness(0.3);
+        let vtx = test_shading_vertex(Vec3::Z);
+        let pre = material
+            .light_tree_precompute(&vtx)
+            .expect("precompute should be Some for metallic case");
+        assert!(pre.diffuse.is_none());
+        assert!(pre.glossy.is_some());
+    }
 }

@@ -175,9 +175,6 @@ impl NormalizedLambertMaterial {
         0.0
     }
 
-    /// Per-shading-point precompute for the hierarchical light tree.
-    /// Lambert has only a diffuse lobe, weighted by the (textured) albedo
-    /// luminance.
     pub fn light_tree_precompute(
         &self,
         shading_vertex: &ShadingVertex,
@@ -196,7 +193,6 @@ impl NormalizedLambertMaterial {
         })
     }
 
-    /// Convolve the SG light with the diffuse lobe.
     pub fn light_tree_importance(
         &self,
         precompute: &crate::light_tree::LightTreePrecompute,

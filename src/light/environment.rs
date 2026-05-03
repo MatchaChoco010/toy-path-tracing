@@ -122,12 +122,12 @@ impl EnvironmentLight {
         &self.pixels
     }
 
-    /// Coarse total radiated power. Used by the top-level light category CDF
-    /// to weigh `EnvironmentLight` against the SG light tree and the
-    /// directional lights. Not radiometrically exact (it ignores the constant
-    /// pre-factor of the texel solid-angle integral) but proportional to it.
+    /// Total radiance integrated over the unit sphere, `∫ L(ω) dω`,
+    /// scaled by `self.scale`. Comparable in units to a directional light's
+    /// `intensity * luminance(color)` for the top-level light category CDF.
     pub fn total_power(&self) -> f32 {
-        self.distribution.total_weight * self.scale
+        let texel_solid_angle = TAU * PI / (self.width as f32 * self.height as f32);
+        self.distribution.total_weight * self.scale * texel_solid_angle
     }
 
     pub fn radiance(&self, direction: Vec3) -> Vec3 {
