@@ -3,9 +3,12 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{
-    BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
-    DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+use crate::{
+    bsdf::{
+        BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
+        DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+    },
+    color::srgb_to_linear,
 };
 
 use super::{
@@ -439,7 +442,7 @@ impl SimplePbrMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        self.base_color
+        srgb_to_linear(self.base_color)
             * self
                 .base_color_texture
                 .as_ref()

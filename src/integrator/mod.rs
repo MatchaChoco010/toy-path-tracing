@@ -250,6 +250,7 @@ pub(super) mod test_helpers {
     use glam::{Vec2, Vec3};
 
     use crate::{
+        color::linear_to_srgb,
         material::{EmissiveMaterial, Material, MirrorMaterial},
         mesh::{Mesh, Vertex},
         ray::Ray,
@@ -258,10 +259,11 @@ pub(super) mod test_helpers {
 
     pub(super) fn mirror_to_light_scene() -> (Scene, Ray, Vec3) {
         let mut scene = Scene::new();
-        let mirror_color = Vec3::new(0.25, 0.5, 0.75);
+        let mirror_color_linear = Vec3::new(0.25, 0.5, 0.75);
         let light_strength = 4.0;
-        let mirror_material =
-            scene.add_material(Material::Mirror(MirrorMaterial::new(mirror_color)));
+        let mirror_material = scene.add_material(Material::Mirror(MirrorMaterial::new(
+            linear_to_srgb(mirror_color_linear),
+        )));
         let light_material = scene.add_material(Material::Emissive(EmissiveMaterial::new(
             Vec3::ONE,
             light_strength,
@@ -285,7 +287,7 @@ pub(super) mod test_helpers {
         .normalize();
         let ray = Ray::new(mirror_hit - incoming_direction, incoming_direction);
 
-        (scene, ray, mirror_color * light_strength)
+        (scene, ray, mirror_color_linear * light_strength)
     }
 
     fn mirror_triangle_mesh() -> Mesh {

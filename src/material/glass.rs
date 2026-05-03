@@ -3,7 +3,10 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{BsdfFlags, GlassBsdf};
+use crate::{
+    bsdf::{BsdfFlags, GlassBsdf},
+    color::srgb_to_linear,
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -155,7 +158,7 @@ impl GlassMaterial {
     }
 
     fn color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        self.color
+        srgb_to_linear(self.color)
             * self
                 .color_texture
                 .as_ref()
@@ -212,7 +215,7 @@ mod tests {
     fn texture_modulates_transmission_color() {
         let material = GlassMaterial {
             eta: 1.5,
-            color: Vec3::new(0.5, 0.5, 0.5),
+            color: Vec3::ONE,
             color_texture: Some(Arc::new(Texture::from_pixels(
                 1,
                 1,
@@ -233,7 +236,7 @@ mod tests {
         assert!(
             sample
                 .weight
-                .abs_diff_eq(Vec3::new(0.1, 0.2, 0.3) * radiance_scale, 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) * radiance_scale, 1.0e-6)
         );
     }
 }

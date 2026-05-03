@@ -296,10 +296,10 @@ mod tests {
 
     #[test]
     fn emissive_material_reports_emission_capability() {
-        let material = Material::Emissive(EmissiveMaterial::new(Vec3::new(0.25, 2.0, 1.0), 3.0));
+        let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 3.0));
 
         assert!(material.may_emit());
-        assert_eq!(material.max_emission(), 6.0);
+        assert_eq!(material.max_emission(), 3.0);
     }
 
     #[test]
@@ -353,12 +353,11 @@ mod tests {
 
     #[test]
     fn lambert_material_eval_delegates_to_bsdf() {
-        let material =
-            Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::new(0.3, 0.5, 0.7)));
+        let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let f = material.eval(&shading_vertex, Vec3::Z);
 
-        assert!(f.abs_diff_eq(Vec3::new(0.3, 0.5, 0.7) / std::f32::consts::PI, 1.0e-6));
+        assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-6));
     }
 
     #[test]
@@ -387,8 +386,7 @@ mod tests {
 
     #[test]
     fn mirror_material_sample_returns_delta_flag() {
-        let color = Vec3::new(0.3, 0.5, 0.7);
-        let material = Material::Mirror(MirrorMaterial::new(color));
+        let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let shading_vertex = test_shading_vertex(wo);
         let mut rng = rand::rng();
@@ -399,7 +397,7 @@ mod tests {
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));
-        assert_eq!(sample.weight, color);
+        assert_eq!(sample.weight, Vec3::ONE);
         assert_eq!(sample.pdf, 1.0);
         assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::REFLECTION);
     }
@@ -435,14 +433,11 @@ mod tests {
 
     #[test]
     fn glass_material_sample_can_return_transmission_flag() {
-        let color = Vec3::new(0.3, 0.5, 0.7);
-        let material = Material::Glass(GlassMaterial::new(1.5, color, false));
+        let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let shading_vertex = test_shading_vertex(wo);
         let mut rng = rand::rng();
 
-        // Transmission probability at this angle is ~95%; retry a few times to
-        // avoid a flaky test when the RNG happens to pick the reflection branch.
         let sample = (0..64)
             .find_map(|_| {
                 let s = material.sample(&shading_vertex, &mut rng)?;
@@ -451,7 +446,7 @@ mod tests {
             .expect("expected a transmission sample within retry budget");
 
         assert!(sample.wi.z < 0.0);
-        assert!(sample.weight.abs_diff_eq(color * 2.25, 1.0e-6));
+        assert!(sample.weight.abs_diff_eq(Vec3::ONE * 2.25, 1.0e-6));
         assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::TRANSMISSION);
     }
 

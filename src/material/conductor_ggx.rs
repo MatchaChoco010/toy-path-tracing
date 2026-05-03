@@ -3,7 +3,10 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{BsdfFlags, ConductorGgxBsdf};
+use crate::{
+    bsdf::{BsdfFlags, ConductorGgxBsdf},
+    color::srgb_to_linear,
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -245,7 +248,7 @@ impl ConductorGgxMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        self.base_color
+        srgb_to_linear(self.base_color)
             * self
                 .base_color_texture
                 .as_ref()
@@ -367,7 +370,7 @@ mod tests {
     #[test]
     fn textures_modulate_base_color_and_roughness() {
         let material = ConductorGgxMaterial {
-            base_color: Vec3::new(0.5, 0.5, 0.5),
+            base_color: Vec3::ONE,
             base_color_texture: Some(Arc::new(Texture::from_pixels(
                 1,
                 1,
@@ -387,7 +390,7 @@ mod tests {
         assert!(
             material
                 .base_color_at(&vtx)
-                .abs_diff_eq(Vec3::new(0.1, 0.2, 0.3), 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-6)
         );
         assert!((alpha_x - 0.16).abs() < 1.0e-6);
         assert!((alpha_y - 0.16).abs() < 1.0e-6);
