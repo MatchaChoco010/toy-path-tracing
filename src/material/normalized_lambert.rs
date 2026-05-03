@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::NormalizedLambertBsdf;
+use crate::{bsdf::NormalizedLambertBsdf, color::srgb_to_linear};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -32,6 +32,31 @@ impl NormalizedLambertMaterial {
             opacity: 1.0,
             opacity_texture: None,
         }
+    }
+
+    pub fn with_rho_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.rho_texture = Some(texture);
+        self
+    }
+
+    pub fn with_normal_map(mut self, normal_map: NormalMap) -> Self {
+        self.normal_map = Some(normal_map);
+        self
+    }
+
+    pub fn with_normal_strength(mut self, strength: f32) -> Self {
+        self.normal_strength = strength;
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_opacity_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.opacity_texture = Some(texture);
+        self
     }
 
     pub fn try_new_with_texture_path(
@@ -150,9 +175,6 @@ impl NormalizedLambertMaterial {
         0.0
     }
 
-    /// Per-shading-point precompute for the hierarchical light tree.
-    /// Lambert has only a diffuse lobe, weighted by the (textured) albedo
-    /// luminance.
     pub fn light_tree_precompute(
         &self,
         shading_vertex: &ShadingVertex,
@@ -171,7 +193,6 @@ impl NormalizedLambertMaterial {
         })
     }
 
-    /// Convolve the SG light with the diffuse lobe.
     pub fn light_tree_importance(
         &self,
         precompute: &crate::light_tree::LightTreePrecompute,
@@ -184,7 +205,7 @@ impl NormalizedLambertMaterial {
     }
 
     fn rho_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        self.rho
+        srgb_to_linear(self.rho)
             * self
                 .rho_texture
                 .as_ref()
@@ -240,7 +261,7 @@ mod tests {
     #[test]
     fn texture_modulates_rho() {
         let material = NormalizedLambertMaterial {
-            rho: Vec3::new(0.5, 0.5, 0.5),
+            rho: Vec3::ONE,
             rho_texture: Some(Arc::new(Texture::from_pixels(
                 1,
                 1,
@@ -256,7 +277,7 @@ mod tests {
         assert!(
             material
                 .eval(&vtx, Vec3::Z)
-                .abs_diff_eq(Vec3::new(0.1, 0.2, 0.3) / PI, 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) / PI, 1.0e-6)
         );
     }
 

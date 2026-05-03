@@ -3,9 +3,12 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{
-    BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
-    DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+use crate::{
+    bsdf::{
+        BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
+        DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+    },
+    color::srgb_to_linear,
 };
 
 use super::{
@@ -51,6 +54,41 @@ impl SimplePbrMaterial {
             opacity_texture: None,
             dielectric_ggx_directional_albedo_lut: None,
         }
+    }
+
+    pub fn with_base_color_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.base_color_texture = Some(texture);
+        self
+    }
+
+    pub fn with_metallic_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.metallic_texture = Some(texture);
+        self
+    }
+
+    pub fn with_roughness_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.roughness_texture = Some(texture);
+        self
+    }
+
+    pub fn with_normal_map(mut self, normal_map: NormalMap) -> Self {
+        self.normal_map = Some(normal_map);
+        self
+    }
+
+    pub fn with_normal_strength(mut self, strength: f32) -> Self {
+        self.normal_strength = strength;
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_opacity_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.opacity_texture = Some(texture);
+        self
     }
 
     pub fn try_new_with_texture_paths(
@@ -439,7 +477,7 @@ impl SimplePbrMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        self.base_color
+        srgb_to_linear(self.base_color)
             * self
                 .base_color_texture
                 .as_ref()

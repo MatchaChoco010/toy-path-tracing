@@ -3,7 +3,10 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{BsdfFlags, DielectricGgxBsdf};
+use crate::{
+    bsdf::{BsdfFlags, DielectricGgxBsdf},
+    color::srgb_to_linear,
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -44,6 +47,36 @@ impl DielectricGgxMaterial {
             opacity: 1.0,
             opacity_texture: None,
         }
+    }
+
+    pub fn with_color_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.color_texture = Some(texture);
+        self
+    }
+
+    pub fn with_roughness_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.roughness_texture = Some(texture);
+        self
+    }
+
+    pub fn with_normal_map(mut self, normal_map: NormalMap) -> Self {
+        self.normal_map = Some(normal_map);
+        self
+    }
+
+    pub fn with_normal_strength(mut self, strength: f32) -> Self {
+        self.normal_strength = strength;
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_opacity_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.opacity_texture = Some(texture);
+        self
     }
 
     pub fn try_new_with_texture_paths(
@@ -336,7 +369,7 @@ impl DielectricGgxMaterial {
     }
 
     fn color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        self.color
+        srgb_to_linear(self.color)
             * self
                 .color_texture
                 .as_ref()
@@ -478,7 +511,7 @@ mod tests {
     #[test]
     fn textures_modulate_color_and_roughness() {
         let material = DielectricGgxMaterial {
-            color: Vec3::new(0.5, 0.5, 0.5),
+            color: Vec3::ONE,
             color_texture: Some(Arc::new(Texture::from_pixels(
                 1,
                 1,
@@ -500,7 +533,7 @@ mod tests {
         assert!(
             material
                 .color_at(&vtx)
-                .abs_diff_eq(Vec3::new(0.1, 0.2, 0.3), 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-6)
         );
         assert!((alpha_x - 0.16).abs() < 1.0e-6);
         assert!((alpha_y - 0.16).abs() < 1.0e-6);

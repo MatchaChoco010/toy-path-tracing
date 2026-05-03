@@ -1,7 +1,9 @@
 mod conductor_ggx;
 mod dielectric_ggx;
 mod directional_albedo;
+mod disney_brdf;
 mod glass;
+mod gtr1;
 mod mirror;
 mod normalized_lambert;
 mod smith_ggx;
@@ -13,6 +15,7 @@ pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 pub(crate) use directional_albedo::{
     DielectricGgxDirectionalAlbedoLut, DirectionalAlbedoCache, sanitize_dielectric_eta,
 };
+pub use disney_brdf::DisneyBrdfBsdf;
 pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;

@@ -225,6 +225,7 @@ mod tests {
 
     use crate::{
         bsdf::BsdfFlags,
+        color::linear_to_srgb,
         light::{DirectionalLight, EnvironmentLight, PointLight, SpotLight},
         material::{EmissiveMaterial, Material, MirrorMaterial, NormalizedLambertMaterial},
         mesh::{Mesh, Vertex},
@@ -295,7 +296,7 @@ mod tests {
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
@@ -332,7 +333,7 @@ mod tests {
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
@@ -376,7 +377,7 @@ mod tests {
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
@@ -463,7 +464,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         // Power chosen so Li at r=2 equals 1: P / (4π·r²) = 1  =>  P = 16π.
@@ -502,10 +503,10 @@ mod tests {
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let blocker_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         let blocker_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.5)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.5))),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_instance(blocker_mesh, blocker_material, Mat4::IDENTITY);
@@ -541,7 +542,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_directional_light(DirectionalLight::new(
@@ -578,7 +579,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         // P=16π so Li at r=2 on axis equals 1.
@@ -618,7 +619,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
+            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         // Spot pointing +X (away from the floor below it).
