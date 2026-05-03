@@ -49,6 +49,36 @@ impl DielectricGgxMaterial {
         }
     }
 
+    pub fn with_color_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.color_texture = Some(texture);
+        self
+    }
+
+    pub fn with_roughness_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.roughness_texture = Some(texture);
+        self
+    }
+
+    pub fn with_normal_map(mut self, normal_map: NormalMap) -> Self {
+        self.normal_map = Some(normal_map);
+        self
+    }
+
+    pub fn with_normal_strength(mut self, strength: f32) -> Self {
+        self.normal_strength = strength;
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_opacity_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.opacity_texture = Some(texture);
+        self
+    }
+
     pub fn try_new_with_texture_paths(
         color: Vec3,
         eta: f32,

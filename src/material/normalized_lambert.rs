@@ -34,6 +34,31 @@ impl NormalizedLambertMaterial {
         }
     }
 
+    pub fn with_rho_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.rho_texture = Some(texture);
+        self
+    }
+
+    pub fn with_normal_map(mut self, normal_map: NormalMap) -> Self {
+        self.normal_map = Some(normal_map);
+        self
+    }
+
+    pub fn with_normal_strength(mut self, strength: f32) -> Self {
+        self.normal_strength = strength;
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_opacity_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.opacity_texture = Some(texture);
+        self
+    }
+
     pub fn try_new_with_texture_path(
         rho: Vec3,
         rho_texture_path: Option<&Path>,

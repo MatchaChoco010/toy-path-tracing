@@ -27,6 +27,21 @@ impl EmissiveMaterial {
         }
     }
 
+    pub fn with_color_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.color_texture = Some(texture);
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
+    pub fn with_opacity_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.opacity_texture = Some(texture);
+        self
+    }
+
     pub fn sample(
         &self,
         _shading_vertex: &ShadingVertex,
