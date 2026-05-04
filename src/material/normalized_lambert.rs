@@ -126,6 +126,7 @@ impl NormalizedLambertMaterial {
             flags: sample.flags,
             eta: sample.eta,
             cone_spread: DIFFUSE_CONE_SPREAD,
+            wavelength_lock: None,
         };
 
         if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -255,6 +256,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            wavelength_lock: None,
         }
     }
 

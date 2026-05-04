@@ -64,6 +64,7 @@ pub struct ShadingVertex {
     pub dndv: Vec3,
     pub frame: OrthonormalBasis,
     pub front_face: bool,
+    pub wavelength_lock: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,6 +75,7 @@ pub struct MaterialSample {
     pub flags: BsdfFlags,
     pub eta: f32,
     pub cone_spread: f32,
+    pub wavelength_lock: Option<f32>,
 }
 
 impl ShadingVertex {
@@ -305,6 +307,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            wavelength_lock: None,
         }
     }
 

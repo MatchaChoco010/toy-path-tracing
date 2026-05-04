@@ -39,6 +39,7 @@ pub struct BsdfSample {
     pub pdf: f32,
     pub flags: BsdfFlags,
     pub eta: f32,
+    pub wavelength_lock: Option<f32>,
 }
 
 #[cfg(test)]

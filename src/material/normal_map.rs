@@ -99,6 +99,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            wavelength_lock: None,
         }
     }
 

@@ -417,6 +417,7 @@ impl Scene {
             dndv,
             frame,
             front_face,
+            wavelength_lock: None,
         }
     }
 

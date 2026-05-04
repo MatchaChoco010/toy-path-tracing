@@ -377,6 +377,7 @@ mod tests {
             flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
             eta: 1.0,
             cone_spread: 0.0,
+            wavelength_lock: None,
         };
 
         let ray = spawn_scattered_ray(&incoming_ray, 1.0, &vtx, &sample);
@@ -417,6 +418,7 @@ mod tests {
             flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
             eta: 1.0,
             cone_spread: 0.2,
+            wavelength_lock: None,
         };
 
         let ray = spawn_scattered_ray(&incoming_ray, 1.0, &vtx, &sample);
@@ -449,6 +451,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            wavelength_lock: None,
         }
     }
 }

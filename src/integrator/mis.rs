@@ -37,6 +37,7 @@ pub fn trace_radiance(
     let mut hit_t = initial_hit.t;
     let mut vtx = scene.shading_vertex(initial_hit, &ray);
     let mut material = scene.instance_material(initial_hit.triangle.instance_index);
+    let mut wavelength_lock: Option<f32> = None;
 
     if let Some(le) = material.le(&vtx) {
         radiance += le;
@@ -45,6 +46,7 @@ pub fn trace_radiance(
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
+        vtx.wavelength_lock = wavelength_lock;
         let Some(sample) = material.sample(&vtx, rng) else {
             break;
         };
@@ -62,6 +64,9 @@ pub fn trace_radiance(
         }
 
         throughput *= sample.weight;
+        if let Some(lambda) = sample.wavelength_lock {
+            wavelength_lock = Some(lambda);
+        }
 
         if depth + 1 >= rr_start_depth {
             let survive_probability = russian_roulette_probability(throughput);
@@ -78,7 +83,8 @@ pub fn trace_radiance(
 
         match next_hit {
             Some(next_hit) => {
-                let next_vtx = scene.shading_vertex(next_hit, &next_ray);
+                let mut next_vtx = scene.shading_vertex(next_hit, &next_ray);
+                next_vtx.wavelength_lock = wavelength_lock;
                 let next_material = scene.instance_material(next_hit.triangle.instance_index);
                 radiance += emitted_radiance_from_bsdf_sample_area(
                     scene,
