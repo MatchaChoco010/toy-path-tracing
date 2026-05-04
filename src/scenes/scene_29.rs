@@ -1,25 +1,21 @@
-// Side-by-side comparison of SimplePBR (scene 20 setup) and Disney BRDF
-// using the same dragon model, identical baseColor / metallic / roughness /
-// normal textures, and the same lighting environment. The Disney dragon
-// adds a light clearcoat layer to make the difference legible.
-//
-// Left dragon (negative X) -- SimplePBR.
-// Right dragon (positive X) -- Disney BRDF.
+use std::{error::Error, path::Path, sync::Arc};
 
 use glam::{Mat4, Vec3};
-use std::{error::Error, path::Path};
 
 use crate::{
     camera::PinholeCamera,
     light::EnvironmentLight,
-    material::{DisneyBrdfMaterial, Material, NormalizedLambertMaterial, SimplePbrMaterial},
+    material::{
+        Material, NormalMap, NormalizedLambertMaterial, ScalarTexture, SimplePbrMaterial,
+        StandardSurfaceMaterial, Texture, TextureColorSpace,
+    },
     mesh::{load_gltf, load_obj},
     scene::Scene,
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_26() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_29() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor_material = scene.add_material(Material::NormalizedLambert(
@@ -43,19 +39,25 @@ pub fn create_scene_26() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         )?,
     ));
 
-    let disney_material = scene.add_material(Material::DisneyBrdf(
-        DisneyBrdfMaterial::try_new_with_texture_paths(
-            Vec3::ONE,
-            1.0,
-            1.0,
-            Some(Path::new("assets/models/dragon-BaseColor.png")),
-            Some(Path::new("assets/models/dragon-Metallic.png")),
-            Some(Path::new("assets/models/dragon-Roughness.png")),
-            Some(Path::new("assets/models/dragon-Normal.png")),
-        )?
-        .with_specular(0.5)
-        .with_clearcoat(0.4)
-        .with_clearcoat_gloss(0.9),
+    let base_color_tex = Arc::new(Texture::from_file_with_color_space(
+        "assets/models/dragon-BaseColor.png",
+        TextureColorSpace::Srgb,
+    )?);
+    let metalness_tex = Arc::new(ScalarTexture::from_file(
+        "assets/models/dragon-Metallic.png",
+    )?);
+    let roughness_tex = Arc::new(ScalarTexture::from_file(
+        "assets/models/dragon-Roughness.png",
+    )?);
+    let normal_map = NormalMap::from_file("assets/models/dragon-Normal.png")?;
+    let standard_material = scene.add_material(Material::StandardSurface(
+        StandardSurfaceMaterial::new(Vec3::ONE)
+            .with_metalness(1.0)
+            .with_specular_roughness(1.0)
+            .with_base_color_texture(base_color_tex)
+            .with_metalness_texture(metalness_tex)
+            .with_specular_roughness_texture(roughness_tex)
+            .with_normal_map(normal_map),
     ));
 
     let dragon = load_obj(Path::new("assets/models/dragon.obj"))?;
@@ -67,7 +69,6 @@ pub fn create_scene_26() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     );
     let dragon_mesh = scene.add_mesh(dragon);
 
-    // Both dragons face the camera (rotate to head toward +Z).
     let face_camera = Mat4::from_quat(game_rotation_degrees(0.0, 90.0, 0.0));
     let dragon_local = face_camera
         * Mat4::from_scale(Vec3::splat(dragon_scale))
@@ -78,8 +79,9 @@ pub fn create_scene_26() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Mat4::from_translation(Vec3::new(-half_offset, 0.0, 0.0)) * dragon_local;
     scene.add_instance(dragon_mesh, simple_pbr_material, simple_pbr_transform);
 
-    let disney_transform = Mat4::from_translation(Vec3::new(half_offset, 0.0, 0.0)) * dragon_local;
-    scene.add_instance(dragon_mesh, disney_material, disney_transform);
+    let standard_transform =
+        Mat4::from_translation(Vec3::new(half_offset, 0.0, 0.0)) * dragon_local;
+    scene.add_instance(dragon_mesh, standard_material, standard_transform);
 
     let env = EnvironmentLight::from_hdr_file(
         "assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr",
@@ -88,7 +90,6 @@ pub fn create_scene_26() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     )?;
     scene.set_environment_light(env);
 
-    // Front camera: a touch elevated so the back of each dragon is visible.
     let camera_eye = Vec3::new(0.0, 1.6, 6.2);
     let camera_target = Vec3::new(0.0, 0.7, 0.0);
     let camera = PinholeCamera::new(

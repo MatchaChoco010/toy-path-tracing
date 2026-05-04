@@ -152,6 +152,7 @@ impl DisneyBrdfBsdf {
             pdf,
             flags: BsdfFlags::GLOSSY | BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION,
             eta: 1.0,
+            wavelength_lock: None,
         })
     }
 

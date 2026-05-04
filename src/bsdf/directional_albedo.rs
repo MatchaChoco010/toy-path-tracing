@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use crate::math::fresnel_dielectric;
 
 use super::dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
+use super::sheen::sheen_directional_albedo_estimate;
 
 const MIN_ALPHA: f32 = 1.0e-4;
 const EFFECTIVELY_SMOOTH_ALPHA: f32 = 1.0e-3;
@@ -35,6 +36,7 @@ const UNIFORM_HEMISPHERE_PDF: f32 = 1.0 / (2.0 * PI);
 pub(crate) struct DirectionalAlbedoCache {
     dielectric_ggx:
         HashMap<DielectricGgxDirectionalAlbedoKey, Arc<DielectricGgxDirectionalAlbedoLut>>,
+    sheen: Option<Arc<SheenDirectionalAlbedoLut>>,
 }
 
 impl DirectionalAlbedoCache {
@@ -51,6 +53,15 @@ impl DirectionalAlbedoCache {
 
         let lut = Arc::new(DielectricGgxDirectionalAlbedoLut::build(eta));
         self.dielectric_ggx.insert(key, Arc::clone(&lut));
+        lut
+    }
+
+    pub(crate) fn get_or_build_sheen(&mut self) -> Arc<SheenDirectionalAlbedoLut> {
+        if let Some(lut) = self.sheen.as_ref() {
+            return Arc::clone(lut);
+        }
+        let lut = Arc::new(SheenDirectionalAlbedoLut::build());
+        self.sheen = Some(Arc::clone(&lut));
         lut
     }
 }
@@ -330,4 +341,55 @@ fn compute_lut_axis_lerp(value: f32, resolution: usize) -> (usize, usize, f32) {
 
 fn lut_cell_center(index: usize, resolution: usize) -> f32 {
     (index as f32 + 0.5) / resolution as f32
+}
+
+const SHEEN_LUT_COS_RESOLUTION: usize = 32;
+const SHEEN_LUT_ROUGHNESS_RESOLUTION: usize = 32;
+const SHEEN_LUT_LEN: usize = SHEEN_LUT_COS_RESOLUTION * SHEEN_LUT_ROUGHNESS_RESOLUTION;
+const SHEEN_LUT_SAMPLE_COUNT: usize = 256;
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct SheenDirectionalAlbedoLut {
+    values: Vec<f32>,
+}
+
+impl SheenDirectionalAlbedoLut {
+    fn build() -> Self {
+        let mut values = vec![0.0; SHEEN_LUT_LEN];
+        values
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(index, value)| {
+                let r_index = index / SHEEN_LUT_COS_RESOLUTION;
+                let c_index = index % SHEEN_LUT_COS_RESOLUTION;
+                let cos_theta = lut_cell_center(c_index, SHEEN_LUT_COS_RESOLUTION);
+                let roughness = lut_cell_center(r_index, SHEEN_LUT_ROUGHNESS_RESOLUTION);
+                *value =
+                    sheen_directional_albedo_estimate(roughness, cos_theta, SHEEN_LUT_SAMPLE_COUNT);
+            });
+        Self { values }
+    }
+
+    pub(crate) fn lookup(&self, cos_theta: f32, roughness: f32) -> f32 {
+        let cos_theta = cos_theta.clamp(0.0, 1.0);
+        let roughness = roughness.clamp(0.0, 1.0);
+        let (cos_lower, cos_upper, cos_blend) =
+            compute_lut_axis_lerp(cos_theta, SHEEN_LUT_COS_RESOLUTION);
+        let (r_lower, r_upper, r_blend) =
+            compute_lut_axis_lerp(roughness, SHEEN_LUT_ROUGHNESS_RESOLUTION);
+        let mut value = 0.0;
+        for (cos_idx, cos_w) in [(cos_lower, 1.0 - cos_blend), (cos_upper, cos_blend)] {
+            for (r_idx, r_w) in [(r_lower, 1.0 - r_blend), (r_upper, r_blend)] {
+                value += cos_w * r_w * self.values[r_idx * SHEEN_LUT_COS_RESOLUTION + cos_idx];
+            }
+        }
+        value.clamp(0.0, 1.0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn constant_for_tests(value: f32) -> Self {
+        Self {
+            values: vec![value.clamp(0.0, 1.0); SHEEN_LUT_LEN],
+        }
+    }
 }

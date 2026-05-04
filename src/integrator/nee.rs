@@ -23,6 +23,7 @@ pub fn trace_radiance(
     let mut throughput = Vec3::ONE;
     let mut ray = initial_ray;
     let mut count_emission_at_hit = true;
+    let mut wavelength_lock: Option<f32> = None;
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
@@ -37,7 +38,8 @@ pub fn trace_radiance(
             break;
         };
 
-        let vtx = scene.shading_vertex(hit, &ray);
+        let mut vtx = scene.shading_vertex(hit, &ray);
+        vtx.wavelength_lock = wavelength_lock;
         let material = scene.instance_material(hit.triangle.instance_index);
 
         if count_emission_at_hit && let Some(le) = material.le(&vtx) {
@@ -61,6 +63,9 @@ pub fn trace_radiance(
         }
 
         throughput *= sample.weight;
+        if let Some(lambda) = sample.wavelength_lock {
+            wavelength_lock = Some(lambda);
+        }
 
         if depth + 1 >= rr_start_depth {
             let survive_probability = russian_roulette_probability(throughput);

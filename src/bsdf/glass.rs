@@ -81,6 +81,7 @@ impl GlassBsdf {
             wi,
             pdf,
             flags,
+            wavelength_lock: None,
             eta: 1.0,
         })
     }
@@ -109,6 +110,7 @@ impl GlassBsdf {
                 pdf: reflection_probability,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
+                wavelength_lock: None,
             });
         }
 
@@ -121,6 +123,7 @@ impl GlassBsdf {
             pdf: transmission_probability,
             flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
             eta,
+            wavelength_lock: None,
         })
     }
 }

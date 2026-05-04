@@ -16,14 +16,14 @@ pub fn create_scene_11() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.6)),
     ));
-    let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(8.0, 1.0, 8.0));
     scene.add_instance(floor_mesh_index, floor_material, floor_transform);
 
     let bunny_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::new(0.55, 0.72, 0.92)),
     ));
-    let bunny = load_gltf(Path::new("assets/gltf/bunny.glb"))?;
+    let bunny = load_gltf(Path::new("assets/models/bunny.glb"))?;
     let bunny_height = 2.0;
     let bunny_scale = uniform_scale_for_height(&bunny, bunny_height);
     let bunny_pivot = Vec3::new(

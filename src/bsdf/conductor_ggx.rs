@@ -114,6 +114,7 @@ impl ConductorGgxBsdf {
             pdf,
             flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
             eta: 1.0,
+            wavelength_lock: None,
         })
     }
 
@@ -131,6 +132,7 @@ impl ConductorGgxBsdf {
             pdf: 1.0,
             flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
             eta: 1.0,
+            wavelength_lock: None,
         })
     }
 

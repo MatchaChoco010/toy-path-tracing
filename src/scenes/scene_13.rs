@@ -23,14 +23,14 @@ pub(super) fn create_sky_bunny_scene(
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.62)),
     ));
-    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(12.0, 1.0, 12.0));
     scene.add_instance(floor_mesh, floor_material, floor_transform);
 
     let bunny_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::new(0.74, 0.76, 0.72)),
     ));
-    let bunny = load_gltf(Path::new("assets/gltf/bunny.glb"))?;
+    let bunny = load_gltf(Path::new("assets/models/bunny.glb"))?;
     let bunny_scale = uniform_scale_for_height(&bunny, 2.35);
     let bunny_pivot = Vec3::new(
         bunny.bounds.center().x,

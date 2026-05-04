@@ -19,7 +19,7 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.9)),
     ));
-    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(18.0, 1.0, 18.0));
     scene.add_instance(floor_mesh, floor_material, floor_transform);
 
@@ -30,14 +30,14 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             1.0,
             1.5,
             0.0,
-            Some(Path::new("assets/gltf/dragon-BaseColor.png")),
-            Some(Path::new("assets/gltf/dragon-Metallic.png")),
-            Some(Path::new("assets/gltf/dragon-Roughness.png")),
-            Some(Path::new("assets/gltf/dragon-Normal.png")),
+            Some(Path::new("assets/models/dragon-BaseColor.png")),
+            Some(Path::new("assets/models/dragon-Metallic.png")),
+            Some(Path::new("assets/models/dragon-Roughness.png")),
+            Some(Path::new("assets/models/dragon-Normal.png")),
         )?,
     ));
 
-    let dragon = load_obj(Path::new("assets/gltf/dragon.obj"))?;
+    let dragon = load_obj(Path::new("assets/models/dragon.obj"))?;
     let dragon_scale = uniform_scale_for_height(&dragon, 2.35);
     let dragon_pivot = Vec3::new(
         dragon.bounds.center().x,
@@ -62,7 +62,7 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         false,
     )));
 
-    let bunny = load_gltf(Path::new("assets/gltf/bunny.glb"))?;
+    let bunny = load_gltf(Path::new("assets/models/bunny.glb"))?;
     let bunny_scale = uniform_scale_for_height(&bunny, 1.25);
     let bunny_pivot = Vec3::new(
         bunny.bounds.center().x,
@@ -83,7 +83,7 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         * Mat4::from_translation(-bunny_pivot);
     scene.add_instance(bunny_mesh, lambert_bunny_material, lambert_bunny_transform);
 
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_scale = uniform_scale_for_height(&sphere, 1.25);
     let sphere_pivot = Vec3::new(
         sphere.bounds.center().x,

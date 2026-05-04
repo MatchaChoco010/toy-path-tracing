@@ -68,12 +68,12 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `12` | Cornell box 風の部屋からエリアライトを外し、薄青 Lambert バニーとラフな金色 / 銅色の Conductor GGX 球を配置。暖色と寒色の `PointLight` を 2 灯、バニーに向けたマゼンタ / ティールの `SpotLight` を 2 灯で照らす delta 光源ミックスの確認シーンです。 |
 | `13` | 広い Lambert 床の上に少し大きめの diffuse バニーを置き、`assets/sky/brown_photostudio_02_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
 | `14` | scene 13 と同じ床 / バニー構成で、`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
-| `15` | Cornell box 風の部屋に、`assets/gltf/sphere-color.png` と `assets/gltf/sphere-roughness.png` を使う金属 Conductor GGX 球、同じ color texture を使う Lambert 球を斜めに並べたテクスチャ確認用シーンです。 |
-| `16` | scene 14 と同じ床 / Sky 環境に、`assets/gltf/bunny-color.png` を使う Lambert バニーと、`assets/gltf/sphere-color.png` / `assets/gltf/sphere-roughness.png` を使う金属 Conductor GGX 球を配置したテクスチャ確認用シーンです。 |
-| `17` | 広い Lambert 床に `assets/gltf/floor-brick.png` を貼り、完全鏡面の金属球と完全鏡面のガラス球を配置して、斜め上から `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の IBL で照らす確認用シーンです。 |
-| `18` | Cornell box 風の部屋に、`assets/gltf/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球と roughness `0.4` の Conductor GGX 球を斜めに配置した normal map 確認用シーンです。 |
-| `19` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/gltf/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球、roughness `0.4` の Conductor GGX 球、完全鏡面 Mirror 球を配置した normal map 確認用シーンです。 |
-| `20` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/gltf/dragon.obj` と dragon 用の base color / metallic / roughness / normal texture を使う SimplePBR ドラゴンを斜め向きに配置したシーンです。 |
+| `15` | Cornell box 風の部屋に、`assets/models/sphere-color.png` と `assets/models/sphere-roughness.png` を使う金属 Conductor GGX 球、同じ color texture を使う Lambert 球を斜めに並べたテクスチャ確認用シーンです。 |
+| `16` | scene 14 と同じ床 / Sky 環境に、`assets/models/bunny-color.png` を使う Lambert バニーと、`assets/models/sphere-color.png` / `assets/models/sphere-roughness.png` を使う金属 Conductor GGX 球を配置したテクスチャ確認用シーンです。 |
+| `17` | 広い Lambert 床に `assets/models/floor-brick.png` を貼り、完全鏡面の金属球と完全鏡面のガラス球を配置して、斜め上から `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の IBL で照らす確認用シーンです。 |
+| `18` | Cornell box 風の部屋に、`assets/models/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球と roughness `0.4` の Conductor GGX 球を斜めに配置した normal map 確認用シーンです。 |
+| `19` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/models/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球、roughness `0.4` の Conductor GGX 球、完全鏡面 Mirror 球を配置した normal map 確認用シーンです。 |
+| `20` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/models/dragon.obj` と dragon 用の base color / metallic / roughness / normal texture を使う SimplePBR ドラゴンを斜め向きに配置したシーンです。 |
 | `21` | scene 20 の SimplePBR ドラゴンに加えて、roughness `0.4` の金色 Conductor GGX バニー、`Glass` 球、薄青の NormalizedLambert バニーを並べ、同じ puresky 環境で照らすマテリアル比較シーンです。 |
 | `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel (約 561 万 triangles) を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす建築シーンです。OBJ のマテリアルは原則 SimplePBR、`d < 1` か `illum 4` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けて読み込みます。`map_Kd` PNG が alpha matte を含む場合はその alpha チャンネルを `opacity_texture` に渡し、植物の葉などをアルファカットアウトで描画します。アセットは `bash assets/download.sh` で取得します。 |
 | `23` | `assets/san_miguel_2.0/san-miguel.obj` の通常版 San Miguel (約 998 万 triangles) を puresky 環境光で照らす建築シーンです。マテリアル割り当てやカメラ設定、アルファカットアウトの扱いは scene 22 と同じ方針ですが、コードは `scene_23.rs` として独立に持ちます。アセットは `bash assets/download.sh` で取得します。 |
@@ -82,6 +82,10 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `26` | 同じドラゴンモデル / `dragon-BaseColor.png` / `dragon-Metallic.png` / `dragon-Roughness.png` / `dragon-Normal.png` を、左に SimplePBR、右に Disney BRDF (clearcoat `0.4`、clearcoatGloss `0.9`) で並べた比較用シーンです。`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光下、両方のドラゴンを正面から映します。 |
 | `27` | Disney BRDF の sheen=0 確認用シーン。`assets/sky/studio_small_08_4k.hdr` 環境下、`baseColor=(0.5, 0.15, 0.05)` の dark red 球 1 つを sheen=0、sheenTint=0、specular=0 で描画します。scene 28 と並べて sheen の効果を比較します。 |
 | `28` | scene 27 と同じ構成・同じ環境光で sheen=1 にした sheen lobe 比較用シーンです。 |
+| `29` | scene 26 と同じドラゴン / texture 構成で、左に SimplePBR、右に Autodesk Standard Surface を並べた比較用シーンです。`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光下で映します。 |
+| `30` | `assets/mori-knob/` の floor / base / knob を 1 列に 4 セット並べ、knob だけを Standard Surface のバリエーション (thin_film 金、Abbe 数 15 の dispersive glass、sheen の効いた赤ベルベット、coat 付きプラスチック) で描画する Standard Surface のショーケースです。floor / base / 上空の Emissive ライトで照らします。 |
+| `31` | `assets/models/paper-plane.obj` の紙飛行機を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境下で thin_walled な Standard Surface (`subsurface = 0`) として描画し、紙飛行機の真下から太陽方向を見上げた際の透過しない見え方を確認するシーンです。 |
+| `32` | scene 31 と同じ構成で `subsurface = 0.5` にした thin_walled diffuse transmission の比較用シーンです。紙越しに太陽光が回り込み、紙飛行機の下面が薄く明るく見えます。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

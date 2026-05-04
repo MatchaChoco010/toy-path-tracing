@@ -17,18 +17,18 @@ pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.62)),
     ));
-    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(12.0, 1.0, 12.0));
     scene.add_instance(floor_mesh, floor_material, floor_transform);
 
     let bunny_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::try_new_with_texture_path(
             Vec3::ONE,
-            Some(Path::new("assets/gltf/bunny-color.png")),
+            Some(Path::new("assets/models/bunny-color.png")),
             None,
         )?,
     ));
-    let bunny = load_gltf(Path::new("assets/gltf/bunny.glb"))?;
+    let bunny = load_gltf(Path::new("assets/models/bunny.glb"))?;
     let bunny_scale = uniform_scale_for_height(&bunny, 2.25);
     let bunny_pivot = Vec3::new(
         bunny.bounds.center().x,
@@ -47,12 +47,12 @@ pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             Vec3::ONE,
             1.0,
             0.0,
-            Some(Path::new("assets/gltf/sphere-color.png")),
-            Some(Path::new("assets/gltf/sphere-roughness.png")),
+            Some(Path::new("assets/models/sphere-color.png")),
+            Some(Path::new("assets/models/sphere-roughness.png")),
             None,
         )?,
     ));
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_scale = uniform_scale_for_height(&sphere, 1.05);
     let sphere_pivot = Vec3::new(
         sphere.bounds.center().x,

@@ -17,11 +17,11 @@ pub fn create_scene_8() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.55)),
     ));
-    let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(6.0, 1.0, 6.0));
     scene.add_instance(floor_mesh_index, floor_material, floor_transform);
 
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_height = 0.6;
     let sphere_scale = uniform_scale_for_height(&sphere, sphere_height);
     let sphere_pivot = Vec3::new(
