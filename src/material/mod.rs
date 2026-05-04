@@ -250,7 +250,8 @@ impl Material {
             Self::DielectricGgx(material) => material.light_tree_precompute(shading_vertex),
             Self::SimplePBR(material) => material.light_tree_precompute(shading_vertex),
             Self::DisneyBrdf(material) => material.light_tree_precompute(shading_vertex),
-            Self::Mirror(_) | Self::Glass(_) | Self::StandardSurface(_) | Self::Emissive(_) => None,
+            Self::StandardSurface(material) => material.light_tree_precompute(shading_vertex),
+            Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => None,
         }
     }
 
@@ -274,7 +275,8 @@ impl Material {
             Self::DielectricGgx(material) => material.light_tree_importance(precompute, w, lobe),
             Self::SimplePBR(material) => material.light_tree_importance(precompute, w, lobe),
             Self::DisneyBrdf(material) => material.light_tree_importance(precompute, w, lobe),
-            Self::Mirror(_) | Self::Glass(_) | Self::StandardSurface(_) | Self::Emissive(_) => 0.0,
+            Self::StandardSurface(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => 0.0,
         }
     }
 }
