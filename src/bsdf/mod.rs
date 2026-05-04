@@ -11,6 +11,7 @@ mod normalized_lambert;
 mod oren_nayar;
 mod sheen;
 mod smith_ggx;
+mod standard_surface;
 pub(crate) mod thin_film;
 
 use glam::Vec3;
@@ -30,6 +31,7 @@ pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;
 pub use oren_nayar::OrenNayarBsdf;
 pub use sheen::SheenBsdf;
+pub use standard_surface::{StandardSurfaceBsdf, StandardSurfaceBsdfParams};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -7,6 +7,7 @@ mod mirror;
 mod normal_map;
 mod normalized_lambert;
 mod simple_pbr;
+mod standard_surface;
 mod texture;
 
 use glam::{Vec2, Vec3};
@@ -30,6 +31,7 @@ pub use mirror::MirrorMaterial;
 pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
 pub use simple_pbr::SimplePbrMaterial;
+pub use standard_surface::StandardSurfaceMaterial;
 pub use texture::{ScalarTexture, Texture, TextureColorSpace};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +43,7 @@ pub enum Material {
     Glass(GlassMaterial),
     SimplePBR(SimplePbrMaterial),
     DisneyBrdf(DisneyBrdfMaterial),
+    StandardSurface(StandardSurfaceMaterial),
     Emissive(EmissiveMaterial),
 }
 
@@ -98,6 +101,7 @@ impl Material {
             Self::Glass(material) => material.prepare_shading_vertex(shading_vertex),
             Self::SimplePBR(material) => material.prepare_shading_vertex(shading_vertex),
             Self::DisneyBrdf(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::StandardSurface(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Emissive(_) => *shading_vertex,
         }
     }
@@ -115,6 +119,7 @@ impl Material {
             Self::Glass(material) => material.sample(shading_vertex, rng),
             Self::SimplePBR(material) => material.sample(shading_vertex, rng),
             Self::DisneyBrdf(material) => material.sample(shading_vertex, rng),
+            Self::StandardSurface(material) => material.sample(shading_vertex, rng),
             Self::Emissive(material) => material.sample(shading_vertex, rng),
         }
     }
@@ -128,6 +133,7 @@ impl Material {
             Self::Glass(material) => material.le(shading_vertex),
             Self::SimplePBR(material) => material.le(shading_vertex),
             Self::DisneyBrdf(material) => material.le(shading_vertex),
+            Self::StandardSurface(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
         }
     }
@@ -141,6 +147,7 @@ impl Material {
             Self::Glass(material) => material.eval(shading_vertex, wi),
             Self::SimplePBR(material) => material.eval(shading_vertex, wi),
             Self::DisneyBrdf(material) => material.eval(shading_vertex, wi),
+            Self::StandardSurface(material) => material.eval(shading_vertex, wi),
             Self::Emissive(material) => material.eval(shading_vertex, wi),
         }
     }
@@ -154,6 +161,7 @@ impl Material {
             Self::Glass(material) => material.pdf(shading_vertex, wi),
             Self::SimplePBR(material) => material.pdf(shading_vertex, wi),
             Self::DisneyBrdf(material) => material.pdf(shading_vertex, wi),
+            Self::StandardSurface(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
         }
     }
@@ -167,6 +175,7 @@ impl Material {
             Self::Glass(material) => material.may_emit(),
             Self::SimplePBR(material) => material.may_emit(),
             Self::DisneyBrdf(material) => material.may_emit(),
+            Self::StandardSurface(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
         }
     }
@@ -180,6 +189,7 @@ impl Material {
             Self::Glass(material) => material.max_emission(),
             Self::SimplePBR(material) => material.max_emission(),
             Self::DisneyBrdf(material) => material.max_emission(),
+            Self::StandardSurface(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
         }
     }
@@ -196,6 +206,7 @@ impl Material {
             Self::Glass(material) => material.has_alpha_test(),
             Self::SimplePBR(material) => material.has_alpha_test(),
             Self::DisneyBrdf(material) => material.has_alpha_test(),
+            Self::StandardSurface(material) => material.has_alpha_test(),
             Self::Emissive(material) => material.has_alpha_test(),
         }
     }
@@ -215,6 +226,7 @@ impl Material {
             Self::Glass(material) => material.any_hit(shading_vertex, u),
             Self::SimplePBR(material) => material.any_hit(shading_vertex, u),
             Self::DisneyBrdf(material) => material.any_hit(shading_vertex, u),
+            Self::StandardSurface(material) => material.any_hit(shading_vertex, u),
             Self::Emissive(material) => material.any_hit(shading_vertex, u),
         }
     }
@@ -238,7 +250,7 @@ impl Material {
             Self::DielectricGgx(material) => material.light_tree_precompute(shading_vertex),
             Self::SimplePBR(material) => material.light_tree_precompute(shading_vertex),
             Self::DisneyBrdf(material) => material.light_tree_precompute(shading_vertex),
-            Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => None,
+            Self::Mirror(_) | Self::Glass(_) | Self::StandardSurface(_) | Self::Emissive(_) => None,
         }
     }
 
@@ -262,7 +274,7 @@ impl Material {
             Self::DielectricGgx(material) => material.light_tree_importance(precompute, w, lobe),
             Self::SimplePBR(material) => material.light_tree_importance(precompute, w, lobe),
             Self::DisneyBrdf(material) => material.light_tree_importance(precompute, w, lobe),
-            Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => 0.0,
+            Self::Mirror(_) | Self::Glass(_) | Self::StandardSurface(_) | Self::Emissive(_) => 0.0,
         }
     }
 }

@@ -126,6 +126,21 @@ impl Scene {
                 .get_or_build_dielectric_ggx(simple_pbr.eta);
             simple_pbr.install_dielectric_ggx_directional_albedo_lut(lut);
         }
+        if let Material::StandardSurface(standard) = &mut material {
+            standard.validate_and_warn();
+            let spec_eta = standard.requires_specular_eta();
+            let coat_eta = standard.requires_coat_eta();
+            let spec_lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx(spec_eta);
+            let coat_lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx(coat_eta);
+            let sheen_lut = self.directional_albedo_cache.get_or_build_sheen();
+            standard.install_spec_lut(spec_lut);
+            standard.install_coat_lut(coat_lut);
+            standard.install_sheen_lut(sheen_lut);
+        }
 
         let material_index = MaterialIndex(self.materials.len());
         self.materials.push(material);
