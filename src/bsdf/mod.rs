@@ -11,6 +11,7 @@ mod normalized_lambert;
 mod oren_nayar;
 mod sheen;
 mod smith_ggx;
+pub(crate) mod thin_film;
 
 use glam::Vec3;
 
