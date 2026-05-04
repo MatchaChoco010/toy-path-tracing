@@ -7,6 +7,7 @@ mod glass;
 mod gtr1;
 mod mirror;
 mod normalized_lambert;
+mod oren_nayar;
 mod smith_ggx;
 
 use glam::Vec3;
@@ -20,6 +21,7 @@ pub use disney_brdf::DisneyBrdfBsdf;
 pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;
+pub use oren_nayar::OrenNayarBsdf;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
