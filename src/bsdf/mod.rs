@@ -8,6 +8,7 @@ mod gtr1;
 mod mirror;
 mod normalized_lambert;
 mod oren_nayar;
+mod sheen;
 mod smith_ggx;
 
 use glam::Vec3;
@@ -15,13 +16,15 @@ use glam::Vec3;
 pub use conductor_ggx::ConductorGgxBsdf;
 pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 pub(crate) use directional_albedo::{
-    DielectricGgxDirectionalAlbedoLut, DirectionalAlbedoCache, sanitize_dielectric_eta,
+    DielectricGgxDirectionalAlbedoLut, DirectionalAlbedoCache, SheenDirectionalAlbedoLut,
+    sanitize_dielectric_eta,
 };
 pub use disney_brdf::DisneyBrdfBsdf;
 pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;
 pub use oren_nayar::OrenNayarBsdf;
+pub use sheen::SheenBsdf;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
