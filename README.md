@@ -86,6 +86,9 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `30` | `assets/mori-knob/` の floor / base / knob を 1 列に 4 セット並べ、knob だけを Standard Surface のバリエーション (thin_film 金、Abbe 数 15 の dispersive glass、sheen の効いた赤ベルベット、coat 付きプラスチック) で描画する Standard Surface のショーケースです。floor / base / 上空の Emissive ライトで照らします。 |
 | `31` | `assets/models/paper-plane.obj` の紙飛行機を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境下で thin_walled な Standard Surface (`subsurface = 0`) として描画し、紙飛行機の真下から太陽方向を見上げた際の透過しない見え方を確認するシーンです。 |
 | `32` | scene 31 と同じ構成で `subsurface = 0.5` にした thin_walled diffuse transmission の比較用シーンです。紙越しに太陽光が回り込み、紙飛行機の下面が薄く明るく見えます。 |
+| `33` | `assets/mori-knob/floor.obj` のスタジオ床の上に、銀色 (base color `0.92`) の Conductor GGX (single-scattering) 球を 9 個並べ、左から右へ roughness を `0.0` から `1.0` まで等間隔に振った比較用シーンです。`assets/sky/studio_small_08_4k.hdr` を室内 IBL として使います。 |
+| `34` | scene 33 と同じ床 / 球配置 / 環境光で、マテリアルだけを Cui et al. 2023 の position-free multi-scattering Conductor GGX に差し替えた比較用シーンです。stochastic eval が走るため、scene 33 より多めの spp を推奨します (例: `--spp 1024`)。高 roughness 側 (右端) で multi-scattering 由来のエネルギー保存により scene 33 より明るく仕上がります。 |
+| `35` | Cui et al. 2023 multi-scattering Conductor GGX の white furnace test 用シーンです。`F0 = (1, 1, 1)` の球を 2 段 × 9 列で並べ、上段が従来の single-scattering Conductor GGX、下段が Cui 2023 multi-scattering、各段ともに左から右へ roughness を `0.0` から `1.0` まで等間隔に振ります。一様な白い環境光 (intensity `1.0`) のもと 4:3 横長の画面に収め、上段は高 roughness 側でエネルギーロスにより暗くなり (white furnace 失敗)、下段は全列が背景と同輝度になり区別がつかなくなる (white furnace 通過) ことを 1 枚の画像で対比できます。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

@@ -146,7 +146,7 @@ pub(super) fn direct_light_mis_contribution(
         return Vec3::ZERO;
     }
 
-    let f = material.eval(vtx, li.wi);
+    let f = material.eval(vtx, li.wi, rng);
     if f.length_squared() == 0.0 {
         return Vec3::ZERO;
     }

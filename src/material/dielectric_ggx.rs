@@ -199,7 +199,12 @@ impl DielectricGgxMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _internal_rng: &mut ThreadRng,
+    ) -> Vec3 {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)

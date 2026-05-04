@@ -1,32 +1,43 @@
 use std::{path::Path, sync::Arc};
 
-use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
+use glam::Vec3;
+use rand::rngs::ThreadRng;
 
-use crate::{bsdf::NormalizedLambertBsdf, color::srgb_to_linear};
+use crate::{
+    bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf},
+    color::srgb_to_linear,
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_color_texture,
+    TextureColorSpace,
+    normal_map::load_optional_normal_map,
+    texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
 
-const DIFFUSE_CONE_SPREAD: f32 = 0.5;
+const MIN_ALPHA: f32 = 1.0e-4;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct NormalizedLambertMaterial {
-    pub rho: Vec3,
-    pub rho_texture: Option<Arc<Texture>>,
+pub struct ConductorGgxCui2023Material {
+    pub base_color: Vec3,
+    pub base_color_texture: Option<Arc<Texture>>,
+    pub roughness: f32,
+    pub roughness_texture: Option<Arc<ScalarTexture>>,
+    pub anisotropy: f32,
     pub normal_map: Option<NormalMap>,
     pub normal_strength: f32,
     pub opacity: f32,
     pub opacity_texture: Option<Arc<ScalarTexture>>,
 }
 
-impl NormalizedLambertMaterial {
-    pub fn new(rho: Vec3) -> Self {
+impl ConductorGgxCui2023Material {
+    pub fn new(base_color: Vec3, roughness: f32, anisotropy: f32) -> Self {
         Self {
-            rho,
-            rho_texture: None,
+            base_color,
+            base_color_texture: None,
+            roughness,
+            roughness_texture: None,
+            anisotropy,
             normal_map: None,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -34,8 +45,13 @@ impl NormalizedLambertMaterial {
         }
     }
 
-    pub fn with_rho_texture(mut self, texture: Arc<Texture>) -> Self {
-        self.rho_texture = Some(texture);
+    pub fn with_base_color_texture(mut self, texture: Arc<Texture>) -> Self {
+        self.base_color_texture = Some(texture);
+        self
+    }
+
+    pub fn with_roughness_texture(mut self, texture: Arc<ScalarTexture>) -> Self {
+        self.roughness_texture = Some(texture);
         self
     }
 
@@ -59,14 +75,23 @@ impl NormalizedLambertMaterial {
         self
     }
 
-    pub fn try_new_with_texture_path(
-        rho: Vec3,
-        rho_texture_path: Option<&Path>,
+    pub fn try_new_with_texture_paths(
+        base_color: Vec3,
+        roughness: f32,
+        anisotropy: f32,
+        base_color_texture_path: Option<&Path>,
+        roughness_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
     ) -> image::ImageResult<Self> {
         Ok(Self {
-            rho,
-            rho_texture: load_optional_color_texture(rho_texture_path, TextureColorSpace::Srgb)?,
+            base_color,
+            base_color_texture: load_optional_color_texture(
+                base_color_texture_path,
+                TextureColorSpace::Srgb,
+            )?,
+            roughness,
+            roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
+            anisotropy,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -110,37 +135,47 @@ impl NormalizedLambertMaterial {
         shading_vertex: &ShadingVertex,
         rng: &mut ThreadRng,
     ) -> Option<MaterialSample> {
+        if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
+            return None;
+        }
+
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let bsdf = NormalizedLambertBsdf::new(self.rho_at(shading_vertex));
-        let sample = bsdf.sample(wo_local, us)?;
+        let roughness = self.roughness_at(shading_vertex);
+        let (alpha_x, alpha_y) = self.alpha_xy_from_roughness(roughness);
+        let bsdf =
+            ConductorGgxCui2023Bsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
+        let sample = bsdf.sample(wo_local, rng)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
-        let sample = MaterialSample {
+        if wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
+            return None;
+        }
+
+        let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
+            2.0 * roughness.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        Some(MaterialSample {
             weight: sample.weight,
             wi,
             pdf: sample.pdf,
             flags: sample.flags,
             eta: sample.eta,
-            cone_spread: DIFFUSE_CONE_SPREAD,
+            cone_spread,
             wavelength_lock: None,
-        };
-
-        if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
-            return None;
-        }
-
-        Some(sample)
+        })
     }
 
     pub fn eval(
         &self,
         shading_vertex: &ShadingVertex,
         wi: Vec3,
-        _internal_rng: &mut ThreadRng,
+        internal_rng: &mut ThreadRng,
     ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
@@ -151,8 +186,10 @@ impl NormalizedLambertMaterial {
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
-        let bsdf = NormalizedLambertBsdf::new(self.rho_at(shading_vertex));
-        bsdf.eval(wo_local, wi_local)
+        let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
+        let bsdf =
+            ConductorGgxCui2023Bsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
+        bsdf.eval(wo_local, wi_local, internal_rng)
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -165,7 +202,9 @@ impl NormalizedLambertMaterial {
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
-        let bsdf = NormalizedLambertBsdf::new(self.rho_at(shading_vertex));
+        let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
+        let bsdf =
+            ConductorGgxCui2023Bsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
         bsdf.pdf(wo_local, wi_local)
     }
 
@@ -185,16 +224,21 @@ impl NormalizedLambertMaterial {
         &self,
         shading_vertex: &ShadingVertex,
     ) -> Option<crate::light_tree::LightTreePrecompute> {
-        let rho = crate::math::sg::luminance(self.rho_at(shading_vertex));
-        if rho <= 0.0 {
-            return None;
-        }
+        let rho = crate::math::sg::luminance(self.base_color_at(shading_vertex));
+        let alpha = self.alpha_xy_at(shading_vertex);
+        let glossy = crate::light_tree::make_glossy_lobe(
+            rho,
+            shading_vertex.frame,
+            shading_vertex.wo,
+            alpha.0,
+            alpha.1,
+        )?;
         Some(crate::light_tree::LightTreePrecompute {
             p: shading_vertex.p,
             n: shading_vertex.ns,
             frame: shading_vertex.frame,
-            diffuse: Some(crate::light_tree::DiffuseLobePrecompute { rho }),
-            glossy: None,
+            diffuse: None,
+            glossy: Some(glossy),
             btdf: None,
         })
     }
@@ -205,15 +249,34 @@ impl NormalizedLambertMaterial {
         w: f32,
         lobe: &crate::math::sg::SgLobe,
     ) -> f32 {
-        precompute.diffuse.map_or(0.0, |d| {
-            crate::light_tree::diffuse_importance(d, precompute.n, w, lobe)
+        precompute.glossy.map_or(0.0, |g| {
+            crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe)
         })
     }
 
-    fn rho_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.rho)
+    fn alpha_xy_at(&self, shading_vertex: &ShadingVertex) -> (f32, f32) {
+        self.alpha_xy_from_roughness(self.roughness_at(shading_vertex))
+    }
+
+    fn alpha_xy_from_roughness(&self, roughness: f32) -> (f32, f32) {
+        let roughness = roughness.clamp(0.0, 1.0);
+        let anisotropy = self.anisotropy.clamp(-1.0, 1.0);
+        let alpha = roughness * roughness;
+        let aspect = (1.0 - 0.9 * anisotropy.abs()).sqrt();
+        let (alpha_x, alpha_y) = if anisotropy >= 0.0 {
+            (alpha / aspect, alpha * aspect)
+        } else {
+            (alpha * aspect, alpha / aspect)
+        };
+        let alpha_x = alpha_x.clamp(MIN_ALPHA, 1.0);
+        let alpha_y = alpha_y.clamp(MIN_ALPHA, 1.0);
+        (alpha_x, alpha_y)
+    }
+
+    fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
+        srgb_to_linear(self.base_color)
             * self
-                .rho_texture
+                .base_color_texture
                 .as_ref()
                 .map(|texture| {
                     texture.sample_filtered(
@@ -224,76 +287,19 @@ impl NormalizedLambertMaterial {
                 })
                 .unwrap_or(Vec3::ONE)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use std::{f32::consts::PI, sync::Arc};
-
-    use glam::{Vec2, Vec3};
-
-    use crate::{
-        material::{NormalizedLambertMaterial, ShadingVertex, Texture},
-        math::OrthonormalBasis,
-        scene::{InstanceIndex, TriangleRef},
-    };
-
-    fn test_shading_vertex(uv: Vec2) -> ShadingVertex {
-        ShadingVertex {
-            triangle: TriangleRef {
-                instance_index: InstanceIndex(0),
-                triangle_index: 0,
-            },
-            p: Vec3::ZERO,
-            uv,
-            dudx: 0.0,
-            dvdx: 0.0,
-            dudy: 0.0,
-            dvdy: 0.0,
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-            wo: Vec3::Z,
-            dpdu: Vec3::X,
-            dpdv: Vec3::Y,
-            dpdx: Vec3::ZERO,
-            dpdy: Vec3::ZERO,
-            dndu: Vec3::ZERO,
-            dndv: Vec3::ZERO,
-            frame: OrthonormalBasis::from_normal(Vec3::Z),
-            front_face: true,
-            wavelength_lock: None,
-        }
-    }
-
-    #[test]
-    fn texture_modulates_rho() {
-        let material = NormalizedLambertMaterial {
-            rho: Vec3::ONE,
-            rho_texture: Some(Arc::new(Texture::from_pixels(
-                1,
-                1,
-                vec![Vec3::new(0.2, 0.4, 0.6)],
-            ))),
-            normal_map: None,
-            normal_strength: 1.0,
-            opacity: 1.0,
-            opacity_texture: None,
-        };
-        let vtx = test_shading_vertex(Vec2::ZERO);
-
-        let mut rng = rand::rng();
-        assert!(
-            material
-                .eval(&vtx, Vec3::Z, &mut rng)
-                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) / PI, 1.0e-6)
-        );
-    }
-
-    #[test]
-    fn none_texture_keeps_existing_rho() {
-        let material = NormalizedLambertMaterial::try_new_with_texture_path(Vec3::ONE, None, None)
-            .expect("None texture should not try to load an image");
-
-        assert_eq!(material, NormalizedLambertMaterial::new(Vec3::ONE));
+    fn roughness_at(&self, shading_vertex: &ShadingVertex) -> f32 {
+        self.roughness
+            * self
+                .roughness_texture
+                .as_ref()
+                .map(|texture| {
+                    texture.sample_filtered(
+                        shading_vertex.uv,
+                        shading_vertex.uv_dx(),
+                        shading_vertex.uv_dy(),
+                    )
+                })
+                .unwrap_or(1.0)
     }
 }
