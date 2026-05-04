@@ -136,7 +136,12 @@ impl NormalizedLambertMaterial {
         Some(sample)
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _internal_rng: &mut ThreadRng,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -276,9 +281,10 @@ mod tests {
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
 
+        let mut rng = rand::rng();
         assert!(
             material
-                .eval(&vtx, Vec3::Z)
+                .eval(&vtx, Vec3::Z, &mut rng)
                 .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) / PI, 1.0e-6)
         );
     }

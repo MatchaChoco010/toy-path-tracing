@@ -50,7 +50,12 @@ impl EmissiveMaterial {
         None
     }
 
-    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3) -> Vec3 {
+    pub fn eval(
+        &self,
+        _shading_vertex: &ShadingVertex,
+        _wi: Vec3,
+        _internal_rng: &mut ThreadRng,
+    ) -> Vec3 {
         Vec3::ZERO
     }
 

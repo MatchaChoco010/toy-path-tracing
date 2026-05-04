@@ -546,7 +546,12 @@ impl StandardSurfaceMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _internal_rng: &mut ThreadRng,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -872,7 +877,8 @@ mod tests {
     fn evaluates_finite_for_default_setup() {
         let m = material_with_luts();
         let v = test_shading_vertex(Vec3::Z);
-        let f = m.eval(&v, Vec3::new(0.2, 0.3, 0.9327379).normalize());
+        let mut rng = rand::rng();
+        let f = m.eval(&v, Vec3::new(0.2, 0.3, 0.9327379).normalize(), &mut rng);
         assert!(f.is_finite());
     }
 }

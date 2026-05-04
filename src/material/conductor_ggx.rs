@@ -176,7 +176,12 @@ impl ConductorGgxMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _internal_rng: &mut ThreadRng,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -357,7 +362,8 @@ mod tests {
         let vtx = test_shading_vertex(Vec3::Z);
         let wi = Vec3::new(0.0, 0.0, 1.0);
 
-        assert!(material.eval(&vtx, wi).max_element().is_finite());
+        let mut rng = rand::rng();
+        assert!(material.eval(&vtx, wi, &mut rng).max_element().is_finite());
     }
 
     #[test]

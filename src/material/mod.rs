@@ -138,17 +138,22 @@ impl Material {
         }
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        internal_rng: &mut ThreadRng,
+    ) -> Vec3 {
         match self {
-            Self::NormalizedLambert(material) => material.eval(shading_vertex, wi),
-            Self::Mirror(material) => material.eval(shading_vertex, wi),
-            Self::ConductorGgx(material) => material.eval(shading_vertex, wi),
-            Self::DielectricGgx(material) => material.eval(shading_vertex, wi),
-            Self::Glass(material) => material.eval(shading_vertex, wi),
-            Self::SimplePBR(material) => material.eval(shading_vertex, wi),
-            Self::DisneyBrdf(material) => material.eval(shading_vertex, wi),
-            Self::StandardSurface(material) => material.eval(shading_vertex, wi),
-            Self::Emissive(material) => material.eval(shading_vertex, wi),
+            Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::Mirror(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::ConductorGgx(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::DielectricGgx(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::Glass(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::SimplePBR(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::StandardSurface(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::Emissive(material) => material.eval(shading_vertex, wi, internal_rng),
         }
     }
 
@@ -378,15 +383,20 @@ mod tests {
     fn emissive_material_eval_is_always_zero() {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
         let shading_vertex = test_shading_vertex(Vec3::Z);
+        let mut rng = rand::rng();
 
-        assert_eq!(material.eval(&shading_vertex, Vec3::Z), Vec3::ZERO);
+        assert_eq!(
+            material.eval(&shading_vertex, Vec3::Z, &mut rng),
+            Vec3::ZERO
+        );
     }
 
     #[test]
     fn lambert_material_eval_delegates_to_bsdf() {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let shading_vertex = test_shading_vertex(Vec3::Z);
-        let f = material.eval(&shading_vertex, Vec3::Z);
+        let mut rng = rand::rng();
+        let f = material.eval(&shading_vertex, Vec3::Z, &mut rng);
 
         assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-6));
     }
@@ -457,8 +467,12 @@ mod tests {
     fn mirror_material_eval_and_pdf_are_zero() {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
         let shading_vertex = test_shading_vertex(Vec3::Z);
+        let mut rng = rand::rng();
 
-        assert_eq!(material.eval(&shading_vertex, Vec3::Z), Vec3::ZERO);
+        assert_eq!(
+            material.eval(&shading_vertex, Vec3::Z, &mut rng),
+            Vec3::ZERO
+        );
         assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
     }
 
@@ -485,8 +499,12 @@ mod tests {
     fn glass_material_eval_and_pdf_are_zero() {
         let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
         let shading_vertex = test_shading_vertex(Vec3::Z);
+        let mut rng = rand::rng();
 
-        assert_eq!(material.eval(&shading_vertex, Vec3::Z), Vec3::ZERO);
+        assert_eq!(
+            material.eval(&shading_vertex, Vec3::Z, &mut rng),
+            Vec3::ZERO
+        );
         assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
     }
 
