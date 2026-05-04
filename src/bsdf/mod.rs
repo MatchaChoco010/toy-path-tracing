@@ -1,3 +1,4 @@
+mod conductor_complex;
 mod conductor_ggx;
 mod dielectric_ggx;
 mod directional_albedo;
@@ -13,6 +14,9 @@ mod smith_ggx;
 
 use glam::Vec3;
 
+pub use conductor_complex::{
+    ConductorComplexGgxBsdf, artist_friendly_complex_ior, fresnel_complex,
+};
 pub use conductor_ggx::ConductorGgxBsdf;
 pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 pub(crate) use directional_albedo::{
