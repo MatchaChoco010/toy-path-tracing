@@ -18,11 +18,11 @@ pub fn create_scene_19() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::new(Vec3::splat(0.62)),
     ));
-    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(14.0, 1.0, 14.0));
     scene.add_instance(floor_mesh, floor_material, floor_transform);
 
-    let normal_map_path = Path::new("assets/gltf/sphere-normal.png");
+    let normal_map_path = Path::new("assets/models/sphere-normal.png");
     let mut metal_material = ConductorGgxMaterial::try_new_with_texture_paths(
         Vec3::new(0.95, 0.78, 0.42),
         0.4,
@@ -47,7 +47,7 @@ pub fn create_scene_19() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     mirror_material.normal_strength = normal_strength;
     let mirror = scene.add_material(Material::Mirror(mirror_material));
 
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_scale = uniform_scale_for_height(&sphere, 1.15);
     let sphere_pivot = Vec3::new(
         sphere.bounds.center().x,

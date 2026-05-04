@@ -12,7 +12,7 @@ use crate::{
 pub fn create_scene_27() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_extent = sphere.bounds.extent();
     let sphere_target_diameter = 1.6_f32;
     let sphere_scale = sphere_target_diameter / sphere_extent.y.max(1.0e-3);

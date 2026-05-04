@@ -14,7 +14,7 @@ use super::uniform_scale_for_height;
 pub fn create_scene_10() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_height = 0.9;
     let sphere_scale = uniform_scale_for_height(&sphere, sphere_height);
     let sphere_pivot = Vec3::new(

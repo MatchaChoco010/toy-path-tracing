@@ -17,11 +17,11 @@ pub fn create_scene_17() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let floor_material = scene.add_material(Material::NormalizedLambert(
         NormalizedLambertMaterial::try_new_with_texture_path(
             Vec3::ONE,
-            Some(Path::new("assets/gltf/floor-brick.png")),
+            Some(Path::new("assets/models/floor-brick.png")),
             None,
         )?,
     ));
-    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/gltf/floor.glb"))?);
+    let floor_mesh = scene.add_mesh(load_gltf(Path::new("assets/models/floor.glb"))?);
     let floor_transform = Mat4::from_scale(Vec3::new(10.0, 1.0, 10.0));
     scene.add_instance(floor_mesh, floor_material, floor_transform);
 
@@ -29,7 +29,7 @@ pub fn create_scene_17() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mirror_glass =
         scene.add_material(Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false)));
 
-    let sphere = load_gltf(Path::new("assets/gltf/sphere.glb"))?;
+    let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
     let sphere_scale = uniform_scale_for_height(&sphere, 1.2);
     let sphere_pivot = Vec3::new(
         sphere.bounds.center().x,
