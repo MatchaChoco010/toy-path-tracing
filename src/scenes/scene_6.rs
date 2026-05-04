@@ -31,7 +31,8 @@ pub fn create_scene_6() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     scene.add_instance(back_wall_mesh_index, wall_gray, Mat4::IDENTITY);
     let left_wall_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/models/left-wall.glb"))?);
     scene.add_instance(left_wall_mesh_index, red, Mat4::IDENTITY);
-    let right_wall_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/models/right-wall.glb"))?);
+    let right_wall_mesh_index =
+        scene.add_mesh(load_gltf(Path::new("assets/models/right-wall.glb"))?);
     scene.add_instance(right_wall_mesh_index, green, Mat4::IDENTITY);
     let light_mesh_index = scene.add_mesh(load_gltf(Path::new("assets/models/light.glb"))?);
     scene.add_instance(light_mesh_index, light, Mat4::IDENTITY);
