@@ -1,5 +1,6 @@
 mod conductor_complex;
 mod conductor_ggx;
+mod conductor_ggx_cui_2023;
 mod dielectric_ggx;
 mod directional_albedo;
 mod disney_brdf;
@@ -20,6 +21,7 @@ pub use conductor_complex::{
     ConductorComplexGgxBsdf, artist_friendly_complex_ior, fresnel_complex,
 };
 pub use conductor_ggx::ConductorGgxBsdf;
+pub use conductor_ggx_cui_2023::ConductorGgxCui2023Bsdf;
 pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 pub(crate) use directional_albedo::{
     DielectricGgxDirectionalAlbedoLut, DirectionalAlbedoCache, SheenDirectionalAlbedoLut,

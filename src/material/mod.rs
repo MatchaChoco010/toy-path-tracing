@@ -1,4 +1,5 @@
 mod conductor_ggx;
+mod conductor_ggx_cui_2023;
 mod dielectric_ggx;
 mod disney_brdf;
 mod emissive;
@@ -23,6 +24,7 @@ use crate::{
 pub(super) const GEOMETRIC_NORMAL_COS_EPSILON: f32 = 1.0e-6;
 
 pub use conductor_ggx::ConductorGgxMaterial;
+pub use conductor_ggx_cui_2023::ConductorGgxCui2023Material;
 pub use dielectric_ggx::DielectricGgxMaterial;
 pub use disney_brdf::DisneyBrdfMaterial;
 pub use emissive::EmissiveMaterial;
@@ -39,6 +41,7 @@ pub enum Material {
     NormalizedLambert(NormalizedLambertMaterial),
     Mirror(MirrorMaterial),
     ConductorGgx(ConductorGgxMaterial),
+    ConductorGgxCui2023(ConductorGgxCui2023Material),
     DielectricGgx(DielectricGgxMaterial),
     Glass(GlassMaterial),
     SimplePBR(SimplePbrMaterial),
@@ -97,6 +100,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Mirror(material) => material.prepare_shading_vertex(shading_vertex),
             Self::ConductorGgx(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::ConductorGgxCui2023(material) => material.prepare_shading_vertex(shading_vertex),
             Self::DielectricGgx(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Glass(material) => material.prepare_shading_vertex(shading_vertex),
             Self::SimplePBR(material) => material.prepare_shading_vertex(shading_vertex),
@@ -115,6 +119,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.sample(shading_vertex, rng),
             Self::Mirror(material) => material.sample(shading_vertex, rng),
             Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
+            Self::ConductorGgxCui2023(material) => material.sample(shading_vertex, rng),
             Self::DielectricGgx(material) => material.sample(shading_vertex, rng),
             Self::Glass(material) => material.sample(shading_vertex, rng),
             Self::SimplePBR(material) => material.sample(shading_vertex, rng),
@@ -129,6 +134,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::Mirror(material) => material.le(shading_vertex),
             Self::ConductorGgx(material) => material.le(shading_vertex),
+            Self::ConductorGgxCui2023(material) => material.le(shading_vertex),
             Self::DielectricGgx(material) => material.le(shading_vertex),
             Self::Glass(material) => material.le(shading_vertex),
             Self::SimplePBR(material) => material.le(shading_vertex),
@@ -148,6 +154,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::Mirror(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::ConductorGgx(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::ConductorGgxCui2023(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::DielectricGgx(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::Glass(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::SimplePBR(material) => material.eval(shading_vertex, wi, internal_rng),
@@ -162,6 +169,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
             Self::Mirror(material) => material.pdf(shading_vertex, wi),
             Self::ConductorGgx(material) => material.pdf(shading_vertex, wi),
+            Self::ConductorGgxCui2023(material) => material.pdf(shading_vertex, wi),
             Self::DielectricGgx(material) => material.pdf(shading_vertex, wi),
             Self::Glass(material) => material.pdf(shading_vertex, wi),
             Self::SimplePBR(material) => material.pdf(shading_vertex, wi),
@@ -176,6 +184,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.may_emit(),
             Self::Mirror(material) => material.may_emit(),
             Self::ConductorGgx(material) => material.may_emit(),
+            Self::ConductorGgxCui2023(material) => material.may_emit(),
             Self::DielectricGgx(material) => material.may_emit(),
             Self::Glass(material) => material.may_emit(),
             Self::SimplePBR(material) => material.may_emit(),
@@ -190,6 +199,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.max_emission(),
             Self::Mirror(material) => material.max_emission(),
             Self::ConductorGgx(material) => material.max_emission(),
+            Self::ConductorGgxCui2023(material) => material.max_emission(),
             Self::DielectricGgx(material) => material.max_emission(),
             Self::Glass(material) => material.max_emission(),
             Self::SimplePBR(material) => material.max_emission(),
@@ -207,6 +217,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.has_alpha_test(),
             Self::Mirror(material) => material.has_alpha_test(),
             Self::ConductorGgx(material) => material.has_alpha_test(),
+            Self::ConductorGgxCui2023(material) => material.has_alpha_test(),
             Self::DielectricGgx(material) => material.has_alpha_test(),
             Self::Glass(material) => material.has_alpha_test(),
             Self::SimplePBR(material) => material.has_alpha_test(),
@@ -227,6 +238,7 @@ impl Material {
             Self::NormalizedLambert(material) => material.any_hit(shading_vertex, u),
             Self::Mirror(material) => material.any_hit(shading_vertex, u),
             Self::ConductorGgx(material) => material.any_hit(shading_vertex, u),
+            Self::ConductorGgxCui2023(material) => material.any_hit(shading_vertex, u),
             Self::DielectricGgx(material) => material.any_hit(shading_vertex, u),
             Self::Glass(material) => material.any_hit(shading_vertex, u),
             Self::SimplePBR(material) => material.any_hit(shading_vertex, u),
@@ -252,6 +264,7 @@ impl Material {
         match self {
             Self::NormalizedLambert(material) => material.light_tree_precompute(shading_vertex),
             Self::ConductorGgx(material) => material.light_tree_precompute(shading_vertex),
+            Self::ConductorGgxCui2023(material) => material.light_tree_precompute(shading_vertex),
             Self::DielectricGgx(material) => material.light_tree_precompute(shading_vertex),
             Self::SimplePBR(material) => material.light_tree_precompute(shading_vertex),
             Self::DisneyBrdf(material) => material.light_tree_precompute(shading_vertex),
@@ -277,6 +290,9 @@ impl Material {
                 material.light_tree_importance(precompute, w, lobe)
             }
             Self::ConductorGgx(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::ConductorGgxCui2023(material) => {
+                material.light_tree_importance(precompute, w, lobe)
+            }
             Self::DielectricGgx(material) => material.light_tree_importance(precompute, w, lobe),
             Self::SimplePBR(material) => material.light_tree_importance(precompute, w, lobe),
             Self::DisneyBrdf(material) => material.light_tree_importance(precompute, w, lobe),
