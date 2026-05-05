@@ -4,7 +4,7 @@ use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
 use crate::{
-    bsdf::{BsdfFlags, ConductorGgxBsdf},
+    bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut},
     color::srgb_to_linear,
 };
 
@@ -28,6 +28,8 @@ pub struct ConductorGgxMaterial {
     pub normal_strength: f32,
     pub opacity: f32,
     pub opacity_texture: Option<Arc<ScalarTexture>>,
+    pub energy_compensation: bool,
+    pub(crate) energy_compensation_lut: Option<Arc<ConductorGgxEnergyCompensationLut>>,
 }
 
 impl ConductorGgxMaterial {
@@ -42,7 +44,21 @@ impl ConductorGgxMaterial {
             normal_strength: 1.0,
             opacity: 1.0,
             opacity_texture: None,
+            energy_compensation: false,
+            energy_compensation_lut: None,
         }
+    }
+
+    pub fn with_energy_compensation(mut self) -> Self {
+        self.energy_compensation = true;
+        self
+    }
+
+    pub(crate) fn install_energy_compensation_lut(
+        &mut self,
+        lut: Arc<ConductorGgxEnergyCompensationLut>,
+    ) {
+        self.energy_compensation_lut = Some(lut);
     }
 
     pub fn with_base_color_texture(mut self, texture: Arc<Texture>) -> Self {
@@ -96,6 +112,8 @@ impl ConductorGgxMaterial {
             normal_strength: 1.0,
             opacity: 1.0,
             opacity_texture: None,
+            energy_compensation: false,
+            energy_compensation_lut: None,
         })
     }
 
@@ -156,7 +174,7 @@ impl ConductorGgxMaterial {
             .normalize_or_zero();
         let roughness = self.roughness_at(shading_vertex);
         let (alpha_x, alpha_y) = self.alpha_xy_from_roughness(roughness);
-        let bsdf = ConductorGgxBsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
+        let bsdf = self.make_bsdf(self.base_color_at(shading_vertex), alpha_x, alpha_y);
         let sample = bsdf.sample(wo_local, us)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
         let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
@@ -192,7 +210,7 @@ impl ConductorGgxMaterial {
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
-        let bsdf = ConductorGgxBsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
+        let bsdf = self.make_bsdf(self.base_color_at(shading_vertex), alpha_x, alpha_y);
         bsdf.eval(wo_local, wi_local)
     }
 
@@ -207,7 +225,7 @@ impl ConductorGgxMaterial {
             .normalize_or_zero();
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
-        let bsdf = ConductorGgxBsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
+        let bsdf = self.make_bsdf(self.base_color_at(shading_vertex), alpha_x, alpha_y);
         bsdf.pdf(wo_local, wi_local)
     }
 
@@ -223,27 +241,52 @@ impl ConductorGgxMaterial {
         0.0
     }
 
-    /// Per-shading-point precompute for the hierarchical light tree.
-    /// Conductor: a single anisotropic glossy lobe; reflectance acts as F0.
     pub fn light_tree_precompute(
         &self,
         shading_vertex: &ShadingVertex,
     ) -> Option<crate::light_tree::LightTreePrecompute> {
-        let rho = crate::math::sg::luminance(self.base_color_at(shading_vertex));
+        let base_color = self.base_color_at(shading_vertex);
+        let rho_glossy = crate::math::sg::luminance(base_color);
         let alpha = self.alpha_xy_at(shading_vertex);
         let glossy = crate::light_tree::make_glossy_lobe(
-            rho,
+            rho_glossy,
             shading_vertex.frame,
             shading_vertex.wo,
             alpha.0,
             alpha.1,
-        )?;
+        );
+
+        let diffuse = if let Some(lut) = self.energy_compensation_lut.as_ref() {
+            let roughness_eq = (alpha.0 * alpha.1).powf(0.25);
+            let e_avg = lut.lookup_e_avg(roughness_eq);
+            let f_avg = (20.0 * base_color + Vec3::ONE) / 21.0;
+            let one_minus_e_avg = (1.0 - e_avg).max(1.0e-6);
+            let denom = Vec3::ONE - f_avg * one_minus_e_avg;
+            let denom_safe = Vec3::new(
+                denom.x.max(1.0e-6),
+                denom.y.max(1.0e-6),
+                denom.z.max(1.0e-6),
+            );
+            let f_ms = f_avg * f_avg * e_avg / denom_safe;
+            let rho_ms = crate::math::sg::luminance(f_ms * (1.0 - e_avg)).max(0.0);
+            if rho_ms > 0.0 {
+                Some(crate::light_tree::DiffuseLobePrecompute { rho: rho_ms })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if glossy.is_none() && diffuse.is_none() {
+            return None;
+        }
         Some(crate::light_tree::LightTreePrecompute {
             p: shading_vertex.p,
             n: shading_vertex.ns,
             frame: shading_vertex.frame,
-            diffuse: None,
-            glossy: Some(glossy),
+            diffuse,
+            glossy,
             btdf: None,
         })
     }
@@ -254,9 +297,27 @@ impl ConductorGgxMaterial {
         w: f32,
         lobe: &crate::math::sg::SgLobe,
     ) -> f32 {
-        precompute.glossy.map_or(0.0, |g| {
-            crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe)
-        })
+        let mut imp = 0.0;
+        if let Some(g) = precompute.glossy {
+            imp += crate::light_tree::glossy_importance(g, precompute.frame, precompute.n, w, lobe);
+        }
+        if let Some(d) = precompute.diffuse {
+            imp += crate::light_tree::diffuse_importance(d, precompute.n, w, lobe);
+        }
+        imp.max(0.0)
+    }
+
+    fn make_bsdf(&self, base_color: Vec3, alpha_x: f32, alpha_y: f32) -> ConductorGgxBsdf {
+        if let Some(lut) = self.energy_compensation_lut.as_ref() {
+            ConductorGgxBsdf::new_with_energy_compensation(
+                base_color,
+                alpha_x,
+                alpha_y,
+                Arc::clone(lut),
+            )
+        } else {
+            ConductorGgxBsdf::new(base_color, alpha_x, alpha_y)
+        }
     }
 
     #[cfg(test)]
@@ -421,6 +482,8 @@ mod tests {
             normal_strength: 1.0,
             opacity: 1.0,
             opacity_texture: None,
+            energy_compensation: false,
+            energy_compensation_lut: None,
         };
         let vtx = test_shading_vertex(Vec3::Z);
         let (alpha_x, alpha_y) = material.alpha_xy_at(&vtx);

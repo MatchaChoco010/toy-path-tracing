@@ -4,7 +4,7 @@ use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
 use crate::{
-    bsdf::{BsdfFlags, DielectricGgxBsdf},
+    bsdf::{BsdfFlags, DielectricGgxBsdf, DielectricGgxEnergyCompensationLut},
     color::srgb_to_linear,
 };
 
@@ -30,6 +30,8 @@ pub struct DielectricGgxMaterial {
     pub normal_strength: f32,
     pub opacity: f32,
     pub opacity_texture: Option<Arc<ScalarTexture>>,
+    pub energy_compensation: bool,
+    pub(crate) energy_compensation_lut: Option<Arc<DielectricGgxEnergyCompensationLut>>,
 }
 
 impl DielectricGgxMaterial {
@@ -46,7 +48,21 @@ impl DielectricGgxMaterial {
             normal_strength: 1.0,
             opacity: 1.0,
             opacity_texture: None,
+            energy_compensation: false,
+            energy_compensation_lut: None,
         }
+    }
+
+    pub fn with_energy_compensation(mut self) -> Self {
+        self.energy_compensation = true;
+        self
+    }
+
+    pub(crate) fn install_energy_compensation_lut(
+        &mut self,
+        lut: Arc<DielectricGgxEnergyCompensationLut>,
+    ) {
+        self.energy_compensation_lut = Some(lut);
     }
 
     pub fn with_color_texture(mut self, texture: Arc<Texture>) -> Self {
@@ -104,6 +120,8 @@ impl DielectricGgxMaterial {
             normal_strength: 1.0,
             opacity: 1.0,
             opacity_texture: None,
+            energy_compensation: false,
+            energy_compensation_lut: None,
         })
     }
 
@@ -172,12 +190,10 @@ impl DielectricGgxMaterial {
             .normalize_or_zero();
         let roughness = self.roughness_at(shading_vertex);
         let (alpha_x, alpha_y) = self.alpha_xy_from_roughness(roughness);
-        let bsdf = DielectricGgxBsdf::new(
+        let bsdf = self.make_bsdf(
             self.color_at(shading_vertex),
-            self.eta,
             alpha_x,
             alpha_y,
-            self.thin,
             shading_vertex.front_face,
         );
         let sample = bsdf.sample(wo_local, uc, us)?;
@@ -226,12 +242,10 @@ impl DielectricGgxMaterial {
         }
 
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
-        let bsdf = DielectricGgxBsdf::new(
+        let bsdf = self.make_bsdf(
             self.color_at(shading_vertex),
-            self.eta,
             alpha_x,
             alpha_y,
-            self.thin,
             shading_vertex.front_face,
         );
         bsdf.eval(wo_local, wi_local)
@@ -259,12 +273,10 @@ impl DielectricGgxMaterial {
         }
 
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
-        let bsdf = DielectricGgxBsdf::new(
+        let bsdf = self.make_bsdf(
             self.color_at(shading_vertex),
-            self.eta,
             alpha_x,
             alpha_y,
-            self.thin,
             shading_vertex.front_face,
         );
         bsdf.pdf(wo_local, wi_local)
@@ -326,14 +338,41 @@ impl DielectricGgxMaterial {
         } else {
             None
         };
-        if glossy.is_none() && btdf.is_none() {
+
+        let diffuse = if let Some(lut) = self.energy_compensation_lut.as_ref() {
+            let eta_o = if shading_vertex.front_face {
+                self.eta
+            } else {
+                1.0 / self.eta
+            };
+            let roughness_eq = (alpha.0 * alpha.1).powf(0.25);
+            let e_avg = lut.lookup_e_avg(roughness_eq, eta_o);
+            let f_avg_o = if eta_o >= 1.0 {
+                ((eta_o - 1.0) / (4.08567 + 1.00071 * eta_o)).clamp(0.0, 1.0)
+            } else {
+                (0.997118 + 0.1014 * eta_o
+                    - 0.965241 * eta_o * eta_o
+                    - 0.130607 * eta_o * eta_o * eta_o)
+                    .clamp(0.0, 1.0)
+            };
+            let rho_ms_r = rho_color * f_avg_o * (1.0 - e_avg).max(0.0);
+            if rho_ms_r > 0.0 {
+                Some(crate::light_tree::DiffuseLobePrecompute { rho: rho_ms_r })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if glossy.is_none() && btdf.is_none() && diffuse.is_none() {
             return None;
         }
         Some(crate::light_tree::LightTreePrecompute {
             p: shading_vertex.p,
             n: shading_vertex.ns,
             frame: shading_vertex.frame,
-            diffuse: None,
+            diffuse,
             glossy,
             btdf,
         })
@@ -352,7 +391,34 @@ impl DielectricGgxMaterial {
         if let Some(b) = precompute.btdf {
             imp += crate::light_tree::btdf_importance(b, precompute.frame, precompute.n, w, lobe);
         }
+        if let Some(d) = precompute.diffuse {
+            imp += crate::light_tree::diffuse_importance(d, precompute.n, w, lobe);
+        }
         imp.max(0.0)
+    }
+
+    fn make_bsdf(
+        &self,
+        color: Vec3,
+        alpha_x: f32,
+        alpha_y: f32,
+        front_face: bool,
+    ) -> DielectricGgxBsdf {
+        if !self.thin
+            && let Some(lut) = self.energy_compensation_lut.as_ref()
+        {
+            DielectricGgxBsdf::new_with_energy_compensation(
+                color,
+                self.eta,
+                alpha_x,
+                alpha_y,
+                self.thin,
+                front_face,
+                Arc::clone(lut),
+            )
+        } else {
+            DielectricGgxBsdf::new(color, self.eta, alpha_x, alpha_y, self.thin, front_face)
+        }
     }
 
     fn alpha_xy_at(&self, shading_vertex: &ShadingVertex) -> (f32, f32) {
@@ -533,6 +599,8 @@ mod tests {
             normal_strength: 1.0,
             opacity: 1.0,
             opacity_texture: None,
+            energy_compensation: false,
+            energy_compensation_lut: None,
         };
         let vtx = test_shading_vertex(Vec3::Z);
         let (alpha_x, alpha_y) = material.alpha_xy_at(&vtx);
