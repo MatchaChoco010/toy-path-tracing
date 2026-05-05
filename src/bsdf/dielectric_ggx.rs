@@ -1,7 +1,13 @@
+use std::f32::consts::PI;
+use std::sync::Arc;
+
 use glam::{Vec2, Vec3};
 
-use crate::math::{fresnel_dielectric, refract};
+use crate::math::{
+    cosine_weighted_hemisphere_pdf, fresnel_dielectric, refract, sample_cosine_weighted_hemisphere,
+};
 
+use super::DielectricGgxEnergyCompensationLut;
 use super::smith_ggx::{
     EFFECTIVELY_SMOOTH_ALPHA, MIN_ALPHA, ggx_d, ggx_g1, ggx_g2_height_correlated,
     is_upper_hemisphere, pdf_wm_vndf, reflect_local, reflection_half_vector, sample_wm_vndf,
@@ -9,8 +15,9 @@ use super::smith_ggx::{
 use super::{BsdfFlags, BsdfSample};
 
 const DENOM_EPS: f32 = 1.0e-6;
+const MS_DENOM_EPS: f32 = 1.0e-4;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DielectricGgxBsdf {
     color: Vec3,
     eta: f32,
@@ -19,6 +26,7 @@ pub struct DielectricGgxBsdf {
     thin: bool,
     front_face: bool,
     allowed_paths: DielectricGgxAllowedPaths,
+    energy_compensation_lut: Option<Arc<DielectricGgxEnergyCompensationLut>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +73,28 @@ impl DielectricGgxBsdf {
             thin,
             front_face,
             allowed_paths,
+            energy_compensation_lut: None,
+        }
+    }
+
+    pub(crate) fn new_with_energy_compensation(
+        color: Vec3,
+        eta: f32,
+        alpha_x: f32,
+        alpha_y: f32,
+        thin: bool,
+        front_face: bool,
+        lut: Arc<DielectricGgxEnergyCompensationLut>,
+    ) -> Self {
+        Self {
+            color,
+            eta,
+            alpha_x: alpha_x.max(MIN_ALPHA),
+            alpha_y: alpha_y.max(MIN_ALPHA),
+            thin,
+            front_face,
+            allowed_paths: DielectricGgxAllowedPaths::ReflectionAndTransmission,
+            energy_compensation_lut: Some(lut),
         }
     }
 
@@ -97,6 +127,12 @@ impl DielectricGgxBsdf {
             return Vec3::ZERO;
         }
 
+        let f_ss = self.eval_single_scattering(wo, wi);
+        let f_ms = self.eval_multi_scattering(wo, wi);
+        f_ss + f_ms
+    }
+
+    fn eval_single_scattering(&self, wo: Vec3, wi: Vec3) -> Vec3 {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
 
@@ -125,7 +161,6 @@ impl DielectricGgxBsdf {
             let f = fresnel_dielectric(cos_wo_wm, eta_i, eta_t);
             Vec3::splat(d * g * f / (4.0 * cos_o * cos_i))
         } else if wo.z * wi.z < 0.0 && self.allowed_paths.allows_transmission() {
-            // Transmission branch. Generalized half vector.
             let wm_unnorm = eta_rel * wo + wi;
             if wm_unnorm.length_squared() < 1.0e-12 {
                 return Vec3::ZERO;
@@ -139,6 +174,14 @@ impl DielectricGgxBsdf {
                 return Vec3::ZERO;
             }
             let cos_wi_wm = wi.dot(wm);
+            // Backfacing-microfacet check: only wi values that actually arise
+            // from the forward refract map have cos_wi_wm with the same sign as
+            // wi.z. Any other (wo, wi) pair is unreachable by the sampler, so
+            // the BSDF must vanish there to keep eval/pdf consistent with the
+            // sampling distribution.
+            if cos_wi_wm * wi.z < 0.0 {
+                return Vec3::ZERO;
+            }
             let den = cos_wi_wm + eta_rel * cos_wo_wm;
             if den.abs() < DENOM_EPS {
                 return Vec3::ZERO;
@@ -177,6 +220,20 @@ impl DielectricGgxBsdf {
             return 0.0;
         }
 
+        let pdf_ss = self.pdf_single_scattering(wo, wi);
+
+        if !self.compensation_active() {
+            return pdf_ss;
+        }
+
+        let ms = self.ms_params(wo);
+        let pr_ss = ms.e_avg_o.clamp(0.0, 1.0);
+        let pr_ms = (1.0 - pr_ss).max(0.0);
+        let pdf_ms = self.pdf_multi_scattering(wi, &ms);
+        pr_ss * pdf_ss + pr_ms * pdf_ms
+    }
+
+    fn pdf_single_scattering(&self, wo: Vec3, wi: Vec3) -> f32 {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
 
@@ -202,22 +259,22 @@ impl DielectricGgxBsdf {
                 };
             branch_probability * pdf_wm / (4.0 * cos_wo_wm)
         } else if wo.z * wi.z < 0.0 && self.allowed_paths.allows_transmission() {
-            // Transmission.
-            let mut wm_unnorm = eta_rel * wo + wi;
+            let wm_unnorm = eta_rel * wo + wi;
             if wm_unnorm.length_squared() < 1.0e-12 {
                 return 0.0;
             }
             let mut wm = wm_unnorm.normalize();
             if wm.z < 0.0 {
                 wm = -wm;
-                wm_unnorm = -wm_unnorm;
             }
-            let _ = wm_unnorm;
             let cos_wo_wm = wo.dot(wm);
             if cos_wo_wm <= 0.0 {
                 return 0.0;
             }
             let cos_wi_wm = wi.dot(wm);
+            if cos_wi_wm * wi.z < 0.0 {
+                return 0.0;
+            }
             let den = cos_wi_wm + eta_rel * cos_wo_wm;
             if den.abs() < DENOM_EPS {
                 return 0.0;
@@ -252,7 +309,79 @@ impl DielectricGgxBsdf {
             return self.sample_smooth_delta(wo, uc);
         }
 
-        self.sample_rough(wo, uc, us)
+        if !self.compensation_active() {
+            return self.sample_rough(wo, uc, us);
+        }
+
+        self.sample_rough_with_compensation(wo, uc, us)
+    }
+
+    fn sample_rough_with_compensation(&self, wo: Vec3, uc: f32, us: Vec2) -> Option<BsdfSample> {
+        let ms = self.ms_params(wo);
+        let pr_ss = ms.e_avg_o.clamp(0.0, 1.0);
+        let pr_ms = (1.0 - pr_ss).max(0.0);
+        if pr_ss + pr_ms <= 0.0 {
+            return None;
+        }
+
+        if uc < pr_ss {
+            // SS branch: re-map uc to [0, 1) for the inner F-based R/T pick.
+            let uc_inner = if pr_ss > 0.0 { uc / pr_ss } else { 0.0 };
+            let mut sample = self.sample_rough(wo, uc_inner, us)?;
+            // Recompute total pdf and weight using full eval / pdf so that
+            // the sample respects the multi-lobe MIS combination.
+            let pdf_ss = self.pdf_single_scattering(wo, sample.wi);
+            let pdf_ms = self.pdf_multi_scattering(sample.wi, &ms);
+            let pdf_total = pr_ss * pdf_ss + pr_ms * pdf_ms;
+            if pdf_total <= 0.0 {
+                return None;
+            }
+            let f_total = self.eval_single_scattering(wo, sample.wi)
+                + self.eval_multi_scattering_with(wo, sample.wi, &ms);
+            sample.pdf = pdf_total;
+            sample.weight = f_total * (sample.wi.z.abs() / pdf_total);
+            Some(sample)
+        } else {
+            // MS branch: sub-pick R vs T via Ratio(eta_o).
+            let uc_inner = if pr_ms > 0.0 {
+                (uc - pr_ss) / pr_ms
+            } else {
+                0.0
+            };
+            let ratio_r = ms.ratio_r.clamp(0.0, 1.0);
+            let (wi, ms_flags, eta_returned) = if uc_inner < ratio_r {
+                let wi = sample_cosine_weighted_hemisphere(us);
+                if !is_upper_hemisphere(wi) {
+                    return None;
+                }
+                (wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+            } else {
+                let wi_up = sample_cosine_weighted_hemisphere(us);
+                let wi = Vec3::new(wi_up.x, wi_up.y, -wi_up.z);
+                if wi.z >= 0.0 {
+                    return None;
+                }
+                (wi, BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION, ms.eta_rel)
+            };
+
+            let pdf_ss = self.pdf_single_scattering(wo, wi);
+            let pdf_ms = self.pdf_multi_scattering(wi, &ms);
+            let pdf_total = pr_ss * pdf_ss + pr_ms * pdf_ms;
+            if pdf_total <= 0.0 {
+                return None;
+            }
+            let f_total =
+                self.eval_single_scattering(wo, wi) + self.eval_multi_scattering_with(wo, wi, &ms);
+            let weight = f_total * (wi.z.abs() / pdf_total);
+            Some(BsdfSample {
+                weight,
+                wi,
+                pdf: pdf_total,
+                flags: ms_flags,
+                eta: eta_returned,
+                wavelength_lock: None,
+            })
+        }
     }
 
     fn sample_thin_delta(&self, wo: Vec3, uc: f32) -> Option<BsdfSample> {
@@ -443,6 +572,118 @@ impl DielectricGgxBsdf {
                 wavelength_lock: None,
             })
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MsParams {
+    eta_o: f32,
+    eta_rel: f32,
+    roughness_eq: f32,
+    e_avg_o: f32,
+    ratio_r: f32,
+    one_minus_e_avg_o: f32,
+    one_minus_e_avg_t: f32,
+}
+
+impl DielectricGgxBsdf {
+    fn compensation_active(&self) -> bool {
+        self.energy_compensation_lut.is_some()
+            && self.allowed_paths == DielectricGgxAllowedPaths::ReflectionAndTransmission
+    }
+
+    fn ms_params(&self, _wo: Vec3) -> MsParams {
+        let lut = self
+            .energy_compensation_lut
+            .as_ref()
+            .expect("ms_params called without LUT");
+        let eta_o = if self.front_face {
+            self.eta
+        } else {
+            1.0 / self.eta
+        };
+        let eta_t = 1.0 / eta_o;
+        let roughness_eq = (self.alpha_x * self.alpha_y).powf(0.25);
+
+        let e_avg_o = lut.lookup_e_avg(roughness_eq, eta_o);
+        let e_avg_t = lut.lookup_e_avg(roughness_eq, eta_t);
+        let one_minus_e_avg_o = (1.0 - e_avg_o).max(MS_DENOM_EPS);
+        let one_minus_e_avg_t = (1.0 - e_avg_t).max(MS_DENOM_EPS);
+
+        let f_avg_o = f_avg_dielectric(eta_o);
+        let f_avg_t = f_avg_dielectric(eta_t);
+        let a = (1.0 - f_avg_o) / one_minus_e_avg_t;
+        let b = (1.0 - f_avg_t) * eta_o * eta_o / one_minus_e_avg_o;
+        let x = if a + b > MS_DENOM_EPS {
+            b / (a + b)
+        } else {
+            0.5
+        };
+        let ratio_r = (1.0 - x * (1.0 - f_avg_o)).clamp(0.0, 1.0);
+
+        MsParams {
+            eta_o,
+            eta_rel: eta_t,
+            roughness_eq,
+            e_avg_o,
+            ratio_r,
+            one_minus_e_avg_o,
+            one_minus_e_avg_t,
+        }
+    }
+
+    fn eval_multi_scattering(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+        if !self.compensation_active() {
+            return Vec3::ZERO;
+        }
+        let ms = self.ms_params(wo);
+        self.eval_multi_scattering_with(wo, wi, &ms)
+    }
+
+    fn eval_multi_scattering_with(&self, wo: Vec3, wi: Vec3, ms: &MsParams) -> Vec3 {
+        let lut = self
+            .energy_compensation_lut
+            .as_ref()
+            .expect("eval_multi_scattering_with called without LUT");
+
+        let cos_o = wo.z.abs();
+        let cos_i = wi.z.abs();
+        if cos_o <= 0.0 || cos_i <= 0.0 {
+            return Vec3::ZERO;
+        }
+
+        let e_o = lut.lookup_e(cos_o, ms.roughness_eq, ms.eta_o);
+        if wo.z * wi.z > 0.0 {
+            let e_i = lut.lookup_e(cos_i, ms.roughness_eq, ms.eta_o);
+            let f_ms_r = ms.ratio_r * (1.0 - e_o) * (1.0 - e_i) / (PI * ms.one_minus_e_avg_o);
+            Vec3::splat(f_ms_r)
+        } else {
+            let e_i = lut.lookup_e(cos_i, ms.roughness_eq, ms.eta_rel);
+            let radiance_scale = ms.eta_o * ms.eta_o;
+            let f_ms_t = (1.0 - ms.ratio_r) * (1.0 - e_o) * (1.0 - e_i) * radiance_scale
+                / (PI * ms.one_minus_e_avg_t);
+            self.color * f_ms_t
+        }
+    }
+
+    fn pdf_multi_scattering(&self, wi: Vec3, ms: &MsParams) -> f32 {
+        if wi.z > 0.0 {
+            ms.ratio_r * cosine_weighted_hemisphere_pdf(wi.z)
+        } else if wi.z < 0.0 {
+            (1.0 - ms.ratio_r) * cosine_weighted_hemisphere_pdf(-wi.z)
+        } else {
+            0.0
+        }
+    }
+}
+
+fn f_avg_dielectric(eta: f32) -> f32 {
+    if eta >= 1.0 {
+        ((eta - 1.0) / (4.08567 + 1.00071 * eta)).clamp(0.0, 1.0)
+    } else {
+        let e = eta.max(MS_DENOM_EPS);
+        let v = 0.997118 + 0.1014 * e - 0.965241 * e * e - 0.130607 * e * e * e;
+        v.clamp(0.0, 1.0)
     }
 }
 
@@ -698,5 +939,136 @@ mod tests {
         // wi == wo.z small positive but non-physical reflection pair; eval uses
         // generalized half vector logic and should not produce energy.
         assert_eq!(bsdf.eval(Vec3::Z, Vec3::ZERO), Vec3::ZERO);
+    }
+
+    fn van_der_corput(n: u32, base: u32) -> f32 {
+        let mut q = 0.0_f32;
+        let mut bk = 1.0 / base as f32;
+        let mut nn = n;
+        while nn > 0 {
+            q += (nn % base) as f32 * bk;
+            nn /= base;
+            bk /= base as f32;
+        }
+        q
+    }
+
+    fn halton2(i: u32) -> Vec2 {
+        Vec2::new(van_der_corput(i + 1, 2), van_der_corput(i + 1, 3))
+    }
+
+    fn estimate_irradiance_via_quadrature(bsdf: &DielectricGgxBsdf, wo: Vec3, eta: f32) -> f32 {
+        let inv_eta_sq = 1.0 / (eta * eta);
+        let n = 4096_u32;
+        let mut sum = 0.0_f32;
+        for index in 0..n {
+            let uc = van_der_corput(index + 1, 5);
+            let us = halton2(index);
+            let Some(sample) = bsdf.sample(wo, uc, us) else {
+                continue;
+            };
+            if !sample.weight.x.is_finite() {
+                continue;
+            }
+            let scale = if sample.flags.contains(BsdfFlags::TRANSMISSION) {
+                inv_eta_sq
+            } else {
+                1.0
+            };
+            sum += sample.weight.x * scale;
+        }
+        sum / n as f32
+    }
+
+    #[test]
+    fn compensation_passes_white_furnace_full_sphere() {
+        use std::sync::Arc;
+
+        use crate::bsdf::DielectricGgxEnergyCompensationLut;
+
+        let lut = Arc::new(DielectricGgxEnergyCompensationLut::build_for_tests());
+
+        let cases = [
+            (1.5_f32, 0.05_f32),
+            (1.5, 0.15),
+            (1.5, 0.3),
+            (1.5, 0.6),
+            (1.5, 0.9),
+            (1.5, 1.0),
+            (1.33, 0.7),
+            (2.4, 0.5),
+        ];
+        let mut report = Vec::new();
+        let mut max_err = 0.0_f32;
+        for (eta, alpha) in cases {
+            let bsdf = DielectricGgxBsdf::new_with_energy_compensation(
+                Vec3::ONE,
+                eta,
+                alpha,
+                alpha,
+                false,
+                true,
+                Arc::clone(&lut),
+            );
+            let wo = Vec3::new(0.3, -0.2, 0.9327379).normalize();
+            let energy = estimate_irradiance_via_quadrature(&bsdf, wo, eta);
+            let err = (energy - 1.0).abs();
+            max_err = max_err.max(err);
+            report.push(format!("eta={eta} alpha={alpha} energy={energy:.4}"));
+        }
+        assert!(
+            max_err < 0.02,
+            "white furnace error {max_err:.4} exceeds tolerance:\n  {}",
+            report.join("\n  "),
+        );
+    }
+
+    #[test]
+    fn compensation_off_matches_existing_eval() {
+        let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 0.3, 0.3, false, true);
+        let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
+        let wi = Vec3::new(-0.2, 0.3, 0.9327379).normalize();
+        let f = bsdf.eval(wo, wi);
+        let pdf = bsdf.pdf(wo, wi);
+        assert!(f.is_finite());
+        assert!(pdf.is_finite());
+    }
+
+    #[test]
+    fn compensation_sample_weight_matches_eval_cos_over_pdf() {
+        use std::sync::Arc;
+
+        use crate::bsdf::DielectricGgxEnergyCompensationLut;
+
+        let lut = Arc::new(DielectricGgxEnergyCompensationLut::build_for_tests());
+        let bsdf = DielectricGgxBsdf::new_with_energy_compensation(
+            Vec3::new(0.85, 0.95, 0.95),
+            1.5,
+            0.4,
+            0.4,
+            false,
+            true,
+            lut,
+        );
+        let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
+
+        for x in 0..3 {
+            for y in 0..3 {
+                for c in 0..3 {
+                    let uc = (c as f32 + 0.5) / 3.0;
+                    let us = Vec2::new((x as f32 + 0.5) / 3.0, (y as f32 + 0.5) / 3.0);
+                    if let Some(sample) = bsdf.sample(wo, uc, us) {
+                        let f = bsdf.eval(wo, sample.wi);
+                        let expected = f * (sample.wi.z.abs() / sample.pdf);
+                        assert!(
+                            sample.weight.abs_diff_eq(expected, 8.0e-3),
+                            "uc={uc} us={us:?} weight={:?} expected={:?}",
+                            sample.weight,
+                            expected,
+                        );
+                    }
+                }
+            }
+        }
     }
 }

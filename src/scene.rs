@@ -141,6 +141,23 @@ impl Scene {
             standard.install_coat_lut(coat_lut);
             standard.install_sheen_lut(sheen_lut);
         }
+        if let Material::ConductorGgx(conductor) = &mut material
+            && conductor.energy_compensation
+        {
+            let lut = self
+                .directional_albedo_cache
+                .get_or_build_conductor_ggx_energy_compensation();
+            conductor.install_energy_compensation_lut(lut);
+        }
+        if let Material::DielectricGgx(dielectric) = &mut material
+            && dielectric.energy_compensation
+            && !dielectric.thin
+        {
+            let lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx_energy_compensation();
+            dielectric.install_energy_compensation_lut(lut);
+        }
 
         let material_index = MaterialIndex(self.materials.len());
         self.materials.push(material);

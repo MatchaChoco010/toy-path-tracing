@@ -1,7 +1,13 @@
+use std::f32::consts::PI;
+use std::sync::Arc;
+
 use glam::{Vec2, Vec3};
 
-use crate::math::schlick_fresnel;
+use crate::math::{
+    cosine_weighted_hemisphere_pdf, sample_cosine_weighted_hemisphere, schlick_fresnel,
+};
 
+use super::ConductorGgxEnergyCompensationLut;
 use super::smith_ggx::{
     EFFECTIVELY_SMOOTH_ALPHA, MIN_ALPHA, ggx_g1, ggx_g2_height_correlated, is_upper_hemisphere,
     pdf_wm_bounded_vndf, pdf_wm_vndf, reflect_local, reflection_half_vector,
@@ -9,11 +15,12 @@ use super::smith_ggx::{
 };
 use super::{BsdfFlags, BsdfSample};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConductorGgxBsdf {
     base_color: Vec3,
     alpha_x: f32,
     alpha_y: f32,
+    energy_compensation_lut: Option<Arc<ConductorGgxEnergyCompensationLut>>,
 }
 
 impl ConductorGgxBsdf {
@@ -22,6 +29,21 @@ impl ConductorGgxBsdf {
             base_color: base_color.clamp(Vec3::ZERO, Vec3::ONE),
             alpha_x: alpha_x.max(MIN_ALPHA),
             alpha_y: alpha_y.max(MIN_ALPHA),
+            energy_compensation_lut: None,
+        }
+    }
+
+    pub(crate) fn new_with_energy_compensation(
+        base_color: Vec3,
+        alpha_x: f32,
+        alpha_y: f32,
+        lut: Arc<ConductorGgxEnergyCompensationLut>,
+    ) -> Self {
+        Self {
+            base_color: base_color.clamp(Vec3::ZERO, Vec3::ONE),
+            alpha_x: alpha_x.max(MIN_ALPHA),
+            alpha_y: alpha_y.max(MIN_ALPHA),
+            energy_compensation_lut: Some(lut),
         }
     }
 
@@ -30,6 +52,101 @@ impl ConductorGgxBsdf {
             return Vec3::ZERO;
         }
 
+        let f_ss = self.eval_single_scattering(wo, wi);
+        let f_ms = self.eval_multi_scattering(wo, wi);
+        f_ss + f_ms
+    }
+
+    pub fn pdf(&self, wo: Vec3, wi: Vec3) -> f32 {
+        if !is_upper_hemisphere(wo) || !is_upper_hemisphere(wi) || self.effectively_smooth() {
+            return 0.0;
+        }
+
+        let pdf_ss = self.pdf_single_scattering(wo, wi);
+
+        if let Some(lut) = self.energy_compensation_lut.as_ref() {
+            let roughness_eq = self.roughness_eq();
+            let e_avg = lut.lookup_e_avg(roughness_eq);
+            let pr_ss = e_avg.clamp(0.0, 1.0);
+            let pr_ms = (1.0 - pr_ss).max(0.0);
+            let pdf_ms = cosine_weighted_hemisphere_pdf(wi.z.max(0.0));
+            pr_ss * pdf_ss + pr_ms * pdf_ms
+        } else {
+            pdf_ss
+        }
+    }
+
+    pub fn sample(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+        if !is_upper_hemisphere(wo) {
+            return None;
+        }
+
+        if self.effectively_smooth() {
+            return self.sample_smooth(wo);
+        }
+
+        if let Some(lut) = self.energy_compensation_lut.as_ref() {
+            let roughness_eq = self.roughness_eq();
+            let e_avg = lut.lookup_e_avg(roughness_eq);
+            let pr_ss = e_avg.clamp(0.0, 1.0);
+            let pr_ms = (1.0 - pr_ss).max(0.0);
+            if pr_ss + pr_ms <= 0.0 {
+                return None;
+            }
+            let (use_ss, us_remapped) = if us.x < pr_ss {
+                let remapped = if pr_ss > 0.0 { us.x / pr_ss } else { 0.0 };
+                (true, Vec2::new(remapped, us.y))
+            } else {
+                let remapped = if pr_ms > 0.0 {
+                    (us.x - pr_ss) / pr_ms
+                } else {
+                    0.0
+                };
+                (false, Vec2::new(remapped, us.y))
+            };
+
+            if use_ss {
+                let mut sample = self.sample_single_scattering(wo, us_remapped)?;
+                let pdf_ms = cosine_weighted_hemisphere_pdf(sample.wi.z.max(0.0));
+                let pdf_ss = sample.pdf;
+                let pdf_total = pr_ss * pdf_ss + pr_ms * pdf_ms;
+                if pdf_total <= 0.0 {
+                    return None;
+                }
+                let f_total = self.eval_single_scattering(wo, sample.wi)
+                    + self.eval_multi_scattering(wo, sample.wi);
+                sample.pdf = pdf_total;
+                sample.weight = f_total * (sample.wi.z.max(0.0) / pdf_total);
+                Some(sample)
+            } else {
+                let wi = sample_cosine_weighted_hemisphere(us_remapped);
+                if !is_upper_hemisphere(wi) {
+                    return None;
+                }
+                let pdf_ms = cosine_weighted_hemisphere_pdf(wi.z);
+                let pdf_ss = self.pdf_single_scattering(wo, wi);
+                let pdf_total = pr_ss * pdf_ss + pr_ms * pdf_ms;
+                if pdf_total <= 0.0 {
+                    return None;
+                }
+                let f_total =
+                    self.eval_single_scattering(wo, wi) + self.eval_multi_scattering(wo, wi);
+                let weight = f_total * (wi.z / pdf_total);
+                Some(BsdfSample {
+                    weight,
+                    wi,
+                    pdf: pdf_total,
+                    flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
+                    eta: 1.0,
+                    wavelength_lock: None,
+                })
+            }
+        } else {
+            self.sample_single_scattering(wo, us)
+        }
+    }
+
+    fn eval_single_scattering(&self, wo: Vec3, wi: Vec3) -> Vec3 {
         let Some(wm) = reflection_half_vector(wo, wi) else {
             return Vec3::ZERO;
         };
@@ -54,29 +171,35 @@ impl ConductorGgxBsdf {
         f * (d * g / (4.0 * cos_theta_o * cos_theta_i))
     }
 
-    pub fn pdf(&self, wo: Vec3, wi: Vec3) -> f32 {
-        if !is_upper_hemisphere(wo) || !is_upper_hemisphere(wi) || self.effectively_smooth() {
-            return 0.0;
+    fn eval_multi_scattering(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+        let Some(lut) = self.energy_compensation_lut.as_ref() else {
+            return Vec3::ZERO;
+        };
+        let cos_o = wo.z.max(0.0);
+        let cos_i = wi.z.max(0.0);
+        if cos_o <= 0.0 || cos_i <= 0.0 {
+            return Vec3::ZERO;
         }
+        let roughness_eq = self.roughness_eq();
+        let e_o = lut.lookup_e(cos_o, roughness_eq);
+        let e_i = lut.lookup_e(cos_i, roughness_eq);
+        let e_avg = lut.lookup_e_avg(roughness_eq);
+        let one_minus_e_avg = (1.0 - e_avg).max(MS_DENOM_EPS);
+        let f_avg = schlick_f_avg(self.base_color);
+        let f_ms = compute_f_ms(f_avg, e_avg);
+        f_ms * ((1.0 - e_o) * (1.0 - e_i) / (PI * one_minus_e_avg))
+    }
 
+    fn pdf_single_scattering(&self, wo: Vec3, wi: Vec3) -> f32 {
         let Some(wm) = reflection_half_vector(wo, wi) else {
             return 0.0;
         };
-
         let pdf_wm = pdf_wm_bounded_vndf(wo, wm, self.alpha_x, self.alpha_y);
         let jacobian = reflection_jacobian(wo, wm);
         pdf_wm * jacobian
     }
 
-    pub fn sample(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
-        if !is_upper_hemisphere(wo) {
-            return None;
-        }
-
-        if self.effectively_smooth() {
-            return self.sample_smooth(wo);
-        }
-
+    fn sample_single_scattering(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
         let wm = sample_wm_bounded_vndf(wo, self.alpha_x, self.alpha_y, us)?;
         let wi = reflect_local(wo, wm);
         if !is_upper_hemisphere(wi) {
@@ -118,6 +241,10 @@ impl ConductorGgxBsdf {
         })
     }
 
+    fn roughness_eq(&self) -> f32 {
+        (self.alpha_x * self.alpha_y).powf(0.25)
+    }
+
     fn sample_smooth(&self, wo: Vec3) -> Option<BsdfSample> {
         let wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize_or_zero();
         if !is_upper_hemisphere(wi) {
@@ -144,6 +271,23 @@ impl ConductorGgxBsdf {
 fn reflection_jacobian(wo: Vec3, wm: Vec3) -> f32 {
     let denom = 4.0 * wo.dot(wm).abs();
     if denom <= 0.0 { 0.0 } else { 1.0 / denom }
+}
+
+const MS_DENOM_EPS: f32 = 1.0e-6;
+
+fn schlick_f_avg(f0: Vec3) -> Vec3 {
+    (20.0 * f0 + Vec3::ONE) / 21.0
+}
+
+fn compute_f_ms(f_avg: Vec3, e_avg: f32) -> Vec3 {
+    let one_minus_eavg = (1.0 - e_avg).max(0.0);
+    let denom = Vec3::ONE - f_avg * one_minus_eavg;
+    let denom_safe = Vec3::new(
+        denom.x.max(MS_DENOM_EPS),
+        denom.y.max(MS_DENOM_EPS),
+        denom.z.max(MS_DENOM_EPS),
+    );
+    f_avg * f_avg * e_avg / denom_safe
 }
 
 #[cfg(test)]
@@ -281,6 +425,76 @@ mod tests {
                     assert_eq!(sample.flags, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn schlick_f_avg_matches_closed_form_for_f0() {
+        let f0 = Vec3::new(0.04, 0.5, 0.92);
+        let expected = (20.0 * f0 + Vec3::ONE) / 21.0;
+        assert!(super::schlick_f_avg(f0).abs_diff_eq(expected, 1.0e-6));
+    }
+
+    #[test]
+    fn compensation_passes_white_furnace_at_high_roughness() {
+        use std::sync::Arc;
+
+        use crate::bsdf::ConductorGgxEnergyCompensationLut;
+
+        let lut = Arc::new(ConductorGgxEnergyCompensationLut::build_for_tests());
+
+        for &alpha in &[0.05_f32, 0.2, 0.4, 0.7, 1.0] {
+            let bsdf = ConductorGgxBsdf::new_with_energy_compensation(
+                Vec3::ONE,
+                alpha,
+                alpha,
+                Arc::clone(&lut),
+            );
+            let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
+            let energy = integrate_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+            assert!(
+                energy.x > 0.97 && energy.x < 1.03,
+                "alpha={alpha}, energy={energy:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn compensation_off_matches_single_scattering_eval() {
+        let bsdf = ConductorGgxBsdf::new(Vec3::new(0.9, 0.7, 0.4), 0.4, 0.25);
+        let wo = Vec3::new(0.2, -0.1, 0.9746794).normalize();
+        let wi = Vec3::new(-0.2, 0.1, 0.9746794).normalize();
+        let f = bsdf.eval(wo, wi);
+        let pdf = bsdf.pdf(wo, wi);
+        assert!(f.is_finite());
+        assert!(pdf.is_finite());
+        assert!(pdf > 0.0);
+    }
+
+    #[test]
+    fn compensation_sample_weight_matches_eval_cos_over_pdf() {
+        use std::sync::Arc;
+
+        use crate::bsdf::ConductorGgxEnergyCompensationLut;
+
+        let lut = Arc::new(ConductorGgxEnergyCompensationLut::build_for_tests());
+        let bsdf =
+            ConductorGgxBsdf::new_with_energy_compensation(Vec3::new(0.9, 0.7, 0.4), 0.4, 0.4, lut);
+        let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
+
+        for (x_index, y_index) in [(1, 1), (1, 3), (3, 2), (2, 0)] {
+            let us = Vec2::new((x_index as f32 + 0.5) / 4.0, (y_index as f32 + 0.5) / 4.0);
+            let sample = bsdf
+                .sample(wo, us)
+                .expect("expected glossy sample with compensation");
+            let f = bsdf.eval(wo, sample.wi);
+            let expected = f * (sample.wi.z / sample.pdf);
+            assert!(
+                sample.weight.abs_diff_eq(expected, 5.0e-3),
+                "us={us:?} weight={:?} expected={:?}",
+                sample.weight,
+                expected,
+            );
         }
     }
 }

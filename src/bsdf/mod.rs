@@ -24,7 +24,8 @@ pub use conductor_ggx::ConductorGgxBsdf;
 pub use conductor_ggx_cui_2023::ConductorGgxCui2023Bsdf;
 pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 pub(crate) use directional_albedo::{
-    DielectricGgxDirectionalAlbedoLut, DirectionalAlbedoCache, SheenDirectionalAlbedoLut,
+    ConductorGgxEnergyCompensationLut, DielectricGgxDirectionalAlbedoLut,
+    DielectricGgxEnergyCompensationLut, DirectionalAlbedoCache, SheenDirectionalAlbedoLut,
     sanitize_dielectric_eta,
 };
 pub use disney_brdf::DisneyBrdfBsdf;
