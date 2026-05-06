@@ -5,6 +5,7 @@ mod dielectric_ggx;
 mod directional_albedo;
 mod disney_brdf;
 pub(crate) mod dispersion;
+mod eon;
 mod glass;
 mod gtr1;
 mod mirror;
@@ -29,6 +30,7 @@ pub(crate) use directional_albedo::{
     sanitize_dielectric_eta,
 };
 pub use disney_brdf::DisneyBrdfBsdf;
+pub use eon::EonBsdf;
 pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;

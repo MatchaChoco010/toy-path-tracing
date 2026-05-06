@@ -94,6 +94,7 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `38` | 一様な白い環境光 (intensity `1.0`) のもと、`F0 = (1, 1, 1)` / `color = (1, 1, 1)` の球を 9 列 × 4 段で並べる。上から SS Conductor、SS Dielectric (`eta = 1.5`)、MS Conductor、MS Dielectric の順、各段とも roughness を左から右へ `0.0` → `1.0` で振る。 |
 | `39` | `assets/sky/brown_photostudio_02_4k.hdr` の IBL のもと、sRGB ゴールド (`F0 = (1.00, 0.78, 0.34)`) の Conductor GGX 球を 9 列 × 2 段で並べる。上段が compensation OFF、下段が `with_energy_compensation()` 有効、各段とも roughness を左から右へ `0.0` → `1.0` で振る。 |
 | `40` | `assets/mori-knob/floor.obj` の白い床に、`assets/glavenus/` の Glavenus STL モデル (base / body / horns / head / legs / tail の 9 パーツ) を配置。base パーツを白の NormalizedLambert、それ以外をオレンジ系の NormalizedLambert にする。`assets/mori-knob/light.obj` の Emissive ライトと `assets/sky/brown_photostudio_02_4k.hdr` の IBL で照らす。 |
+| `41` | scene 40 と同じ床 / ライト / IBL / カメラのもと、Glavenus 全パーツのマテリアルを `roughness = 1.0` の EON (energy-preserving Oren-Nayar) に置き換える。base は白、それ以外はオレンジ系。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

@@ -3,6 +3,7 @@ mod conductor_ggx_cui_2023;
 mod dielectric_ggx;
 mod disney_brdf;
 mod emissive;
+mod eon;
 mod glass;
 mod mirror;
 mod normal_map;
@@ -28,6 +29,7 @@ pub use conductor_ggx_cui_2023::ConductorGgxCui2023Material;
 pub use dielectric_ggx::DielectricGgxMaterial;
 pub use disney_brdf::DisneyBrdfMaterial;
 pub use emissive::EmissiveMaterial;
+pub use eon::EonMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
 pub use normal_map::NormalMap;
@@ -39,6 +41,7 @@ pub use texture::{ScalarTexture, Texture, TextureColorSpace};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Material {
     NormalizedLambert(NormalizedLambertMaterial),
+    Eon(EonMaterial),
     Mirror(MirrorMaterial),
     ConductorGgx(ConductorGgxMaterial),
     ConductorGgxCui2023(ConductorGgxCui2023Material),
@@ -98,6 +101,7 @@ impl Material {
     pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
         match self {
             Self::NormalizedLambert(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::Eon(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Mirror(material) => material.prepare_shading_vertex(shading_vertex),
             Self::ConductorGgx(material) => material.prepare_shading_vertex(shading_vertex),
             Self::ConductorGgxCui2023(material) => material.prepare_shading_vertex(shading_vertex),
@@ -117,6 +121,7 @@ impl Material {
     ) -> Option<MaterialSample> {
         match self {
             Self::NormalizedLambert(material) => material.sample(shading_vertex, rng),
+            Self::Eon(material) => material.sample(shading_vertex, rng),
             Self::Mirror(material) => material.sample(shading_vertex, rng),
             Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
             Self::ConductorGgxCui2023(material) => material.sample(shading_vertex, rng),
@@ -132,6 +137,7 @@ impl Material {
     pub fn le(&self, shading_vertex: &ShadingVertex) -> Option<Vec3> {
         match self {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
+            Self::Eon(material) => material.le(shading_vertex),
             Self::Mirror(material) => material.le(shading_vertex),
             Self::ConductorGgx(material) => material.le(shading_vertex),
             Self::ConductorGgxCui2023(material) => material.le(shading_vertex),
@@ -152,6 +158,7 @@ impl Material {
     ) -> Vec3 {
         match self {
             Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::Eon(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::Mirror(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::ConductorGgx(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::ConductorGgxCui2023(material) => material.eval(shading_vertex, wi, internal_rng),
@@ -167,6 +174,7 @@ impl Material {
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
         match self {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
+            Self::Eon(material) => material.pdf(shading_vertex, wi),
             Self::Mirror(material) => material.pdf(shading_vertex, wi),
             Self::ConductorGgx(material) => material.pdf(shading_vertex, wi),
             Self::ConductorGgxCui2023(material) => material.pdf(shading_vertex, wi),
@@ -182,6 +190,7 @@ impl Material {
     pub fn may_emit(&self) -> bool {
         match self {
             Self::NormalizedLambert(material) => material.may_emit(),
+            Self::Eon(material) => material.may_emit(),
             Self::Mirror(material) => material.may_emit(),
             Self::ConductorGgx(material) => material.may_emit(),
             Self::ConductorGgxCui2023(material) => material.may_emit(),
@@ -197,6 +206,7 @@ impl Material {
     pub fn max_emission(&self) -> f32 {
         match self {
             Self::NormalizedLambert(material) => material.max_emission(),
+            Self::Eon(material) => material.max_emission(),
             Self::Mirror(material) => material.max_emission(),
             Self::ConductorGgx(material) => material.max_emission(),
             Self::ConductorGgxCui2023(material) => material.max_emission(),
@@ -215,6 +225,7 @@ impl Material {
     pub fn has_alpha_test(&self) -> bool {
         match self {
             Self::NormalizedLambert(material) => material.has_alpha_test(),
+            Self::Eon(material) => material.has_alpha_test(),
             Self::Mirror(material) => material.has_alpha_test(),
             Self::ConductorGgx(material) => material.has_alpha_test(),
             Self::ConductorGgxCui2023(material) => material.has_alpha_test(),
@@ -236,6 +247,7 @@ impl Material {
     pub fn any_hit(&self, shading_vertex: &ShadingVertex, u: f32) -> bool {
         match self {
             Self::NormalizedLambert(material) => material.any_hit(shading_vertex, u),
+            Self::Eon(material) => material.any_hit(shading_vertex, u),
             Self::Mirror(material) => material.any_hit(shading_vertex, u),
             Self::ConductorGgx(material) => material.any_hit(shading_vertex, u),
             Self::ConductorGgxCui2023(material) => material.any_hit(shading_vertex, u),
@@ -263,6 +275,7 @@ impl Material {
     ) -> Option<LightTreePrecompute> {
         match self {
             Self::NormalizedLambert(material) => material.light_tree_precompute(shading_vertex),
+            Self::Eon(material) => material.light_tree_precompute(shading_vertex),
             Self::ConductorGgx(material) => material.light_tree_precompute(shading_vertex),
             Self::ConductorGgxCui2023(material) => material.light_tree_precompute(shading_vertex),
             Self::DielectricGgx(material) => material.light_tree_precompute(shading_vertex),
@@ -289,6 +302,7 @@ impl Material {
             Self::NormalizedLambert(material) => {
                 material.light_tree_importance(precompute, w, lobe)
             }
+            Self::Eon(material) => material.light_tree_importance(precompute, w, lobe),
             Self::ConductorGgx(material) => material.light_tree_importance(precompute, w, lobe),
             Self::ConductorGgxCui2023(material) => {
                 material.light_tree_importance(precompute, w, lobe)
