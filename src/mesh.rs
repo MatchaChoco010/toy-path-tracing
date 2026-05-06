@@ -1,5 +1,10 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use std::{collections::HashMap, fmt, fs, path::Path};
+use std::{
+    collections::HashMap,
+    fmt, fs,
+    io::{self, Read, Seek},
+    path::Path,
+};
 
 use crate::qbvh::{Qbvh, build_qbvh};
 
@@ -131,6 +136,9 @@ pub enum LoadMeshError {
         line: usize,
         message: String,
     },
+    Stl {
+        message: String,
+    },
     EmptyMesh,
     MissingPositions {
         mesh_index: usize,
@@ -154,6 +162,7 @@ impl fmt::Display for LoadMeshError {
             Self::Gltf(error) => write!(f, "{error}"),
             Self::Io(error) => write!(f, "{error}"),
             Self::Obj { line, message } => write!(f, "OBJ parse error on line {line}: {message}"),
+            Self::Stl { message } => write!(f, "STL parse error: {message}"),
             Self::EmptyMesh => write!(f, "the mesh asset did not contain any triangle mesh data"),
             Self::MissingPositions {
                 mesh_index,
@@ -235,6 +244,11 @@ pub fn load_gltf(path: &Path) -> Result<Mesh, LoadMeshError> {
 pub fn load_obj(path: &Path) -> Result<Mesh, LoadMeshError> {
     let source = fs::read_to_string(path)?;
     parse_obj(&source)
+}
+
+pub fn load_stl(path: &Path) -> Result<Mesh, LoadMeshError> {
+    let mut reader = fs::File::open(path)?;
+    read_stl_into_mesh(&mut reader)
 }
 
 fn append_gltf_node(
@@ -576,6 +590,50 @@ pub(crate) fn obj_error(line: usize, message: impl Into<String>) -> LoadMeshErro
     }
 }
 
+fn read_stl_into_mesh<R: Read + Seek>(reader: &mut R) -> Result<Mesh, LoadMeshError> {
+    let indexed = stl_io::read_stl(reader).map_err(stl_io_error)?;
+    build_stl_mesh(indexed)
+}
+
+fn build_stl_mesh(indexed: stl_io::IndexedMesh) -> Result<Mesh, LoadMeshError> {
+    if indexed.faces.is_empty() || indexed.vertices.is_empty() {
+        return Err(LoadMeshError::EmptyMesh);
+    }
+
+    let positions: Vec<Vec3> = indexed
+        .vertices
+        .iter()
+        .map(|vertex| Vec3::new(vertex[0], vertex[1], vertex[2]))
+        .collect();
+
+    let mut indices = Vec::with_capacity(indexed.faces.len() * 3);
+    for face in &indexed.faces {
+        for vertex_index in face.vertices {
+            indices
+                .push(u32::try_from(vertex_index).map_err(|_| LoadMeshError::VertexCountOverflow)?);
+        }
+    }
+
+    let normals = generate_vertex_normals(&positions, &indices);
+    let vertices = positions
+        .into_iter()
+        .zip(normals)
+        .map(|(position, normal)| Vertex {
+            position,
+            normal,
+            uv: Vec2::ZERO,
+        })
+        .collect();
+
+    Ok(Mesh::new(vertices, indices))
+}
+
+fn stl_io_error(error: io::Error) -> LoadMeshError {
+    LoadMeshError::Stl {
+        message: format!("{error}"),
+    }
+}
+
 pub(crate) fn generate_vertex_normals(positions: &[Vec3], indices: &[u32]) -> Vec<Vec3> {
     let mut normals = vec![Vec3::ZERO; positions.len()];
 
@@ -620,8 +678,9 @@ fn compute_bounds(vertices: &[Vertex]) -> Option<Bounds> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bounds, Mesh, Vertex, parse_obj};
+    use super::{Bounds, LoadMeshError, Mesh, Vertex, parse_obj, read_stl_into_mesh};
     use glam::{Vec2, Vec3};
+    use std::io::Cursor;
 
     #[test]
     fn triangle_accessors_follow_index_buffer() {
@@ -724,5 +783,78 @@ f -3 -2 -1
         assert_eq!(mesh.vertices.len(), 3);
         assert_eq!(mesh.indices, vec![0, 1, 2]);
         assert_eq!(mesh.triangle_normals(0), [Vec3::Z; 3]);
+    }
+
+    #[test]
+    fn load_stl_ascii_dedups_shared_vertices_and_generates_normals() {
+        let source = b"solid quad
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 1 0 0
+    vertex 1 1 0
+  endloop
+endfacet
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 1 1 0
+    vertex 0 1 0
+  endloop
+endfacet
+endsolid quad
+";
+        let mesh =
+            read_stl_into_mesh(&mut Cursor::new(&source[..])).expect("ASCII STL should load");
+
+        assert_eq!(mesh.vertices.len(), 4);
+        assert_eq!(mesh.triangle_count(), 2);
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.normal.abs_diff_eq(Vec3::Z, 1.0e-5))
+        );
+    }
+
+    #[test]
+    fn load_stl_binary_reads_one_triangle() {
+        const HEADER_BYTES: usize = 80;
+        let mut bytes = vec![0u8; HEADER_BYTES];
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        let triangle: [Vec3; 3] = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        for component in [0.0f32, 0.0, 1.0] {
+            bytes.extend_from_slice(&component.to_le_bytes());
+        }
+        for vertex in &triangle {
+            for component in [vertex.x, vertex.y, vertex.z] {
+                bytes.extend_from_slice(&component.to_le_bytes());
+            }
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+
+        let mesh = read_stl_into_mesh(&mut Cursor::new(bytes)).expect("binary STL should load");
+
+        assert_eq!(mesh.vertices.len(), 3);
+        assert_eq!(mesh.triangle_count(), 1);
+        assert_eq!(mesh.triangle_normals(0), [Vec3::Z; 3]);
+    }
+
+    #[test]
+    fn load_stl_ascii_rejects_unterminated_facet() {
+        let source = b"solid bad
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 1 0 0
+";
+        match read_stl_into_mesh(&mut Cursor::new(&source[..])) {
+            Err(LoadMeshError::Stl { .. }) | Err(LoadMeshError::EmptyMesh) => {}
+            Err(other) => panic!("expected Stl/EmptyMesh error, got {other:?}"),
+            Ok(_) => panic!("unterminated facet should not parse"),
+        }
     }
 }

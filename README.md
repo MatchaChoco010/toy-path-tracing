@@ -53,46 +53,48 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 
 | シーン番号 | 内容 |
 | --- | --- |
-| `0` | Cornell box 風の部屋に、箱とバニーを配置したシーンです。 |
-| `1` | Cornell box 風の部屋に、バニーと 2 つの球を配置したシーンです。 |
-| `2` | Cornell box 風の部屋に、完全鏡面の銀色バニーと金色の球を配置したシーンです。 |
-| `3` | Cornell box 風の部屋に、手前の透明ガラス球、左右の thin / 通常の水色ガラスバニー、球越しの歪み確認用の薄い青の Lambert バニーを配置した確認用シーンです。 |
-| `4` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.25 / 0.5 / 0.75 / 1.0` にした金色の Conductor GGX 球を 5 つ並べた確認用シーンです。 |
-| `5` | Cornell box 風の部屋に、roughness `0.3` の銀色 Conductor GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
-| `6` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6` にした透明な Dielectric GGX ガラス球を 5 つ、少しだけ宙に浮かせて並べ、地面への影と集光模様が見えるようにした確認用シーンです。 |
-| `7` | Cornell box 風の部屋に、roughness `0.3` の薄水色 Dielectric GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` の異方性違いにした確認用シーンです。 |
-| `8` | 広い Lambert 床の上に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` にした Conductor GGX 金属球を 6 つ並べ、その上段に同じ roughness 列の Dielectric GGX ガラス球を 6 つ並べ、`assets/sky/` の HDRI を IBL として読み込む屋外風シーンです。 |
-| `9` | Cornell box の中央に大きめのラフな金色 Conductor GGX (`roughness = 0.35`) のバニーを置き、天井のエリアライトと `assets/sky/` の HDRI を IBL として併用する確認用シーンです。カメラはボックスの外からやや引いた位置にあり、ボックス外周の Sky も写り込みます。 |
-| `10` | White furnace test 用シーン。`1.0` の一様な白い環境光のもと、上段に roughness を `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` と並べた Dielectric GGX ガラス球、下段に同じ roughness 列の銀色 Conductor GGX 金属球を 6 個ずつ配置し、エネルギー保存をチェックします。 |
-| `11` | 広い Lambert 床の上に薄青の Lambert バニーを置き、`DirectionalLight` (太陽相当の平行光) 1 つだけで照らす delta 光源の基本確認シーンです。 |
-| `12` | Cornell box 風の部屋からエリアライトを外し、薄青 Lambert バニーとラフな金色 / 銅色の Conductor GGX 球を配置。暖色と寒色の `PointLight` を 2 灯、バニーに向けたマゼンタ / ティールの `SpotLight` を 2 灯で照らす delta 光源ミックスの確認シーンです。 |
-| `13` | 広い Lambert 床の上に少し大きめの diffuse バニーを置き、`assets/sky/brown_photostudio_02_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
-| `14` | scene 13 と同じ床 / バニー構成で、`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の環境光だけで照らす SkyLight 比較用シーンです。 |
-| `15` | Cornell box 風の部屋に、`assets/models/sphere-color.png` と `assets/models/sphere-roughness.png` を使う金属 Conductor GGX 球、同じ color texture を使う Lambert 球を斜めに並べたテクスチャ確認用シーンです。 |
-| `16` | scene 14 と同じ床 / Sky 環境に、`assets/models/bunny-color.png` を使う Lambert バニーと、`assets/models/sphere-color.png` / `assets/models/sphere-roughness.png` を使う金属 Conductor GGX 球を配置したテクスチャ確認用シーンです。 |
-| `17` | 広い Lambert 床に `assets/models/floor-brick.png` を貼り、完全鏡面の金属球と完全鏡面のガラス球を配置して、斜め上から `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の IBL で照らす確認用シーンです。 |
-| `18` | Cornell box 風の部屋に、`assets/models/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球と roughness `0.4` の Conductor GGX 球を斜めに配置した normal map 確認用シーンです。 |
-| `19` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/models/sphere-normal.png` の normal map を normal strength `0.2` で使う Lambert 球、roughness `0.4` の Conductor GGX 球、完全鏡面 Mirror 球を配置した normal map 確認用シーンです。 |
-| `20` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境に、`assets/models/dragon.obj` と dragon 用の base color / metallic / roughness / normal texture を使う SimplePBR ドラゴンを斜め向きに配置したシーンです。 |
-| `21` | scene 20 の SimplePBR ドラゴンに加えて、roughness `0.4` の金色 Conductor GGX バニー、`Glass` 球、薄青の NormalizedLambert バニーを並べ、同じ puresky 環境で照らすマテリアル比較シーンです。 |
-| `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel (約 561 万 triangles) を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす建築シーンです。OBJ のマテリアルは原則 SimplePBR、`d < 1` か `illum 4` の透明系は DielectricGgx、`Ke` を持つ場合は Emissive に振り分けて読み込みます。`map_Kd` PNG が alpha matte を含む場合はその alpha チャンネルを `opacity_texture` に渡し、植物の葉などをアルファカットアウトで描画します。アセットは `bash assets/download.sh` で取得します。 |
-| `23` | `assets/san_miguel_2.0/san-miguel.obj` の通常版 San Miguel (約 998 万 triangles) を puresky 環境光で照らす建築シーンです。マテリアル割り当てやカメラ設定、アルファカットアウトの扱いは scene 22 と同じ方針ですが、コードは `scene_23.rs` として独立に持ちます。アセットは `bash assets/download.sh` で取得します。 |
-| `24` | `assets/bistro/Exterior/exterior.obj` と `assets/bistro/Interior/interior.obj` を結合した Amazon Lumberyard Bistro を、Sky 環境光なしでシーン中の emissive ポリゴンだけを光源として描画する夜のビストロシーンです。マテリアルは原則 SimplePBR、`d < 1` か `illum 4/6/7/9` の透明系は DielectricGgx に振り分けます。Emissive は `Ke` の linear 値が `1.0` 以上の場合と、`Ke == 0` でも `map_Ke` が指定されている場合に割り当て、`map_Ke` テクスチャを `EmissiveMaterial` の `color_texture` として使います。窓ガラスのように `Ke` が弱いだけのマテリアルは SimplePBR にフォールバックします。アセットは `bash assets/download.sh` で取得します。 |
-| `25` | Burley 2012 "Physically Based Shading at Disney" Figure 16 を再現する Disney BRDF パラメータスイープです。10 行 × 11 列の球を縦横の壁状に並べ、`assets/sky/studio_small_08_4k.hdr` の環境光のもとカメラを正面から構えて 1:1 画面に収めます。各行で `subsurface / metallic / specular / specularTint / roughness / anisotropic / sheen / sheenTint / clearcoat / clearcoatGloss` のいずれか 1 つを 0.0 から 1.0 まで振ります。 |
-| `26` | 同じドラゴンモデル / `dragon-BaseColor.png` / `dragon-Metallic.png` / `dragon-Roughness.png` / `dragon-Normal.png` を、左に SimplePBR、右に Disney BRDF (clearcoat `0.4`、clearcoatGloss `0.9`) で並べた比較用シーンです。`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光下、両方のドラゴンを正面から映します。 |
-| `27` | Disney BRDF の sheen=0 確認用シーン。`assets/sky/studio_small_08_4k.hdr` 環境下、`baseColor=(0.5, 0.15, 0.05)` の dark red 球 1 つを sheen=0、sheenTint=0、specular=0 で描画します。scene 28 と並べて sheen の効果を比較します。 |
-| `28` | scene 27 と同じ構成・同じ環境光で sheen=1 にした sheen lobe 比較用シーンです。 |
-| `29` | scene 26 と同じドラゴン / texture 構成で、左に SimplePBR、右に Autodesk Standard Surface を並べた比較用シーンです。`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光下で映します。 |
-| `30` | `assets/mori-knob/` の floor / base / knob を 1 列に 4 セット並べ、knob だけを Standard Surface のバリエーション (thin_film 金、Abbe 数 15 の dispersive glass、sheen の効いた赤ベルベット、coat 付きプラスチック) で描画する Standard Surface のショーケースです。floor / base / 上空の Emissive ライトで照らします。 |
-| `31` | `assets/models/paper-plane.obj` の紙飛行機を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境下で thin_walled な Standard Surface (`subsurface = 0`) として描画し、紙飛行機の真下から太陽方向を見上げた際の透過しない見え方を確認するシーンです。 |
-| `32` | scene 31 と同じ構成で `subsurface = 0.5` にした thin_walled diffuse transmission の比較用シーンです。紙越しに太陽光が回り込み、紙飛行機の下面が薄く明るく見えます。 |
-| `33` | `assets/mori-knob/floor.obj` のスタジオ床の上に、銀色 (base color `0.92`) の Conductor GGX (single-scattering) 球を 9 個並べ、左から右へ roughness を `0.0` から `1.0` まで等間隔に振った比較用シーンです。`assets/sky/studio_small_08_4k.hdr` を室内 IBL として使います。 |
-| `34` | scene 33 と同じ床 / 球配置 / 環境光で、マテリアルだけを Cui et al. 2023 の position-free multi-scattering Conductor GGX に差し替えた比較用シーンです。stochastic eval が走るため、scene 33 より多めの spp を推奨します (例: `--spp 1024`)。高 roughness 側 (右端) で multi-scattering 由来のエネルギー保存により scene 33 より明るく仕上がります。 |
-| `35` | Cui et al. 2023 multi-scattering Conductor GGX の white furnace test 用シーンです。`F0 = (1, 1, 1)` の球を 2 段 × 9 列で並べ、上段が従来の single-scattering Conductor GGX、下段が Cui 2023 multi-scattering、各段ともに左から右へ roughness を `0.0` から `1.0` まで等間隔に振ります。一様な白い環境光 (intensity `1.0`) のもと 4:3 横長の画面に収め、上段は高 roughness 側でエネルギーロスにより暗くなり (white furnace 失敗)、下段は全列が背景と同輝度になり区別がつかなくなる (white furnace 通過) ことを 1 枚の画像で対比できます。 |
-| `36` | Kulla & Conty 2017 (Imageworks) の multi-scattering compensation 比較用 (single-scattering 側)。`assets/sky/brown_photostudio_02_4k.hdr` の室内 IBL のもと、9 球 × 2 段を 4:3 画面に収め、上段に銀色 (`F0 = 0.92`) Conductor GGX (compensation OFF)、下段に白 Dielectric GGX (`eta = 1.5`、compensation OFF) を並べ、左から右へ roughness を `0.0` から `1.0` まで等間隔に振ります。scene 37 と比較してエネルギーロスによる暗化を確認します。 |
-| `37` | scene 36 と同じ床 / 球配置 / IBL / カメラ構成で、両段とも `with_energy_compensation()` を有効化した Kulla & Conty 2017 multi-scattering 版です。Hill 2018 part 2 の `F_avg^2` 補正と Imageworks slide v2 の `Ratio(η)` reciprocity 構築を用い、scene 36 と比較して高 roughness 側のエネルギーが取り戻されていることを確認します。 |
-| `38` | Kulla & Conty 2017 の white furnace test 用 4 段シーンです。`F0 = (1, 1, 1)` / `color = (1, 1, 1)` の球を 9 列 × 4 段で並べ、上から SS Conductor、SS Dielectric (`eta = 1.5`)、MS Conductor、MS Dielectric の順に配置、各段とも左から右へ roughness を `0.0` から `1.0` まで振ります。一様な白い環境光 (intensity `1.0`) のもと 4:3 画面に収め、上 2 段の高 roughness 側でエネルギーロスが目立ち、下 2 段はほぼ背景と同輝度になることを対比します。stochastic ではないので比較的少ない spp でも収束しますが、収束を確認するなら `--spp 1024` 程度を推奨します。 |
-| `39` | 色付き金属 (sRGB ゴールド `F0 = (1.00, 0.78, 0.34)`) で Hill 2018 part 2 の `F_avg^2` 補正を視覚確認するシーンです。`assets/sky/brown_photostudio_02_4k.hdr` の室内 IBL のもと 9 球 × 2 段を 4:3 画面に収め、上段が compensation OFF (single-scattering)、下段が `with_energy_compensation()` 有効 (multi-scattering) の Conductor GGX を並べ、左から右へ roughness を `0.0` から `1.0` まで振ります。下段の高 roughness 側で取り戻された `F_avg^2` 重みのエネルギーが色を保ったまま明るく仕上がることを上段との対比で確認します。 |
+| `0` | Cornell box 風の部屋に箱とバニーを配置。 |
+| `1` | Cornell box 風の部屋にバニーと 2 つの球を配置。 |
+| `2` | Cornell box 風の部屋に完全鏡面の銀色バニーと金色の球を配置。 |
+| `3` | Cornell box 風の部屋に透明ガラス球、左右に thin / 通常の水色ガラスバニー、薄青の Lambert バニーを配置。 |
+| `4` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.25 / 0.5 / 0.75 / 1.0` にした金色 Conductor GGX 球を 5 つ並べる。 |
+| `5` | Cornell box 風の部屋に、roughness `0.3` の銀色 Conductor GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` にする。 |
+| `6` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6` にした透明 Dielectric GGX ガラス球を 5 つ、少し宙に浮かせて並べる。 |
+| `7` | Cornell box 風の部屋に、roughness `0.3` の薄水色 Dielectric GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` にする。 |
+| `8` | 広い Lambert 床の上に Conductor GGX 金属球と Dielectric GGX ガラス球を 2 段に並べ、各段とも roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` で振る。`assets/sky/` の HDRI を IBL として使う。 |
+| `9` | Cornell box の中央に金色 Conductor GGX (`roughness = 0.35`) のバニーを置き、天井のエリアライトと `assets/sky/` の HDRI を併用。カメラはボックスの外。 |
+| `10` | 一様な白い環境光 (intensity `1.0`) のもと、上段に Dielectric GGX ガラス球、下段に銀色 Conductor GGX 金属球を、各段とも roughness を `0.0 / 0.15 / 0.3 / 0.45 / 0.6 / 0.75` で 6 つずつ並べる。 |
+| `11` | 広い Lambert 床の上に薄青の Lambert バニーを置き、`DirectionalLight` 1 つで照らす。 |
+| `12` | Cornell box 風の部屋に薄青 Lambert バニーと金色 / 銅色の Conductor GGX 球を配置し、暖色 / 寒色の `PointLight` 2 灯と、バニーに向けたマゼンタ / ティールの `SpotLight` 2 灯で照らす。 |
+| `13` | 広い Lambert 床の上に diffuse バニーを置き、`assets/sky/brown_photostudio_02_4k.hdr` の環境光だけで照らす。 |
+| `14` | 広い Lambert 床の上に diffuse バニーを置き、`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の環境光だけで照らす。 |
+| `15` | Cornell box 風の部屋に、`assets/models/sphere-color.png` と `assets/models/sphere-roughness.png` を使う Conductor GGX 球と、同じ color texture を使う Lambert 球を斜めに並べる。 |
+| `16` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光のもと、`assets/models/bunny-color.png` を使う Lambert バニーと `assets/models/sphere-color.png` / `assets/models/sphere-roughness.png` を使う Conductor GGX 球を配置。 |
+| `17` | `assets/models/floor-brick.png` を貼った Lambert 床に完全鏡面の金属球とガラス球を配置し、`assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の IBL で照らす。 |
+| `18` | Cornell box 風の部屋に、`assets/models/sphere-normal.png` を normal strength `0.2` で使う Lambert 球と、roughness `0.4` の Conductor GGX 球を斜めに配置。 |
+| `19` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光のもと、`assets/models/sphere-normal.png` を normal strength `0.2` で使う Lambert 球、roughness `0.4` の Conductor GGX 球、完全鏡面の Mirror 球を配置。 |
+| `20` | 広い Lambert 床と `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光のもと、`assets/models/dragon.obj` と dragon 用の base color / metallic / roughness / normal texture を使う SimplePBR ドラゴンを配置。 |
+| `21` | 広い Lambert 床と puresky 環境光のもと、SimplePBR ドラゴン、roughness `0.4` の金色 Conductor GGX バニー、`Glass` 球、薄青の NormalizedLambert バニーを並べる。 |
+| `22` | `assets/san_miguel_2.0/san-miguel-low-poly.obj` のローポリ版 San Miguel を `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光で照らす。OBJ マテリアルは SimplePBR / DielectricGgx / Emissive に振り分け、`map_Kd` の alpha は `opacity_texture` として使う。 |
+| `23` | `assets/san_miguel_2.0/san-miguel.obj` の通常版 San Miguel を puresky 環境光で照らす。マテリアル割り当ては scene 22 と同じ。 |
+| `24` | `assets/bistro/Exterior/exterior.obj` と `assets/bistro/Interior/interior.obj` を結合した Amazon Lumberyard Bistro を、環境光なしでシーン中の emissive ポリゴンだけで照らす。OBJ マテリアルは SimplePBR / DielectricGgx / Emissive に振り分け、`map_Ke` は `EmissiveMaterial` の `color_texture` として使う。 |
+| `25` | `assets/sky/studio_small_08_4k.hdr` の環境光のもと、Disney BRDF 球を 11 列 × 10 段で並べる。各段で `subsurface / metallic / specular / specularTint / roughness / anisotropic / sheen / sheenTint / clearcoat / clearcoatGloss` のいずれか 1 つを `0.0` → `1.0` で振る。 |
+| `26` | `assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr` の puresky 環境光のもと、同じドラゴンモデルと dragon 用 texture を使い、左に SimplePBR、右に Disney BRDF (clearcoat `0.4`、clearcoatGloss `0.9`) を並べる。 |
+| `27` | `assets/sky/studio_small_08_4k.hdr` 環境下に、`baseColor = (0.5, 0.15, 0.05)` の Disney BRDF 球 (sheen `0`、sheenTint `0`、specular `0`) を 1 つ配置。 |
+| `28` | `assets/sky/studio_small_08_4k.hdr` 環境下に、`baseColor = (0.5, 0.15, 0.05)` の Disney BRDF 球 (sheen `1`、sheenTint `0`、specular `0`) を 1 つ配置。 |
+| `29` | puresky 環境光のもと、同じドラゴンモデルと dragon 用 texture を使い、左に SimplePBR、右に Autodesk Standard Surface を並べる。 |
+| `30` | `assets/mori-knob/` の floor / base / knob を 3 × 3 グリッドに並べ、knob だけ Standard Surface のバリエーション (polished gold、iridescent metal、brushed copper、non-dispersive glass、smooth dispersive glass、rough dispersive glass、red velvet sheen、coated plastic、matte ceramic) を割り当てる。`assets/mori-knob/light.obj` を Emissive ライトとして使い、`assets/sky/studio_small_08_4k.hdr` の IBL を併用。 |
+| `31` | puresky 環境光のもと、`assets/models/paper-plane.obj` の紙飛行機を thin_walled Standard Surface (`subsurface = 0`) として配置。 |
+| `32` | puresky 環境光のもと、`assets/models/paper-plane.obj` の紙飛行機を thin_walled Standard Surface (`subsurface = 0.5`) として配置。 |
+| `33` | `assets/mori-knob/floor.obj` の床の上に銀色 (`F0 = 0.92`) Conductor GGX (single-scattering) 球を 9 個並べ、roughness を左から右へ `0.0` → `1.0` で振る。`assets/sky/studio_small_08_4k.hdr` を IBL として使う。 |
+| `34` | scene 33 と同じ床 / 配置 / IBL のもと、マテリアルを Cui et al. 2023 multi-scattering Conductor GGX に差し替える。 |
+| `35` | 一様な白い環境光 (intensity `1.0`) のもと、`F0 = (1, 1, 1)` の球を 9 列 × 2 段で並べる。上段が single-scattering Conductor GGX、下段が Cui 2023 multi-scattering Conductor GGX で、各段とも roughness を左から右へ `0.0` → `1.0` で振る。 |
+| `36` | `assets/sky/brown_photostudio_02_4k.hdr` の IBL のもと、9 列 × 2 段で上段に銀色 (`F0 = 0.92`) Conductor GGX (compensation OFF)、下段に白 Dielectric GGX (`eta = 1.5`、compensation OFF) を並べ、各段とも roughness を左から右へ `0.0` → `1.0` で振る。 |
+| `37` | scene 36 と同じ配置 / IBL のもと、上下段とも `with_energy_compensation()` を有効にした Kulla & Conty 2017 multi-scattering 版。 |
+| `38` | 一様な白い環境光 (intensity `1.0`) のもと、`F0 = (1, 1, 1)` / `color = (1, 1, 1)` の球を 9 列 × 4 段で並べる。上から SS Conductor、SS Dielectric (`eta = 1.5`)、MS Conductor、MS Dielectric の順、各段とも roughness を左から右へ `0.0` → `1.0` で振る。 |
+| `39` | `assets/sky/brown_photostudio_02_4k.hdr` の IBL のもと、sRGB ゴールド (`F0 = (1.00, 0.78, 0.34)`) の Conductor GGX 球を 9 列 × 2 段で並べる。上段が compensation OFF、下段が `with_energy_compensation()` 有効、各段とも roughness を左から右へ `0.0` → `1.0` で振る。 |
+| `40` | `assets/mori-knob/floor.obj` の白い床に、`assets/glavenus/` の Glavenus STL モデル (base / body / horns / head / legs / tail の 9 パーツ) を配置。base パーツを白の NormalizedLambert、それ以外をオレンジ系の NormalizedLambert にする。`assets/mori-knob/light.obj` の Emissive ライトと `assets/sky/brown_photostudio_02_4k.hdr` の IBL で照らす。 |
+| `41` | scene 40 と同じ床 / ライト / IBL / カメラのもと、Glavenus 全パーツのマテリアルを `roughness = 1.0` の EON (energy-preserving Oren-Nayar) に置き換える。base は白、それ以外はオレンジ系。 |
 
 未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
 

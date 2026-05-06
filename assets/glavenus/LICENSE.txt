@@ -1,0 +1,63 @@
+Glavenus RPG scale fan-art 3D model
+
+This directory contains the following third-party 3D model files:
+
+  - base.stl
+  - body.stl
+  - body-horn-l.stl
+  - body-horn-r.stl
+  - head.stl
+  - leg-l.stl
+  - leg-r.stl
+  - presuported-base.stl
+  - presuported-body.stl
+  - presuported-head.stl
+  - presuported-tail-1.stl
+  - presuoirted-tail-2.stl
+  - tail-1.stl
+  - tail-2.stl
+
+Title:
+  Glavenus RPG scale fan-art
+
+Creator:
+  Axolote Gaming
+
+Source:
+  https://www.myminifactory.com/object/3d-print-glavenus-rpg-scale-fan-art-224500
+
+License:
+  Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International
+  SPDX-License-Identifier: CC-BY-NC-ND-4.0
+  License text:
+  https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+
+Attribution notice:
+  "Glavenus RPG scale fan-art" by Axolote Gaming is licensed under
+  Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International.
+
+Changes:
+  No changes were made to the original model files included in this directory.
+
+Use restrictions:
+  These model files are included for non-commercial use only.
+
+  You may copy and redistribute these model files only under the terms of
+  CC BY-NC-ND 4.0.
+
+  You may not use these model files for commercial purposes.
+
+  You may not distribute modified versions of these model files.
+
+  The license for these model files is separate from the license for the
+  renderer source code in this repository. The renderer source code license
+  does not apply to these model files.
+
+No endorsement:
+  The inclusion of these model files does not imply endorsement of this
+  repository, renderer, project, or its authors by Axolote Gaming.
+
+Additional note:
+  This model is fan art. The CC BY-NC-ND 4.0 license applies to the rights
+  granted by the model creator, but it may not cover rights held by third
+  parties in the underlying character or franchise.
