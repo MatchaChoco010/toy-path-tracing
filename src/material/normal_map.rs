@@ -22,22 +22,24 @@ impl NormalMap {
         )))
     }
 
-    pub fn apply(&self, shading_vertex: &ShadingVertex, strength: f32) -> ShadingVertex {
-        let mut mapped = *shading_vertex;
+    pub fn apply(&self, shading_vertex: &mut ShadingVertex, strength: f32) {
+        let Some(ns) = self.mapped_ns(shading_vertex, strength) else {
+            return;
+        };
+        shading_vertex.ns = ns;
+        shading_vertex.frame = OrthonormalBasis::from_normal_and_tangent(ns, shading_vertex.dpdu);
+    }
+
+    pub fn mapped_ns(&self, shading_vertex: &ShadingVertex, strength: f32) -> Option<Vec3> {
         let local_normal = self.local_normal_at(shading_vertex, strength);
-
         if local_normal.length_squared() == 0.0 {
-            return mapped;
+            return None;
         }
-
         let ns = shading_vertex.frame.local_to_world(local_normal);
         if !ns.is_finite() || ns.length_squared() == 0.0 {
-            return mapped;
+            return None;
         }
-
-        mapped.ns = ns;
-        mapped.frame = OrthonormalBasis::from_normal_and_tangent(ns, shading_vertex.dpdu);
-        mapped
+        Some(ns)
     }
 
     fn local_normal_at(&self, shading_vertex: &ShadingVertex, strength: f32) -> Vec3 {
@@ -100,6 +102,12 @@ mod tests {
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
             wavelength_lock: None,
+            object_to_world: glam::Mat4::IDENTITY,
+            world_to_object: glam::Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
         }
     }
 
@@ -108,7 +116,8 @@ mod tests {
         let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
         let pixel = 0.5 * (local_normal + Vec3::ONE);
         let normal_map = NormalMap::from_texture(Arc::new(Texture::from_pixels(1, 1, vec![pixel])));
-        let mapped = normal_map.apply(&test_shading_vertex(), 1.0);
+        let mut mapped = test_shading_vertex();
+        normal_map.apply(&mut mapped, 1.0);
 
         assert!(mapped.ns.abs_diff_eq(local_normal, 1.0e-6));
         assert!(mapped.frame.normal().abs_diff_eq(local_normal, 1.0e-6));
@@ -120,7 +129,8 @@ mod tests {
         let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
         let pixel = 0.5 * (local_normal + Vec3::ONE);
         let normal_map = NormalMap::from_texture(Arc::new(Texture::from_pixels(1, 1, vec![pixel])));
-        let mapped = normal_map.apply(&test_shading_vertex(), 0.5);
+        let mut mapped = test_shading_vertex();
+        normal_map.apply(&mut mapped, 0.5);
         let expected =
             Vec3::new(local_normal.x * 0.5, local_normal.y * 0.5, local_normal.z).normalize();
 
@@ -133,7 +143,8 @@ mod tests {
         let local_normal = Vec3::new(0.6, 0.0, 0.8).normalize();
         let pixel = 0.5 * (local_normal + Vec3::ONE);
         let normal_map = NormalMap::from_texture(Arc::new(Texture::from_pixels(1, 1, vec![pixel])));
-        let mapped = normal_map.apply(&test_shading_vertex(), 0.0);
+        let mut mapped = test_shading_vertex();
+        normal_map.apply(&mut mapped, 0.0);
 
         assert!(mapped.ns.abs_diff_eq(Vec3::Z, 1.0e-6));
         assert!(mapped.frame.normal().abs_diff_eq(Vec3::Z, 1.0e-6));

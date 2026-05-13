@@ -17,21 +17,18 @@ use super::{
     lobe::{LightTreePrecompute, sg_light_for_node},
 };
 
-/// Per-shading-point query against the light tree.
-///
-/// Bundles a `&Material` (for dispatching `light_tree_importance` per node)
-/// with the precompute the material returned. The integrator builds this
-/// once before tree descent and reuses it for every node visited.
 #[derive(Debug, Clone, Copy)]
 pub struct LightTreeQuery<'a> {
     pub material: &'a Material,
     pub precompute: LightTreePrecompute,
 }
 
-/// Build a query if the material has any non-delta lobes that benefit from
-/// hierarchical product importance sampling.
-pub fn build_query<'a>(vtx: &ShadingVertex, material: &'a Material) -> Option<LightTreeQuery<'a>> {
-    let precompute = material.light_tree_precompute(vtx)?;
+pub fn build_query<'a>(
+    vtx: &ShadingVertex,
+    material: &'a Material,
+    mtlx_scratch: &crate::material::MtlxScratch,
+) -> Option<LightTreeQuery<'a>> {
+    let precompute = material.light_tree_precompute(vtx, mtlx_scratch)?;
     Some(LightTreeQuery {
         material,
         precompute,

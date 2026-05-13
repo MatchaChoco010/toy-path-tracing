@@ -5,7 +5,7 @@ use rand::rngs::ThreadRng;
 use crate::{
     bsdf::BsdfFlags,
     light::LightLiSample,
-    material::{MaterialSample, ShadingVertex},
+    material::{MaterialSample, MtlxScratch, ShadingVertex},
     ray::{Ray, RayCone, RayDifferential},
     scene::{Scene, TriangleRef},
 };
@@ -28,12 +28,16 @@ impl IntegratorKind {
         initial_ray: Ray,
         rng: &mut ThreadRng,
         max_depth: u32,
+        mtlx_scratch: &mut MtlxScratch,
     ) -> Vec3 {
-        match self {
-            Self::Mis => mis::trace_radiance(scene, initial_ray, rng, max_depth),
-            Self::Pt => pt::trace_radiance(scene, initial_ray, rng, max_depth),
-            Self::Nee => nee::trace_radiance(scene, initial_ray, rng, max_depth),
-        }
+        let cp = mtlx_scratch.checkpoint();
+        let radiance = match self {
+            Self::Mis => mis::trace_radiance(scene, initial_ray, rng, max_depth, mtlx_scratch),
+            Self::Pt => pt::trace_radiance(scene, initial_ray, rng, max_depth, mtlx_scratch),
+            Self::Nee => nee::trace_radiance(scene, initial_ray, rng, max_depth, mtlx_scratch),
+        };
+        mtlx_scratch.restore(cp);
+        radiance
     }
 }
 
@@ -214,8 +218,17 @@ pub(super) fn unoccluded(
     vtx: &ShadingVertex,
     li: &LightLiSample,
     rng: &mut ThreadRng,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> bool {
-    unoccluded_ray(scene, vtx, li.wi, li.distance, li.target_triangle, rng)
+    unoccluded_ray(
+        scene,
+        vtx,
+        li.wi,
+        li.distance,
+        li.target_triangle,
+        rng,
+        mtlx_scratch,
+    )
 }
 
 pub(super) fn unoccluded_ray(
@@ -225,10 +238,11 @@ pub(super) fn unoccluded_ray(
     distance: f32,
     target_triangle: Option<TriangleRef>,
     rng: &mut ThreadRng,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> bool {
     let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
     let hit = scene
-        .closest_hit(&shadow_ray, rng)
+        .closest_hit(&shadow_ray, rng, mtlx_scratch)
         .expect("scene.build_qbvh() must be called before traversal");
 
     match hit {
@@ -452,6 +466,12 @@ mod tests {
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
             wavelength_lock: None,
+            object_to_world: glam::Mat4::IDENTITY,
+            world_to_object: glam::Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
         }
     }
 }

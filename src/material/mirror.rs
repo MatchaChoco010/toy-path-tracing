@@ -99,11 +99,10 @@ impl MirrorMaterial {
         alpha >= 1.0 || u < alpha
     }
 
-    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
-        self.normal_map
-            .as_ref()
-            .map(|normal_map| normal_map.apply(shading_vertex, self.normal_strength))
-            .unwrap_or(*shading_vertex)
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &mut ShadingVertex) {
+        if let Some(normal_map) = self.normal_map.as_ref() {
+            normal_map.apply(shading_vertex, self.normal_strength);
+        }
     }
 
     pub fn sample(
@@ -213,6 +212,12 @@ mod tests {
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
             wavelength_lock: None,
+            object_to_world: glam::Mat4::IDENTITY,
+            world_to_object: glam::Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
         }
     }
 

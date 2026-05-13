@@ -123,11 +123,10 @@ impl ConductorGgxCui2023Material {
         alpha >= 1.0 || u < alpha
     }
 
-    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
-        self.normal_map
-            .as_ref()
-            .map(|normal_map| normal_map.apply(shading_vertex, self.normal_strength))
-            .unwrap_or(*shading_vertex)
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &mut ShadingVertex) {
+        if let Some(normal_map) = self.normal_map.as_ref() {
+            normal_map.apply(shading_vertex, self.normal_strength);
+        }
     }
 
     pub fn sample(

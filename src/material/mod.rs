@@ -6,12 +6,15 @@ mod emissive;
 mod eon;
 mod glass;
 mod mirror;
+pub mod mtlx;
+mod mtlx_material;
 mod normal_map;
 mod normalized_lambert;
 mod oren_nayar;
+pub mod pattern;
 mod simple_pbr;
 mod standard_surface;
-mod texture;
+pub mod texture;
 
 use glam::{Vec2, Vec3};
 use rand::rngs::ThreadRng;
@@ -33,6 +36,8 @@ pub use emissive::EmissiveMaterial;
 pub use eon::EonMaterial;
 pub use glass::GlassMaterial;
 pub use mirror::MirrorMaterial;
+pub use mtlx::MtlxScratch;
+pub use mtlx_material::MtlxMaterial;
 pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
 pub use oren_nayar::OrenNayarMaterial;
@@ -54,9 +59,10 @@ pub enum Material {
     DisneyBrdf(DisneyBrdfMaterial),
     StandardSurface(StandardSurfaceMaterial),
     Emissive(EmissiveMaterial),
+    Mtlx(MtlxMaterial),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ShadingVertex {
     pub triangle: TriangleRef,
     pub p: Vec3,
@@ -77,6 +83,15 @@ pub struct ShadingVertex {
     pub frame: OrthonormalBasis,
     pub front_face: bool,
     pub wavelength_lock: Option<f32>,
+    pub object_to_world: glam::Mat4,
+    pub world_to_object: glam::Mat4,
+    pub object_normal_to_world: glam::Mat3,
+    /// MaterialX bytecode の register file は `MtlxScratch` の `regs_pool` に
+    /// 確保される。 ShadingVertex はそこへの handle のみ保持する (Vec を毎回
+    /// alloc しない設計)。 `None` の間は precompute 未実行。
+    pub mtlx_regs: Option<mtlx::RegsHandle>,
+    pub mtlx_dalbedo: Option<mtlx::DalbedoHandle>,
+    pub mtlx_precomputed_for: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,7 +116,22 @@ impl ShadingVertex {
 }
 
 impl Material {
-    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
+    /// Materials such as `Mtlx` evaluate per-vertex bytecode and store the
+    /// resulting locals on the vertex itself. The integrator calls this once
+    /// per intersection before `sample` / `eval` / `pdf` / `le` so the BSDF
+    /// queries can read those locals directly. For non-Mtlx materials this is
+    /// a no-op.
+    pub fn precompute_shading(
+        &self,
+        shading_vertex: &mut ShadingVertex,
+        scratch: &mut MtlxScratch,
+    ) {
+        if let Self::Mtlx(material) = self {
+            material.precompute_shading(shading_vertex, scratch);
+        }
+    }
+
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &mut ShadingVertex) {
         match self {
             Self::NormalizedLambert(material) => material.prepare_shading_vertex(shading_vertex),
             Self::OrenNayar(material) => material.prepare_shading_vertex(shading_vertex),
@@ -114,13 +144,15 @@ impl Material {
             Self::SimplePBR(material) => material.prepare_shading_vertex(shading_vertex),
             Self::DisneyBrdf(material) => material.prepare_shading_vertex(shading_vertex),
             Self::StandardSurface(material) => material.prepare_shading_vertex(shading_vertex),
-            Self::Emissive(_) => *shading_vertex,
+            Self::Emissive(_) => {}
+            Self::Mtlx(material) => material.prepare_shading_vertex(shading_vertex),
         }
     }
 
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
+        scratch: &MtlxScratch,
         rng: &mut ThreadRng,
     ) -> Option<MaterialSample> {
         match self {
@@ -136,10 +168,11 @@ impl Material {
             Self::DisneyBrdf(material) => material.sample(shading_vertex, rng),
             Self::StandardSurface(material) => material.sample(shading_vertex, rng),
             Self::Emissive(material) => material.sample(shading_vertex, rng),
+            Self::Mtlx(material) => material.sample(shading_vertex, scratch, rng),
         }
     }
 
-    pub fn le(&self, shading_vertex: &ShadingVertex) -> Option<Vec3> {
+    pub fn le(&self, shading_vertex: &ShadingVertex, scratch: &MtlxScratch) -> Option<Vec3> {
         match self {
             Self::NormalizedLambert(material) => material.le(shading_vertex),
             Self::OrenNayar(material) => material.le(shading_vertex),
@@ -153,12 +186,14 @@ impl Material {
             Self::DisneyBrdf(material) => material.le(shading_vertex),
             Self::StandardSurface(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
+            Self::Mtlx(material) => material.le(shading_vertex, scratch),
         }
     }
 
     pub fn eval(
         &self,
         shading_vertex: &ShadingVertex,
+        scratch: &MtlxScratch,
         wi: Vec3,
         internal_rng: &mut ThreadRng,
     ) -> Vec3 {
@@ -175,10 +210,11 @@ impl Material {
             Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::StandardSurface(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::Emissive(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::Mtlx(material) => material.eval(shading_vertex, scratch, wi, internal_rng),
         }
     }
 
-    pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
+    pub fn pdf(&self, shading_vertex: &ShadingVertex, scratch: &MtlxScratch, wi: Vec3) -> f32 {
         match self {
             Self::NormalizedLambert(material) => material.pdf(shading_vertex, wi),
             Self::OrenNayar(material) => material.pdf(shading_vertex, wi),
@@ -192,6 +228,27 @@ impl Material {
             Self::DisneyBrdf(material) => material.pdf(shading_vertex, wi),
             Self::StandardSurface(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
+            Self::Mtlx(material) => material.pdf(shading_vertex, scratch, wi),
+        }
+    }
+
+    pub fn eval_pdf(
+        &self,
+        shading_vertex: &ShadingVertex,
+        scratch: &MtlxScratch,
+        wi: Vec3,
+        internal_rng: &mut ThreadRng,
+    ) -> (Vec3, f32) {
+        match self {
+            Self::Mtlx(material) => material.eval_pdf(shading_vertex, scratch, wi),
+            _ => {
+                let f = self.eval(shading_vertex, scratch, wi, internal_rng);
+                if f.length_squared() == 0.0 {
+                    (f, 0.0)
+                } else {
+                    (f, self.pdf(shading_vertex, scratch, wi))
+                }
+            }
         }
     }
 
@@ -209,7 +266,12 @@ impl Material {
             Self::DisneyBrdf(material) => material.may_emit(),
             Self::StandardSurface(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
+            Self::Mtlx(material) => material.may_emit(),
         }
+    }
+
+    pub fn is_pure_emitter(&self) -> bool {
+        matches!(self, Self::Emissive(_))
     }
 
     pub fn max_emission(&self) -> f32 {
@@ -226,12 +288,10 @@ impl Material {
             Self::DisneyBrdf(material) => material.max_emission(),
             Self::StandardSurface(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
+            Self::Mtlx(material) => material.max_emission(),
         }
     }
 
-    /// Returns true when this material can ever reject a hit through its
-    /// `any_hit`. Renderers should short-circuit and skip the
-    /// `ShadingVertex` construction whenever this returns false.
     pub fn has_alpha_test(&self) -> bool {
         match self {
             Self::NormalizedLambert(material) => material.has_alpha_test(),
@@ -246,16 +306,16 @@ impl Material {
             Self::DisneyBrdf(material) => material.has_alpha_test(),
             Self::StandardSurface(material) => material.has_alpha_test(),
             Self::Emissive(material) => material.has_alpha_test(),
+            Self::Mtlx(material) => material.has_alpha_test(),
         }
     }
 
-    /// any-hit shader equivalent. The renderer asks "is this surface hit
-    /// accepted?" and the material answers with a single yes/no using the
-    /// supplied uniform sample `u` (in `[0, 1)`). Materials are free to use
-    /// `u` however they like (probabilistic transmission, hard cutoff,
-    /// procedural opacity, ...). Materials that never reject simply return
-    /// true.
-    pub fn any_hit(&self, shading_vertex: &ShadingVertex, u: f32) -> bool {
+    pub fn any_hit(
+        &self,
+        shading_vertex: &mut ShadingVertex,
+        scratch: &mut MtlxScratch,
+        u: f32,
+    ) -> bool {
         match self {
             Self::NormalizedLambert(material) => material.any_hit(shading_vertex, u),
             Self::OrenNayar(material) => material.any_hit(shading_vertex, u),
@@ -269,21 +329,14 @@ impl Material {
             Self::DisneyBrdf(material) => material.any_hit(shading_vertex, u),
             Self::StandardSurface(material) => material.any_hit(shading_vertex, u),
             Self::Emissive(material) => material.any_hit(shading_vertex, u),
+            Self::Mtlx(material) => material.any_hit(shading_vertex, scratch, u),
         }
     }
 
-    /// Per-shading-point precompute for the hierarchical light tree. Each
-    /// material returns a `LightTreePrecompute` that captures whichever
-    /// lobes (diffuse / glossy / btdf) it needs the tree to favour. Returns
-    /// `None` for delta lobes (mirror / glass) and emissive surfaces -- the
-    /// integrator skips NEE on those anyway, so the tree query never fires.
-    ///
-    /// See `light_tree::lobe` for the shared SG/lobe helpers materials use
-    /// to populate the precompute. See the "MULTI-LOBE NOTES" doc comment
-    /// in that module before adding multi-glossy or multi-BTDF materials.
     pub fn light_tree_precompute(
         &self,
         shading_vertex: &ShadingVertex,
+        scratch: &MtlxScratch,
     ) -> Option<LightTreePrecompute> {
         match self {
             Self::NormalizedLambert(material) => material.light_tree_precompute(shading_vertex),
@@ -295,16 +348,11 @@ impl Material {
             Self::SimplePBR(material) => material.light_tree_precompute(shading_vertex),
             Self::DisneyBrdf(material) => material.light_tree_precompute(shading_vertex),
             Self::StandardSurface(material) => material.light_tree_precompute(shading_vertex),
+            Self::Mtlx(material) => material.light_tree_precompute(shading_vertex, scratch),
             Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => None,
         }
     }
 
-    /// Convolve the SG light `W * g(o; xi, kappa)` with this material's
-    /// lobes and return a non-negative importance. The `precompute` is the
-    /// value returned by `light_tree_precompute` at the shading vertex.
-    ///
-    /// Implementations are expected to delegate to the helpers in
-    /// `light_tree::lobe` (see also the multi-lobe guidance there).
     pub fn light_tree_importance(
         &self,
         precompute: &LightTreePrecompute,
@@ -325,6 +373,7 @@ impl Material {
             Self::SimplePBR(material) => material.light_tree_importance(precompute, w, lobe),
             Self::DisneyBrdf(material) => material.light_tree_importance(precompute, w, lobe),
             Self::StandardSurface(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::Mtlx(material) => material.light_tree_importance(precompute, w, lobe),
             Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => 0.0,
         }
     }
@@ -344,7 +393,7 @@ mod tests {
 
     use super::{
         ConductorGgxMaterial, DielectricGgxMaterial, EmissiveMaterial, GlassMaterial, Material,
-        MirrorMaterial, NormalizedLambertMaterial, ShadingVertex,
+        MirrorMaterial, MtlxScratch, NormalizedLambertMaterial, ShadingVertex,
     };
 
     fn test_shading_vertex(wo: Vec3) -> ShadingVertex {
@@ -371,6 +420,12 @@ mod tests {
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
             wavelength_lock: None,
+            object_to_world: glam::Mat4::IDENTITY,
+            world_to_object: glam::Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
         }
     }
 
@@ -426,11 +481,12 @@ mod tests {
     #[test]
     fn emissive_material_eval_is_always_zero() {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let mut rng = rand::rng();
 
         assert_eq!(
-            material.eval(&shading_vertex, Vec3::Z, &mut rng),
+            material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng),
             Vec3::ZERO
         );
     }
@@ -438,9 +494,10 @@ mod tests {
     #[test]
     fn lambert_material_eval_delegates_to_bsdf() {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let mut rng = rand::rng();
-        let f = material.eval(&shading_vertex, Vec3::Z, &mut rng);
+        let f = material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng);
 
         assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-6));
     }
@@ -448,10 +505,11 @@ mod tests {
     #[test]
     fn lambert_material_pdf_delegates_to_bsdf() {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let wi = Vec3::new(0.2, 0.3, 0.9327379).normalize();
 
-        let pdf = material.pdf(&shading_vertex, wi);
+        let pdf = material.pdf(&shading_vertex, &scratch, wi);
 
         assert!((pdf - wi.z / PI).abs() < 1.0e-6);
     }
@@ -459,11 +517,12 @@ mod tests {
     #[test]
     fn lambert_material_sample_returns_diffuse_flag() {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, &mut rng)
+            .sample(&shading_vertex, &scratch, &mut rng)
             .expect("expected a valid sample");
 
         assert_eq!(sample.flags, BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION);
@@ -473,11 +532,12 @@ mod tests {
     fn mirror_material_sample_returns_delta_flag() {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(wo);
         let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, &mut rng)
+            .sample(&shading_vertex, &scratch, &mut rng)
             .expect("expected a valid sample");
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
@@ -494,11 +554,12 @@ mod tests {
             0.0,
             0.0,
         ));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::new(0.3, -0.4, 0.8660254).normalize());
         let mut rng = rand::rng();
 
         let sample = material
-            .sample(&shading_vertex, &mut rng)
+            .sample(&shading_vertex, &scratch, &mut rng)
             .expect("expected a valid sample");
 
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
@@ -510,26 +571,28 @@ mod tests {
     #[test]
     fn mirror_material_eval_and_pdf_are_zero() {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let mut rng = rand::rng();
 
         assert_eq!(
-            material.eval(&shading_vertex, Vec3::Z, &mut rng),
+            material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng),
             Vec3::ZERO
         );
-        assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
+        assert_eq!(material.pdf(&shading_vertex, &scratch, Vec3::Z), 0.0);
     }
 
     #[test]
     fn glass_material_sample_can_return_transmission_flag() {
         let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(wo);
         let mut rng = rand::rng();
 
         let sample = (0..64)
             .find_map(|_| {
-                let s = material.sample(&shading_vertex, &mut rng)?;
+                let s = material.sample(&shading_vertex, &scratch, &mut rng)?;
                 s.flags.contains(BsdfFlags::TRANSMISSION).then_some(s)
             })
             .expect("expected a transmission sample within retry budget");
@@ -542,22 +605,24 @@ mod tests {
     #[test]
     fn glass_material_eval_and_pdf_are_zero() {
         let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
         let mut rng = rand::rng();
 
         assert_eq!(
-            material.eval(&shading_vertex, Vec3::Z, &mut rng),
+            material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng),
             Vec3::ZERO
         );
-        assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
+        assert_eq!(material.pdf(&shading_vertex, &scratch, Vec3::Z), 0.0);
     }
 
     #[test]
     fn emissive_material_pdf_is_always_zero_for_mis() {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
+        let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
 
-        assert_eq!(material.pdf(&shading_vertex, Vec3::Z), 0.0);
-        assert_eq!(material.pdf(&shading_vertex, -Vec3::Z), 0.0);
+        assert_eq!(material.pdf(&shading_vertex, &scratch, Vec3::Z), 0.0);
+        assert_eq!(material.pdf(&shading_vertex, &scratch, -Vec3::Z), 0.0);
     }
 }

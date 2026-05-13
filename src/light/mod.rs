@@ -29,8 +29,10 @@ mod spot;
 use glam::{Vec2, Vec3};
 
 use crate::{
-    light_tree::{LightTreeLeafKind, LightTreeQuery, pdf_for_leaf_kind, sample_light_tree},
-    material::ShadingVertex,
+    light_tree::{
+        LightTreeLeafKind, LightTreeQuery, build_query, pdf_for_leaf_kind, sample_light_tree,
+    },
+    material::{Material, ShadingVertex},
     math::sg,
     scene::{Scene, TriangleRef},
 };
@@ -253,8 +255,19 @@ pub fn sample_light(
     u_tree: f32,
     u_aux: f32,
     us: Vec2,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> Option<SampledLight> {
-    sample_light_inner(scene, ctx, tree_query, u_root, u_tree, u_aux, us, false)
+    sample_light_inner(
+        scene,
+        ctx,
+        tree_query,
+        u_root,
+        u_tree,
+        u_aux,
+        us,
+        false,
+        mtlx_scratch,
+    )
 }
 
 pub fn sample_light_mis_compensated(
@@ -265,8 +278,65 @@ pub fn sample_light_mis_compensated(
     u_tree: f32,
     u_aux: f32,
     us: Vec2,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> Option<SampledLight> {
-    sample_light_inner(scene, ctx, tree_query, u_root, u_tree, u_aux, us, true)
+    sample_light_inner(
+        scene,
+        ctx,
+        tree_query,
+        u_root,
+        u_tree,
+        u_aux,
+        us,
+        true,
+        mtlx_scratch,
+    )
+}
+
+pub fn sample_light_mis_compensated_lazy(
+    scene: &Scene,
+    ctx: &LightSampleContext,
+    tree_vtx: &ShadingVertex,
+    tree_material: &Material,
+    u_root: f32,
+    u_tree: f32,
+    u_aux: f32,
+    us: Vec2,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
+) -> Option<SampledLight> {
+    let category = scene.light_sampler.sample_category(u_root)?;
+    match category.category {
+        LightCategory::Tree => {
+            let tree = scene.light_tree.as_ref()?;
+            let query = build_query(tree_vtx, tree_material, mtlx_scratch)?;
+            let leaf = sample_light_tree(tree, &query, u_tree)?;
+            let li = sample_li_for_leaf(scene, leaf.leaf, ctx, u_aux, us, mtlx_scratch)?;
+            Some(SampledLight {
+                category: category.category,
+                leaf: Some(leaf.leaf),
+                sample: li,
+                selection_pmf: category.pmf * leaf.pmf,
+            })
+        }
+        LightCategory::Environment => {
+            let li = environment::sample_li_mis_compensated(scene, us)?;
+            Some(SampledLight {
+                category: category.category,
+                leaf: None,
+                sample: li,
+                selection_pmf: category.pmf,
+            })
+        }
+        LightCategory::Directional(i) => {
+            let li = directional::sample_li(&scene.directional_lights[i])?;
+            Some(SampledLight {
+                category: category.category,
+                leaf: None,
+                sample: li,
+                selection_pmf: category.pmf,
+            })
+        }
+    }
 }
 
 fn sample_light_inner(
@@ -278,6 +348,7 @@ fn sample_light_inner(
     u_aux: f32,
     us: Vec2,
     mis_compensated: bool,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> Option<SampledLight> {
     let category = scene.light_sampler.sample_category(u_root)?;
     match category.category {
@@ -285,7 +356,7 @@ fn sample_light_inner(
             let tree = scene.light_tree.as_ref()?;
             let query = tree_query?;
             let leaf = sample_light_tree(tree, query, u_tree)?;
-            let li = sample_li_for_leaf(scene, leaf.leaf, ctx, u_aux, us)?;
+            let li = sample_li_for_leaf(scene, leaf.leaf, ctx, u_aux, us, mtlx_scratch)?;
             Some(SampledLight {
                 category: category.category,
                 leaf: Some(leaf.leaf),
@@ -324,9 +395,12 @@ fn sample_li_for_leaf(
     ctx: &LightSampleContext,
     _u_aux: f32,
     us: Vec2,
+    mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> Option<LightLiSample> {
     match leaf {
-        LightTreeLeafKind::Triangle(tri) => area::sample_li_for_triangle(scene, tri, ctx, us),
+        LightTreeLeafKind::Triangle(tri) => {
+            area::sample_li_for_triangle(scene, tri, ctx, us, mtlx_scratch)
+        }
         LightTreeLeafKind::Point(PointLightIndex(i)) => {
             point::sample_li(&scene.point_lights[i], ctx)
         }
@@ -469,7 +543,6 @@ mod tests {
         assert_eq!(sampler.len(), 2);
         assert!(sampler.contains(LightCategory::Directional(0)));
         assert!(sampler.contains(LightCategory::Directional(1)));
-        // Heavier light has bigger pmf.
         let p0 = sampler.category_pmf(LightCategory::Directional(0));
         let p1 = sampler.category_pmf(LightCategory::Directional(1));
         assert!(p1 > p0);

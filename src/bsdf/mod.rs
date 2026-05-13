@@ -9,6 +9,7 @@ mod eon;
 mod glass;
 mod gtr1;
 mod mirror;
+pub mod mtlx;
 mod normalized_lambert;
 mod oren_nayar;
 mod sheen;
@@ -26,8 +27,9 @@ pub use conductor_ggx_cui_2023::ConductorGgxCui2023Bsdf;
 pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 pub(crate) use directional_albedo::{
     ConductorGgxEnergyCompensationLut, DielectricGgxDirectionalAlbedoLut,
-    DielectricGgxEnergyCompensationLut, DirectionalAlbedoCache, SheenDirectionalAlbedoLut,
-    sanitize_dielectric_eta,
+    DielectricGgxEnergyCompensationLut, DirectionalAlbedoCache,
+    MtlxDielectricGgxDirectionalAlbedoLut, MtlxGeneralizedSchlickGgxDirectionalAlbedoLut,
+    SheenDirectionalAlbedoLut, sanitize_dielectric_eta,
 };
 pub use disney_brdf::DisneyBrdfBsdf;
 pub use eon::EonBsdf;
@@ -35,7 +37,7 @@ pub use glass::GlassBsdf;
 pub use mirror::MirrorBsdf;
 pub use normalized_lambert::NormalizedLambertBsdf;
 pub use oren_nayar::OrenNayarBsdf;
-pub use sheen::SheenBsdf;
+pub use sheen::{SheenBsdf, sheen_directional_albedo_estimate};
 pub use standard_surface::{StandardSurfaceBsdf, StandardSurfaceBsdfParams};
 
 bitflags::bitflags! {

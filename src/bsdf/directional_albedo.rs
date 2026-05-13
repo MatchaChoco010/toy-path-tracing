@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use crate::math::fresnel_dielectric;
 
 use super::dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
+use super::mtlx::{DielectricBsdf as MtlxDielectricBsdf, ScatterMode as MtlxScatterMode};
 use super::sheen::sheen_directional_albedo_estimate;
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -37,6 +38,8 @@ pub(crate) struct DirectionalAlbedoCache {
     dielectric_ggx:
         HashMap<DielectricGgxDirectionalAlbedoKey, Arc<DielectricGgxDirectionalAlbedoLut>>,
     sheen: Option<Arc<SheenDirectionalAlbedoLut>>,
+    mtlx_dielectric_ggx: Option<Arc<MtlxDielectricGgxDirectionalAlbedoLut>>,
+    mtlx_generalized_schlick_ggx: Option<Arc<MtlxGeneralizedSchlickGgxDirectionalAlbedoLut>>,
     conductor_ggx_energy_compensation: Option<Arc<ConductorGgxEnergyCompensationLut>>,
     dielectric_ggx_energy_compensation: Option<Arc<DielectricGgxEnergyCompensationLut>>,
 }
@@ -64,6 +67,28 @@ impl DirectionalAlbedoCache {
         }
         let lut = Arc::new(SheenDirectionalAlbedoLut::build());
         self.sheen = Some(Arc::clone(&lut));
+        lut
+    }
+
+    pub(crate) fn get_or_build_mtlx_dielectric_ggx(
+        &mut self,
+    ) -> Arc<MtlxDielectricGgxDirectionalAlbedoLut> {
+        if let Some(lut) = self.mtlx_dielectric_ggx.as_ref() {
+            return Arc::clone(lut);
+        }
+        let lut = Arc::new(MtlxDielectricGgxDirectionalAlbedoLut::build());
+        self.mtlx_dielectric_ggx = Some(Arc::clone(&lut));
+        lut
+    }
+
+    pub(crate) fn get_or_build_mtlx_generalized_schlick_ggx(
+        &mut self,
+    ) -> Arc<MtlxGeneralizedSchlickGgxDirectionalAlbedoLut> {
+        if let Some(lut) = self.mtlx_generalized_schlick_ggx.as_ref() {
+            return Arc::clone(lut);
+        }
+        let lut = Arc::new(MtlxGeneralizedSchlickGgxDirectionalAlbedoLut::build());
+        self.mtlx_generalized_schlick_ggx = Some(Arc::clone(&lut));
         lut
     }
 
@@ -429,6 +454,229 @@ impl SheenDirectionalAlbedoLut {
     }
 }
 
+const MTLX_DIELECTRIC_DA_COS_RESOLUTION: usize = 64;
+const MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION: usize = 64;
+const MTLX_DIELECTRIC_DA_ETA_RESOLUTION: usize = 32;
+const MTLX_DIELECTRIC_DA_LEN: usize = MTLX_DIELECTRIC_DA_COS_RESOLUTION
+    * MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION
+    * MTLX_DIELECTRIC_DA_ETA_RESOLUTION;
+const MTLX_DIELECTRIC_DA_SAMPLE_COUNT: usize = 64;
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct MtlxDielectricGgxDirectionalAlbedoLut {
+    values: Vec<f32>,
+}
+
+impl MtlxDielectricGgxDirectionalAlbedoLut {
+    fn build() -> Self {
+        let hemisphere_samples = generate_uniform_hemisphere_samples();
+        let mut values = vec![0.0; MTLX_DIELECTRIC_DA_LEN];
+        values
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(index, value)| {
+                let cos_index = index % MTLX_DIELECTRIC_DA_COS_RESOLUTION;
+                let rest = index / MTLX_DIELECTRIC_DA_COS_RESOLUTION;
+                let alpha_index = rest % MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION;
+                let eta_index = rest / MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION;
+
+                let sqrt_cos = lut_cell_center(cos_index, MTLX_DIELECTRIC_DA_COS_RESOLUTION);
+                let cos_theta = sqrt_cos * sqrt_cos;
+                let alpha = lut_cell_center(alpha_index, MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION);
+                let eta_axis = lut_cell_center(eta_index, MTLX_DIELECTRIC_DA_ETA_RESOLUTION);
+                let eta_rel = dielectric_ec_axis_to_eta(eta_axis);
+
+                *value = estimate_mtlx_dielectric_ggx_directional_albedo(
+                    cos_theta,
+                    alpha,
+                    eta_rel,
+                    &hemisphere_samples,
+                );
+            });
+        Self { values }
+    }
+
+    pub(crate) fn lookup(&self, cos_theta: f32, alpha_x: f32, alpha_y: f32, eta_rel: f32) -> f32 {
+        if cos_theta <= 0.0 {
+            return 0.0;
+        }
+
+        let sqrt_cos = cos_theta.clamp(0.0, 1.0).sqrt();
+        let alpha_x = alpha_x.clamp(MIN_ALPHA, 1.0);
+        let alpha_y = alpha_y.clamp(MIN_ALPHA, 1.0);
+        let alpha = (alpha_x * alpha_y).sqrt().clamp(MIN_ALPHA, 1.0);
+        let eta_axis = dielectric_ec_eta_to_axis(eta_rel);
+
+        let (cos_lower, cos_upper, cos_blend) =
+            compute_lut_axis_lerp(sqrt_cos, MTLX_DIELECTRIC_DA_COS_RESOLUTION);
+        let (alpha_lower, alpha_upper, alpha_blend) =
+            compute_lut_axis_lerp(alpha, MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION);
+        let (eta_lower, eta_upper, eta_blend) =
+            compute_lut_axis_lerp(eta_axis, MTLX_DIELECTRIC_DA_ETA_RESOLUTION);
+
+        let mut value = 0.0;
+        for (eta_idx, eta_w) in [(eta_lower, 1.0 - eta_blend), (eta_upper, eta_blend)] {
+            for (alpha_idx, alpha_w) in
+                [(alpha_lower, 1.0 - alpha_blend), (alpha_upper, alpha_blend)]
+            {
+                for (cos_idx, cos_w) in [(cos_lower, 1.0 - cos_blend), (cos_upper, cos_blend)] {
+                    let idx = (eta_idx * MTLX_DIELECTRIC_DA_ALPHA_RESOLUTION + alpha_idx)
+                        * MTLX_DIELECTRIC_DA_COS_RESOLUTION
+                        + cos_idx;
+                    value += eta_w * alpha_w * cos_w * self.values[idx];
+                }
+            }
+        }
+        value.clamp(0.0, 1.0)
+    }
+}
+
+fn estimate_mtlx_dielectric_ggx_directional_albedo(
+    cos_theta: f32,
+    alpha: f32,
+    eta_rel: f32,
+    hemisphere_samples: &[Vec3; DIRECTIONAL_ALBEDO_SAMPLE_COUNT],
+) -> f32 {
+    if cos_theta <= 0.0 || eta_rel <= 0.0 {
+        return 0.0;
+    }
+    let alpha = alpha.clamp(MIN_ALPHA, 1.0);
+    let eta_rel = eta_rel.clamp(DIELECTRIC_EC_ETA_MIN_INVERSE, DIELECTRIC_EC_ETA_MAX);
+    let ior = if eta_rel >= 1.0 {
+        eta_rel
+    } else {
+        1.0 / eta_rel
+    };
+    let front_face = eta_rel >= 1.0;
+    let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+    let wo = Vec3::new(sin_theta, 0.0, cos_theta);
+    let bsdf = MtlxDielectricBsdf::with_thin_film(
+        1.0,
+        Vec3::ONE,
+        ior,
+        Vec2::splat(alpha),
+        MtlxScatterMode::Reflection,
+        0.0,
+        1.5,
+        front_face,
+    );
+    let sum = hemisphere_samples
+        .iter()
+        .map(|&wi| bsdf.eval(wo, wi).x * wi.z.max(0.0) / UNIFORM_HEMISPHERE_PDF)
+        .sum::<f32>();
+
+    (sum / MTLX_DIELECTRIC_DA_SAMPLE_COUNT as f32).clamp(0.0, 1.0)
+}
+
+const MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION: usize = 64;
+const MTLX_GENERALIZED_SCHLICK_DA_ALPHA_RESOLUTION: usize = 64;
+const MTLX_GENERALIZED_SCHLICK_DA_LEN: usize =
+    MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION * MTLX_GENERALIZED_SCHLICK_DA_ALPHA_RESOLUTION;
+const MTLX_GENERALIZED_SCHLICK_DA_SAMPLE_COUNT: usize = 64;
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct MtlxGeneralizedSchlickGgxDirectionalAlbedoLut {
+    ab_values: Vec<Vec2>,
+}
+
+impl MtlxGeneralizedSchlickGgxDirectionalAlbedoLut {
+    fn build() -> Self {
+        let samples = generate_stratified_unit_square_samples_mtlx_schlick();
+        let mut ab_values = vec![Vec2::ZERO; MTLX_GENERALIZED_SCHLICK_DA_LEN];
+        ab_values
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(index, value)| {
+                let cos_index = index % MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION;
+                let alpha_index = index / MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION;
+                let sqrt_cos =
+                    lut_cell_center(cos_index, MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION);
+                let cos_theta = sqrt_cos * sqrt_cos;
+                let alpha =
+                    lut_cell_center(alpha_index, MTLX_GENERALIZED_SCHLICK_DA_ALPHA_RESOLUTION);
+                *value = estimate_mtlx_generalized_schlick_ggx_ab(cos_theta, alpha, &samples);
+            });
+        Self { ab_values }
+    }
+
+    pub(crate) fn lookup(
+        &self,
+        cos_theta: f32,
+        alpha_x: f32,
+        alpha_y: f32,
+        color0: Vec3,
+        color90: Vec3,
+    ) -> Vec3 {
+        if cos_theta <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let sqrt_cos = cos_theta.clamp(0.0, 1.0).sqrt();
+        let alpha = (alpha_x.clamp(MIN_ALPHA, 1.0) * alpha_y.clamp(MIN_ALPHA, 1.0))
+            .sqrt()
+            .clamp(MIN_ALPHA, 1.0);
+        let (cos_lower, cos_upper, cos_blend) =
+            compute_lut_axis_lerp(sqrt_cos, MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION);
+        let (alpha_lower, alpha_upper, alpha_blend) =
+            compute_lut_axis_lerp(alpha, MTLX_GENERALIZED_SCHLICK_DA_ALPHA_RESOLUTION);
+
+        let mut ab = Vec2::ZERO;
+        for (alpha_idx, alpha_w) in [(alpha_lower, 1.0 - alpha_blend), (alpha_upper, alpha_blend)] {
+            for (cos_idx, cos_w) in [(cos_lower, 1.0 - cos_blend), (cos_upper, cos_blend)] {
+                let idx = alpha_idx * MTLX_GENERALIZED_SCHLICK_DA_COS_RESOLUTION + cos_idx;
+                ab += self.ab_values[idx] * (alpha_w * cos_w);
+            }
+        }
+
+        (color0.max(Vec3::ZERO) * ab.x + color90.max(Vec3::ZERO) * ab.y)
+            .clamp(Vec3::ZERO, Vec3::ONE)
+    }
+}
+
+fn estimate_mtlx_generalized_schlick_ggx_ab(
+    cos_theta: f32,
+    alpha: f32,
+    samples: &[Vec2; MTLX_GENERALIZED_SCHLICK_DA_SAMPLE_COUNT],
+) -> Vec2 {
+    if cos_theta <= 0.0 {
+        return Vec2::ZERO;
+    }
+    let alpha = alpha.clamp(MIN_ALPHA, 1.0);
+    let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+    let wo = Vec3::new(sin_theta, 0.0, cos_theta);
+    let g1_wo = crate::bsdf::smith_ggx::ggx_g1(wo, alpha, alpha);
+    if g1_wo <= 0.0 {
+        return Vec2::ZERO;
+    }
+
+    let sum = samples.iter().fold(Vec2::ZERO, |acc, &us| {
+        let Some(wm) = crate::bsdf::smith_ggx::sample_wm_vndf(wo, alpha, alpha, us) else {
+            return acc;
+        };
+        let v_dot_h = wo.dot(wm).clamp(0.0, 1.0);
+        if v_dot_h <= 0.0 {
+            return acc;
+        }
+        let wi = crate::bsdf::smith_ggx::reflect_local(wo, wm);
+        if wi.z <= 0.0 {
+            return acc;
+        }
+        let fc = (1.0 - v_dot_h).powi(5);
+        let g2 = crate::bsdf::smith_ggx::ggx_g2_height_correlated(wo, wi, alpha, alpha);
+        acc + Vec2::new(g2 * (1.0 - fc), g2 * fc)
+    });
+
+    (sum / (g1_wo * MTLX_GENERALIZED_SCHLICK_DA_SAMPLE_COUNT as f32)).clamp(Vec2::ZERO, Vec2::ONE)
+}
+
+fn generate_stratified_unit_square_samples_mtlx_schlick()
+-> [Vec2; MTLX_GENERALIZED_SCHLICK_DA_SAMPLE_COUNT] {
+    std::array::from_fn(|index| {
+        let u = (index as f32 + 0.5) / MTLX_GENERALIZED_SCHLICK_DA_SAMPLE_COUNT as f32;
+        let v = radical_inverse_vdc(index as u32);
+        Vec2::new(u, v)
+    })
+}
+
 const CONDUCTOR_EC_COS_RESOLUTION: usize = 64;
 const CONDUCTOR_EC_ROUGHNESS_RESOLUTION: usize = 64;
 const CONDUCTOR_EC_LEN: usize = CONDUCTOR_EC_COS_RESOLUTION * CONDUCTOR_EC_ROUGHNESS_RESOLUTION;
@@ -748,4 +996,36 @@ fn estimate_dielectric_ggx_directional_albedo_full_sphere(
         sum += sample.weight.x * scale_irrad;
     }
     (sum / DIELECTRIC_EC_BSDF_SAMPLE_COUNT as f32).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conductor_energy_compensation_lookup_returns_cell_center_values() {
+        let lut = ConductorGgxEnergyCompensationLut::build_for_tests();
+        for (cos_index, r_index) in [(0, 0), (7, 5), (31, 23), (63, 63)] {
+            let sqrt_cos = lut_cell_center(cos_index, CONDUCTOR_EC_COS_RESOLUTION);
+            let cos_theta = sqrt_cos * sqrt_cos;
+            let roughness = lut_cell_center(r_index, CONDUCTOR_EC_ROUGHNESS_RESOLUTION);
+            let expected = lut.e_values[r_index * CONDUCTOR_EC_COS_RESOLUTION + cos_index];
+            let actual = lut.lookup_e(cos_theta, roughness);
+            assert!(
+                (actual - expected).abs() < 1.0e-5,
+                "lookup mismatch at cos_index={cos_index}, r_index={r_index}: expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn conductor_energy_compensation_lookup_stays_in_bounds() {
+        let lut = ConductorGgxEnergyCompensationLut::build_for_tests();
+        for cos_theta in [0.0, 0.1, 0.5, 0.9, 1.0] {
+            for roughness in [0.0, 0.05, 0.25, 0.75, 1.0] {
+                let e = lut.lookup_e(cos_theta, roughness);
+                assert!((0.0..=1.0).contains(&e));
+            }
+        }
+    }
 }
