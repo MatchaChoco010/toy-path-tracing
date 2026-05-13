@@ -127,8 +127,34 @@ impl<P: TexturePixel> Texture<P> {
         self.bilerp_level(0, uv)
     }
 
+    pub fn sample_nearest(&self, uv: Vec2) -> P {
+        let texture_level = self.level(0);
+        let u = wrap_unit(uv.x);
+        let v = wrap_unit(uv.y);
+        let x = (u * texture_level.width as f32).floor() as isize;
+        let y = (v * texture_level.height as f32).floor() as isize;
+        self.pixel_level_wrapped(0, x, y)
+    }
+
     pub fn sample_filtered(&self, uv: Vec2, dstdx: Vec2, dstdy: Vec2) -> P {
         self.sample_ewa(uv, dstdx, dstdy)
+    }
+
+    /// MaterialX 経路用の軽量フィルタ: ray differential から LOD を選び、
+    /// その mip 段で純粋な 4 texel bilinear。 anisotropic な歪みは無視するが
+    /// LOD 選択により aliasing と cache miss を抑える。
+    pub fn sample_mip_bilinear(&self, uv: Vec2, dpdx: Vec2, dpdy: Vec2) -> P {
+        if !dpdx.is_finite() || !dpdy.is_finite() {
+            return self.bilerp_level(0, uv);
+        }
+        let width = dpdx
+            .abs()
+            .max(dpdy.abs())
+            .max_element()
+            .max(MIN_FILTER_WIDTH);
+        let lod = ((self.level_count() - 1) as f32 + width.log2()).max(0.0);
+        let level = (lod as usize).min(self.level_count() - 1);
+        self.bilerp_level(level, uv)
     }
 
     fn sample_ewa(&self, uv: Vec2, mut dst0: Vec2, mut dst1: Vec2) -> P {
@@ -163,8 +189,7 @@ impl<P: TexturePixel> Texture<P> {
         a.lerp(b, t)
     }
 
-    #[cfg(test)]
-    fn sample_trilinear(&self, uv: Vec2, dstdx: Vec2, dstdy: Vec2) -> P {
+    pub fn sample_trilinear(&self, uv: Vec2, dstdx: Vec2, dstdy: Vec2) -> P {
         if !dstdx.is_finite() || !dstdy.is_finite() {
             return self.sample(uv);
         }
@@ -456,7 +481,11 @@ fn wrap_unit(t: f32) -> f32 {
 }
 
 fn wrap_index(index: isize, size: usize) -> usize {
-    index.rem_euclid(size as isize) as usize
+    if size.is_power_of_two() {
+        (index as usize) & (size - 1)
+    } else {
+        index.rem_euclid(size as isize) as usize
+    }
 }
 
 #[cfg(test)]

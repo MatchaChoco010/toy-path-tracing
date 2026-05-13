@@ -1,7 +1,10 @@
 use glam::Vec3;
 use rand::RngExt;
 
-use crate::{light::infinite_light_le, math::russian_roulette_probability, ray::Ray, scene::Scene};
+use crate::{
+    light::infinite_light_le, material::MtlxScratch, math::russian_roulette_probability, ray::Ray,
+    scene::Scene,
+};
 
 use super::spawn_scattered_ray;
 
@@ -10,6 +13,7 @@ pub fn trace_radiance(
     initial_ray: Ray,
     rng: &mut rand::rngs::ThreadRng,
     max_depth: u32,
+    mtlx_scratch: &mut MtlxScratch,
 ) -> Vec3 {
     let mut radiance = Vec3::ZERO;
     let mut throughput = Vec3::ONE;
@@ -19,7 +23,7 @@ pub fn trace_radiance(
 
     for depth in 0..max_depth {
         let hit = scene
-            .closest_hit(&ray, rng)
+            .closest_hit(&ray, rng, mtlx_scratch)
             .expect("scene.build_qbvh() must be called before traversal");
 
         let Some(hit) = hit else {
@@ -30,12 +34,13 @@ pub fn trace_radiance(
         let mut shading_vertex = scene.shading_vertex(hit, &ray);
         shading_vertex.wavelength_lock = wavelength_lock;
         let material = scene.instance_material(hit.triangle.instance_index);
+        material.precompute_shading(&mut shading_vertex, mtlx_scratch);
 
-        if let Some(le) = material.le(&shading_vertex) {
+        if let Some(le) = material.le(&shading_vertex, mtlx_scratch) {
             radiance += throughput * le;
         }
 
-        let Some(sample) = material.sample(&shading_vertex, rng) else {
+        let Some(sample) = material.sample(&shading_vertex, mtlx_scratch, rng) else {
             break;
         };
 
@@ -64,14 +69,15 @@ mod tests {
 
     use super::super::test_helpers::mirror_to_light_scene;
     use super::trace_radiance;
-    use crate::{light::EnvironmentLight, ray::Ray, scene::Scene};
+    use crate::{light::EnvironmentLight, material::MtlxScratch, ray::Ray, scene::Scene};
 
     #[test]
     fn trace_radiance_counts_light_after_delta_bounce() {
         let (scene, ray, expected) = mirror_to_light_scene();
         let mut rng = rand::rng();
+        let mut scratch = MtlxScratch::default();
 
-        let radiance = trace_radiance(&scene, ray, &mut rng, 2);
+        let radiance = trace_radiance(&scene, ray, &mut rng, 2, &mut scratch);
 
         assert!(radiance.abs_diff_eq(expected, 1.0e-5));
     }
@@ -86,8 +92,9 @@ mod tests {
         scene.build_light_tree();
 
         let mut rng = rand::rng();
+        let mut scratch = MtlxScratch::default();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);
-        let radiance = trace_radiance(&scene, ray, &mut rng, 4);
+        let radiance = trace_radiance(&scene, ray, &mut rng, 4, &mut scratch);
 
         assert!(radiance.abs_diff_eq(env_radiance, 1.0e-5));
     }

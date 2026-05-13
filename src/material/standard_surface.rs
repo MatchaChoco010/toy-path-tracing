@@ -375,11 +375,10 @@ impl StandardSurfaceMaterial {
         alpha >= 1.0 || u < alpha
     }
 
-    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &ShadingVertex) -> ShadingVertex {
-        self.normal_map
-            .as_ref()
-            .map(|n| n.apply(shading_vertex, self.normal_strength))
-            .unwrap_or(*shading_vertex)
+    pub(crate) fn prepare_shading_vertex(&self, shading_vertex: &mut ShadingVertex) {
+        if let Some(normal_map) = self.normal_map.as_ref() {
+            normal_map.apply(shading_vertex, self.normal_strength);
+        }
     }
 
     pub fn le(&self, shading_vertex: &ShadingVertex) -> Option<Vec3> {
@@ -703,10 +702,10 @@ impl StandardSurfaceMaterial {
 
     fn coat_basis_in_base(&self, shading_vertex: &ShadingVertex) -> Option<OrthonormalBasis> {
         let normal_map = self.coat_normal_map.as_ref()?;
-        let mapped = normal_map.apply(shading_vertex, self.coat_normal_strength);
+        let mapped_ns = normal_map.mapped_ns(shading_vertex, self.coat_normal_strength)?;
         let coat_normal_local = shading_vertex
             .frame
-            .world_to_local(mapped.ns)
+            .world_to_local(mapped_ns)
             .normalize_or_zero();
         if coat_normal_local.length_squared() == 0.0 || coat_normal_local.z <= 0.0 {
             return None;
@@ -828,6 +827,12 @@ mod tests {
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
             wavelength_lock: None,
+            object_to_world: glam::Mat4::IDENTITY,
+            world_to_object: glam::Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
         }
     }
 

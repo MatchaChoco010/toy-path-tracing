@@ -520,7 +520,7 @@ mod tests {
 
     use glam::{Vec2, Vec3};
 
-    use super::super::{LightSampleContext, LightType};
+    use super::super::LightType;
     use super::{
         EnvironmentLight, build_distribution, direction_to_uv, infinite_light_le,
         infinite_light_pdf_li, sample_li, uv_to_direction,
@@ -726,12 +726,6 @@ mod tests {
         let mut scene = Scene::new();
         let pixels = vec![Vec3::splat(1.0); 32 * 16];
         scene.set_environment_light(EnvironmentLight::from_pixels(32, 16, pixels, 1.0, 0.0));
-
-        let _ = LightSampleContext {
-            p: Vec3::ZERO,
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-        };
 
         let li = sample_li(&scene, Vec2::new(0.3, 0.6)).expect("expected a sample");
 

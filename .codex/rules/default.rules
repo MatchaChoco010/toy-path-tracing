@@ -1,6 +1,6 @@
 prefix_rule(
   pattern = ["git", "push"],
-  decision = "ask",
+  decision = "prompt",
   justification = "Confirm with the user before pushing to a remote repository.",
   match = [
     "git push",

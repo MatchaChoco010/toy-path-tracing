@@ -810,7 +810,7 @@ mod tests {
         assert_eq!(tree.nodes.len(), 1);
         let n = &tree.nodes[tree.root as usize];
         assert!(n.is_leaf());
-        assert!((n.flux - 0.5).abs() < 1.0e-5); // area = 0.5, max emission = 1.
+        assert!((n.flux - 0.5).abs() < 1.0e-5);
     }
 
     #[test]
@@ -825,7 +825,6 @@ mod tests {
         assert!(tree.nodes.len() >= 3);
         let n = &tree.nodes[tree.root as usize];
         assert!(!n.is_leaf());
-        // Sum of leaves' flux should equal root's flux.
         let mut leaf_flux = 0.0;
         for node in &tree.nodes {
             if node.is_leaf() {
@@ -858,7 +857,7 @@ mod tests {
         assert_eq!(tree.nodes.len(), 1);
         let n = &tree.nodes[tree.root as usize];
         assert!(n.is_leaf());
-        assert!(n.lambda.abs() < 1.0e-5); // point light is uniform
+        assert!(n.lambda.abs() < 1.0e-5);
     }
 
     #[test]

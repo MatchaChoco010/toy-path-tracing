@@ -5,7 +5,7 @@ use crate::{
     bsdf::BsdfFlags,
     light::{LightSampleContext, infinite_light_le, sample_light},
     light_tree,
-    material::{Material, ShadingVertex},
+    material::{Material, MtlxScratch, ShadingVertex},
     math::russian_roulette_probability,
     ray::Ray,
     scene::Scene,
@@ -18,6 +18,7 @@ pub fn trace_radiance(
     initial_ray: Ray,
     rng: &mut rand::rngs::ThreadRng,
     max_depth: u32,
+    mtlx_scratch: &mut MtlxScratch,
 ) -> Vec3 {
     let mut radiance = Vec3::ZERO;
     let mut throughput = Vec3::ONE;
@@ -28,7 +29,7 @@ pub fn trace_radiance(
 
     for depth in 0..max_depth {
         let hit = scene
-            .closest_hit(&ray, rng)
+            .closest_hit(&ray, rng, mtlx_scratch)
             .expect("scene.build_qbvh() must be called before traversal");
 
         let Some(hit) = hit else {
@@ -41,26 +42,34 @@ pub fn trace_radiance(
         let mut vtx = scene.shading_vertex(hit, &ray);
         vtx.wavelength_lock = wavelength_lock;
         let material = scene.instance_material(hit.triangle.instance_index);
-
-        if count_emission_at_hit && let Some(le) = material.le(&vtx) {
+        material.precompute_shading(&mut vtx, mtlx_scratch);
+        if count_emission_at_hit && let Some(le) = material.le(&vtx, mtlx_scratch) {
             radiance += throughput * le;
         }
 
-        let Some(sample) = material.sample(&vtx, rng) else {
-            break;
-        };
-        let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
-
-        if should_sample_direct_light(material, sample.flags) {
+        if should_sample_direct_light(material) {
             let u_root = rng.random::<f32>();
             let u_tree = rng.random::<f32>();
             let u_aux = rng.random::<f32>();
             let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
             radiance += throughput
                 * direct_light_nee_contribution(
-                    scene, material, &vtx, u_root, u_tree, u_aux, us, rng,
+                    scene,
+                    material,
+                    &vtx,
+                    u_root,
+                    u_tree,
+                    u_aux,
+                    us,
+                    rng,
+                    mtlx_scratch,
                 );
         }
+
+        let Some(sample) = material.sample(&vtx, mtlx_scratch, rng) else {
+            break;
+        };
+        let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
 
         throughput *= sample.weight;
         if let Some(lambda) = sample.wavelength_lock {
@@ -82,8 +91,8 @@ pub fn trace_radiance(
     radiance
 }
 
-pub(super) fn should_sample_direct_light(material: &Material, sample_flags: BsdfFlags) -> bool {
-    !material.may_emit() && !sample_flags.contains(BsdfFlags::DELTA)
+pub(super) fn should_sample_direct_light(material: &Material) -> bool {
+    !material.is_pure_emitter()
 }
 
 pub(super) fn direct_light_nee_contribution(
@@ -95,12 +104,21 @@ pub(super) fn direct_light_nee_contribution(
     u_aux: f32,
     us: Vec2,
     rng: &mut rand::rngs::ThreadRng,
+    mtlx_scratch: &mut MtlxScratch,
 ) -> Vec3 {
     let ctx = LightSampleContext::from_vertex(vtx);
-    let tree_query = light_tree::build_query(vtx, material);
+    let tree_query = light_tree::build_query(vtx, material, mtlx_scratch);
 
-    let Some(sampled) = sample_light(scene, &ctx, tree_query.as_ref(), u_root, u_tree, u_aux, us)
-    else {
+    let Some(sampled) = sample_light(
+        scene,
+        &ctx,
+        tree_query.as_ref(),
+        u_root,
+        u_tree,
+        u_aux,
+        us,
+        mtlx_scratch,
+    ) else {
         return Vec3::ZERO;
     };
     let li = sampled.sample;
@@ -109,17 +127,17 @@ pub(super) fn direct_light_nee_contribution(
         return Vec3::ZERO;
     }
 
-    let f = material.eval(vtx, li.wi, rng);
+    let f = material.eval(vtx, mtlx_scratch, li.wi, rng);
     if f.length_squared() == 0.0 {
         return Vec3::ZERO;
     }
 
-    let cos_surface = vtx.ns.dot(li.wi).max(0.0);
+    let cos_surface = vtx.ns.dot(li.wi).abs();
     if cos_surface <= 0.0 {
         return Vec3::ZERO;
     }
 
-    if !unoccluded(scene, vtx, &li, rng) {
+    if !unoccluded(scene, vtx, &li, rng, mtlx_scratch) {
         return Vec3::ZERO;
     }
 
@@ -140,14 +158,20 @@ mod tests {
     use super::super::test_helpers::mirror_to_light_scene;
     use super::{direct_light_nee_contribution, should_sample_direct_light, trace_radiance};
     use crate::{
-        bsdf::BsdfFlags,
+        bsdf::mtlx::ScatterMode,
         color::linear_to_srgb,
         light::{DirectionalLight, EnvironmentLight, PointLight, SpotLight},
-        material::{EmissiveMaterial, Material, MirrorMaterial, NormalizedLambertMaterial},
+        material::mtlx::{ClosureNode, CompiledMaterial, ParamRef},
+        material::{
+            EmissiveMaterial, Material, MirrorMaterial, MtlxMaterial, MtlxScratch,
+            NormalizedLambertMaterial, ShadingVertex,
+        },
+        math::OrthonormalBasis,
         mesh::{Mesh, Vertex},
         ray::Ray,
         scene::{InstanceIndex, Scene, TriangleRef},
     };
+    use std::sync::Arc;
 
     fn unit_mesh(z: f32) -> Mesh {
         Mesh::new(
@@ -179,15 +203,178 @@ mod tests {
         }
     }
 
+    fn transmission_mtlx_material() -> Material {
+        Material::Mtlx(MtlxMaterial::new(Arc::new(CompiledMaterial {
+            instructions: Vec::new(),
+            operand_pool: Vec::new(),
+            value_pool: Vec::new(),
+            opacity_instructions: Vec::new(),
+            opacity_operand_pool: Vec::new(),
+            opacity_closure_nodes: Vec::new(),
+            opacity_num_registers: 0,
+            num_registers: 0,
+            closure_nodes: vec![
+                ClosureNode::Surface {
+                    bsdf: 1,
+                    edf: 2,
+                    opacity: ParamRef::Float(1.0),
+                    thin_walled: false,
+                },
+                ClosureNode::Dielectric {
+                    weight: ParamRef::Float(1.0),
+                    tint: ParamRef::Color3(Vec3::ONE),
+                    ior: ParamRef::Float(1.5),
+                    roughness: ParamRef::Vector2(Vec2::splat(0.2)),
+                    scatter_mode: ScatterMode::Transmission,
+                    thinfilm_thickness: ParamRef::Float(0.0),
+                    thinfilm_ior: ParamRef::Float(1.0),
+                    normal: None,
+                    tangent: None,
+                },
+                ClosureNode::Zero,
+            ],
+            root: 0,
+            passthrough: false,
+            max_emission: 0.0,
+            may_emit: false,
+            has_opacity_test: false,
+            thin_walled: false,
+            sheen_lut: None,
+            mtlx_dielectric_lut: None,
+            mtlx_generalized_schlick_lut: None,
+        })))
+    }
+
+    fn standalone_shading_vertex_for_transmission() -> ShadingVertex {
+        ShadingVertex {
+            triangle: triangle_ref(0),
+            p: Vec3::new(0.25, 0.25, 0.0),
+            uv: Vec2::ZERO,
+            dudx: 0.0,
+            dvdx: 0.0,
+            dudy: 0.0,
+            dvdy: 0.0,
+            ng: Vec3::Z,
+            ns: Vec3::Z,
+            wo: Vec3::Z,
+            dpdu: Vec3::X,
+            dpdv: Vec3::Y,
+            dpdx: Vec3::ZERO,
+            dpdy: Vec3::ZERO,
+            dndu: Vec3::ZERO,
+            dndv: Vec3::ZERO,
+            frame: OrthonormalBasis::from_normal(Vec3::Z),
+            front_face: true,
+            wavelength_lock: None,
+            object_to_world: Mat4::IDENTITY,
+            world_to_object: Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
+        }
+    }
+
+    fn light_below_scene() -> Scene {
+        let mut scene = Scene::new();
+        let light_mesh = scene.add_mesh(unit_mesh(-1.0));
+        let light_material =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 4.0)));
+        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
+        scene.build_qbvh();
+        scene.build_light_tree();
+        scene
+    }
+
     #[test]
-    fn direct_light_sampling_is_skipped_for_delta_samples() {
+    fn direct_light_sampling_skips_only_pure_emitters() {
         let mirror = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
         let lambert = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let light = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
 
-        assert!(!should_sample_direct_light(&mirror, BsdfFlags::DELTA));
-        assert!(should_sample_direct_light(&lambert, BsdfFlags::DIFFUSE));
-        assert!(!should_sample_direct_light(&light, BsdfFlags::DIFFUSE));
+        assert!(should_sample_direct_light(&mirror));
+        assert!(should_sample_direct_light(&lambert));
+        assert!(!should_sample_direct_light(&light));
+    }
+
+    #[test]
+    fn direct_light_sampling_runs_for_mtlx_with_conservative_may_emit() {
+        use crate::material::MtlxMaterial;
+        use crate::material::mtlx::{ClosureNode, CompiledMaterial, ParamRef};
+        use std::sync::Arc;
+
+        let closure_nodes = vec![
+            ClosureNode::Zero,
+            ClosureNode::OrenNayarDiffuse {
+                weight: ParamRef::Float(1.0),
+                color: ParamRef::Color3(Vec3::splat(0.5)),
+                roughness: ParamRef::Float(0.0),
+                energy_compensation: false,
+                normal: None,
+            },
+            ClosureNode::UniformEdf {
+                color: ParamRef::Color3(Vec3::splat(0.5)),
+            },
+            ClosureNode::Surface {
+                bsdf: 1,
+                edf: 2,
+                opacity: ParamRef::Float(1.0),
+                thin_walled: false,
+            },
+        ];
+        let compiled = CompiledMaterial {
+            instructions: Vec::new(),
+            operand_pool: Vec::new(),
+            value_pool: Vec::new(),
+            opacity_instructions: Vec::new(),
+            opacity_operand_pool: Vec::new(),
+            opacity_closure_nodes: Vec::new(),
+            opacity_num_registers: 0,
+            num_registers: 0,
+
+            closure_nodes,
+            root: 3,
+            passthrough: false,
+            max_emission: 0.5,
+            may_emit: true,
+            has_opacity_test: false,
+            thin_walled: false,
+            sheen_lut: None,
+            mtlx_dielectric_lut: None,
+            mtlx_generalized_schlick_lut: None,
+        };
+        let mtlx = Material::Mtlx(MtlxMaterial::new(Arc::new(compiled)));
+
+        assert!(mtlx.may_emit());
+        assert!(!mtlx.is_pure_emitter());
+        assert!(should_sample_direct_light(&mtlx));
+    }
+
+    #[test]
+    fn direct_light_nee_keeps_transmission_below_surface() {
+        let scene = light_below_scene();
+        let material = transmission_mtlx_material();
+        let mut vtx = standalone_shading_vertex_for_transmission();
+        let mut scratch = MtlxScratch::default();
+        let mut rng = rand::rng();
+        material.precompute_shading(&mut vtx, &mut scratch);
+
+        let l = direct_light_nee_contribution(
+            &scene,
+            &material,
+            &vtx,
+            0.5,
+            0.5,
+            0.5,
+            Vec2::new(0.25, 0.5),
+            &mut rng,
+            &mut scratch,
+        );
+
+        assert!(
+            l.length_squared() > 0.0,
+            "transmission NEE must use abs cosine for lights below the surface"
+        );
     }
 
     #[test]
@@ -195,7 +382,8 @@ mod tests {
         let (scene, ray, expected) = mirror_to_light_scene();
         let mut rng = rand::rng();
 
-        let radiance = trace_radiance(&scene, ray, &mut rng, 2);
+        let mut scratch = MtlxScratch::default();
+        let radiance = trace_radiance(&scene, ray, &mut rng, 2, &mut scratch);
 
         assert!(radiance.abs_diff_eq(expected, 1.0e-5));
     }
@@ -232,6 +420,7 @@ mod tests {
             0.5,
             Vec2::new(0.25, 0.5),
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
 
         assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-5));
@@ -272,6 +461,7 @@ mod tests {
             0.5,
             Vec2::new(0.25, 0.5),
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
 
         assert_eq!(radiance, Vec3::ZERO);
@@ -310,6 +500,7 @@ mod tests {
             0.0,
             Vec2::new(0.0, 0.5),
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
 
         assert!(radiance.x > 0.0);
@@ -348,6 +539,7 @@ mod tests {
             0.0,
             Vec2::ZERO,
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -384,6 +576,7 @@ mod tests {
             0.0,
             Vec2::ZERO,
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
         let expected = 2.0 * 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -424,6 +617,7 @@ mod tests {
             0.0,
             Vec2::ZERO,
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
         let expected = 0.8 / PI;
         assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
@@ -465,6 +659,7 @@ mod tests {
             0.0,
             Vec2::ZERO,
             &mut rand::rng(),
+            &mut MtlxScratch::default(),
         );
         assert_eq!(radiance, Vec3::ZERO);
     }
@@ -480,7 +675,8 @@ mod tests {
 
         let mut rng = rand::rng();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);
-        let radiance = trace_radiance(&scene, ray, &mut rng, 2);
+        let mut scratch = MtlxScratch::default();
+        let radiance = trace_radiance(&scene, ray, &mut rng, 2, &mut scratch);
 
         assert!(radiance.abs_diff_eq(env_radiance, 1.0e-5));
     }

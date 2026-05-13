@@ -11,7 +11,7 @@
 // MIS can compute the BSDF-side reverse PDF.
 
 use super::importance::{LightTreeQuery, evaluate_node_importance};
-use super::{INVALID_NODE, LightTree, LightTreeLeafKind, LightTreeNode};
+use super::{INVALID_NODE, LightTree, LightTreeLeafKind};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LightTreeSample {
@@ -157,12 +157,4 @@ pub fn pdf_for_leaf_kind(tree: &LightTree, query: &LightTreeQuery, leaf: LightTr
         }
     };
     pdf_for_leaf(tree, query, node_idx)
-}
-
-#[allow(unused)]
-fn debug_node(node: &LightTreeNode) -> String {
-    format!(
-        "leaf={:?} flux={} mu={:?} sigma={} radius={}",
-        node.leaf, node.flux, node.mu, node.sigma_s2, node.radius
-    )
 }

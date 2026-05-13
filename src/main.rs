@@ -54,10 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exposure = camera.exposure;
     let mut pixels = vec![0_u8; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();
-    pixels
-        .par_chunks_mut(3)
-        .enumerate()
-        .for_each_init(rand::rng, |rng, (index, pixel)| {
+    pixels.par_chunks_mut(3).enumerate().for_each_init(
+        || (rand::rng(), scene.make_mtlx_scratch()),
+        |(rng, mtlx_scratch), (index, pixel)| {
             let x = (index as u32) % resolution.x;
             let y = (index as u32) / resolution.x;
             let mut color = Vec3::ZERO;
@@ -66,7 +65,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
                 let ray =
                     camera.generate_ray_differential(resolution, UVec2::new(x, y), us, args.spp);
-                let sample = args.integrator.trace_radiance(&scene, ray, rng, args.depth);
+                let sample =
+                    args.integrator
+                        .trace_radiance(&scene, ray, rng, args.depth, mtlx_scratch);
                 let sample_count = (sample_index + 1) as f32;
                 color += (sample - color) / sample_count;
             }
@@ -77,7 +78,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pixel[0] = float_to_u8(encoded.x);
             pixel[1] = float_to_u8(encoded.y);
             pixel[2] = float_to_u8(encoded.z);
-        });
+        },
+    );
     println!("render: {}", format_duration(intersect_start.elapsed()));
 
     let image = RgbImage::from_raw(resolution.x, resolution.y, pixels)

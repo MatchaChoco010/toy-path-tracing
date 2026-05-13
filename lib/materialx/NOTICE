@@ -1,0 +1,40 @@
+Vendored MaterialX standard libraries
+=====================================
+
+This directory contains a subset of the MaterialX standard libraries vendored
+from the upstream MaterialX project.
+
+Upstream:    https://github.com/AcademySoftwareFoundation/MaterialX
+Tag:         v1.39.4
+Source path: libraries/{stdlib,pbrlib,bxdf,nprlib}/*.mtlx
+
+License: Apache License, Version 2.0 (see LICENSE in this directory).
+
+Files included
+--------------
+- libraries/stdlib/stdlib_defs.mtlx
+- libraries/stdlib/stdlib_ng.mtlx
+- libraries/pbrlib/pbrlib_defs.mtlx
+- libraries/pbrlib/pbrlib_ng.mtlx
+- libraries/bxdf/standard_surface.mtlx
+- libraries/bxdf/disney_principled.mtlx
+- libraries/bxdf/open_pbr_surface.mtlx
+- libraries/bxdf/usd_preview_surface.mtlx
+- libraries/bxdf/gltf_pbr.mtlx
+- libraries/nprlib/nprlib_defs.mtlx
+- libraries/nprlib/nprlib_ng.mtlx
+
+Files intentionally NOT included
+--------------------------------
+- libraries/targets/  (target-specific shader generation)
+- libraries/cmlib/    (color management, handled in Rust directly)
+- libraries/lights/   (lightshader-typed materials, this project uses its own
+                       light system)
+- libraries/bxdf/lama/ and libraries/bxdf/translation/
+- per-target source directories under each library
+  (genglsl/genosl/genmdl/genmsl/), since this project provides its own
+  evaluator instead of using MaterialX shader generation.
+
+The mtlx files are vendored verbatim with no modifications. To update,
+download the corresponding files from the MaterialX repository at the
+tag above.

@@ -83,6 +83,7 @@ pub struct Scene {
     pub spot_lights: Vec<SpotLight>,
     pub light_sampler: LightSampler,
     pub light_tree: Option<LightTree>,
+    pub mtlx_num_locals: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +141,18 @@ impl Scene {
             standard.install_spec_lut(spec_lut);
             standard.install_coat_lut(coat_lut);
             standard.install_sheen_lut(sheen_lut);
+        }
+        if let Material::Mtlx(mtlx) = &mut material {
+            let sheen_lut = self.directional_albedo_cache.get_or_build_sheen();
+            let mtlx_dielectric_lut = self
+                .directional_albedo_cache
+                .get_or_build_mtlx_dielectric_ggx();
+            let mtlx_generalized_schlick_lut = self
+                .directional_albedo_cache
+                .get_or_build_mtlx_generalized_schlick_ggx();
+            mtlx.install_sheen_lut(sheen_lut);
+            mtlx.install_mtlx_dielectric_lut(mtlx_dielectric_lut);
+            mtlx.install_mtlx_generalized_schlick_lut(mtlx_generalized_schlick_lut);
         }
         if let Material::ConductorGgx(conductor) = &mut material
             && conductor.energy_compensation
@@ -259,12 +272,35 @@ impl Scene {
             .map(|instance| instance.world_bounds)
             .collect::<Vec<_>>();
         self.qbvh = build_qbvh(&instance_bounds);
+        self.update_mtlx_scratch_capacity();
+    }
+
+    fn update_mtlx_scratch_capacity(&mut self) {
+        let mut max_registers: u32 = 0;
+        for material in &self.materials {
+            if let Material::Mtlx(m) = material {
+                max_registers = max_registers.max(m.compiled.num_registers);
+                if let Some(back) = &m.back_compiled {
+                    max_registers = max_registers.max(back.num_registers);
+                }
+            }
+        }
+        self.mtlx_num_locals = max_registers;
+    }
+
+    pub fn make_mtlx_scratch(&self) -> crate::material::MtlxScratch {
+        crate::material::MtlxScratch::default()
+    }
+
+    pub fn mtlx_num_locals(&self) -> u32 {
+        self.mtlx_num_locals
     }
 
     pub fn closest_hit(
         &self,
         ray: &Ray,
         rng: &mut ThreadRng,
+        mtlx_scratch: &mut crate::material::MtlxScratch,
     ) -> Result<Option<SceneHit>, ClosestHitError> {
         if self.instances.is_empty() {
             return Ok(None);
@@ -290,10 +326,13 @@ impl Scene {
                         instance_index,
                         triangle_index: hit.triangle_index,
                     };
-                    let shading_vertex =
+                    let mut shading_vertex =
                         self.alpha_test_shading_vertex(triangle, hit.barycentric, ray);
                     let u: f32 = rng.random();
-                    material.any_hit(&shading_vertex, u)
+                    let cp = mtlx_scratch.checkpoint();
+                    let accept = material.any_hit(&mut shading_vertex, mtlx_scratch, u);
+                    mtlx_scratch.restore(cp);
+                    accept
                 });
 
                 if let Some(mesh_hit) = mesh_hit {
@@ -377,14 +416,15 @@ impl Scene {
         barycentric: Vec3,
         incident_direction: Vec3,
     ) -> ShadingVertex {
-        let shading_vertex = self.base_shading_vertex_from_triangle_sample_impl(
+        let mut shading_vertex = self.base_shading_vertex_from_triangle_sample_impl(
             triangle,
             barycentric,
             incident_direction,
             None,
         );
         self.instance_material(triangle.instance_index)
-            .prepare_shading_vertex(&shading_vertex)
+            .prepare_shading_vertex(&mut shading_vertex);
+        shading_vertex
     }
 
     fn base_shading_vertex_from_triangle_sample_impl(
@@ -430,6 +470,8 @@ impl Scene {
         }
         let differentials = compute_shading_differentials(p, ng, dpdu, dpdv, ray);
 
+        let instance = self.instances[triangle.instance_index.0];
+
         ShadingVertex {
             triangle,
             p,
@@ -450,18 +492,25 @@ impl Scene {
             frame,
             front_face,
             wavelength_lock: None,
+            object_to_world: instance.local_to_world,
+            world_to_object: instance.world_to_local,
+            object_normal_to_world: instance.normal_to_world,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
         }
     }
 
     pub fn shading_vertex(&self, hit: SceneHit, ray: &Ray) -> ShadingVertex {
-        let shading_vertex = self.base_shading_vertex_from_triangle_sample_impl(
+        let mut shading_vertex = self.base_shading_vertex_from_triangle_sample_impl(
             hit.triangle,
             hit.barycentric,
             ray.direction,
             Some(ray),
         );
         self.instance_material(hit.triangle.instance_index)
-            .prepare_shading_vertex(&shading_vertex)
+            .prepare_shading_vertex(&mut shading_vertex);
+        shading_vertex
     }
 
     pub fn area_light_triangle_probability(&self, triangle: TriangleRef) -> Option<f32> {
@@ -811,7 +860,10 @@ mod tests {
         TriangleRef,
     };
     use crate::{
-        material::{EmissiveMaterial, Material, NormalMap, NormalizedLambertMaterial, Texture},
+        material::mtlx::{ClosureNode, CompiledMaterial},
+        material::{
+            EmissiveMaterial, Material, MtlxMaterial, NormalMap, NormalizedLambertMaterial, Texture,
+        },
         mesh::{Mesh, Vertex},
         ray::{Ray, RayCone, RayDifferential},
     };
@@ -883,6 +935,29 @@ mod tests {
         )))
     }
 
+    fn test_compiled_mtlx(num_registers: u32) -> CompiledMaterial {
+        CompiledMaterial {
+            instructions: Vec::new(),
+            operand_pool: Vec::new(),
+            value_pool: Vec::new(),
+            opacity_instructions: Vec::new(),
+            opacity_operand_pool: Vec::new(),
+            opacity_closure_nodes: Vec::new(),
+            opacity_num_registers: 0,
+            num_registers,
+            closure_nodes: vec![ClosureNode::Zero],
+            root: 0,
+            passthrough: false,
+            max_emission: 0.0,
+            may_emit: false,
+            has_opacity_test: false,
+            thin_walled: false,
+            sheen_lut: None,
+            mtlx_dielectric_lut: None,
+            mtlx_generalized_schlick_lut: None,
+        }
+    }
+
     #[test]
     fn add_instance_populates_triangle_refs() {
         let mut scene = Scene::new();
@@ -926,7 +1001,11 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray, &mut rand::rng())
+            .closest_hit(
+                &ray,
+                &mut rand::rng(),
+                &mut crate::material::MtlxScratch::default(),
+            )
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -955,7 +1034,11 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.5, 0.5, 1.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray, &mut rand::rng())
+            .closest_hit(
+                &ray,
+                &mut rand::rng(),
+                &mut crate::material::MtlxScratch::default(),
+            )
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -971,7 +1054,11 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 1.0), Vec3::NEG_Z);
         let error = scene
-            .closest_hit(&ray, &mut rand::rng())
+            .closest_hit(
+                &ray,
+                &mut rand::rng(),
+                &mut crate::material::MtlxScratch::default(),
+            )
             .expect_err("expected missing BVH error");
 
         assert_eq!(error, ClosestHitError::QbvhNotBuilt);
@@ -992,6 +1079,21 @@ mod tests {
     }
 
     #[test]
+    fn mtlx_num_locals_includes_back_material_graph() {
+        let mut scene = Scene::new();
+        let mesh_index = scene.add_mesh(unit_mesh(0.0));
+        let front = Arc::new(test_compiled_mtlx(2));
+        let back = Arc::new(test_compiled_mtlx(7));
+        let material_index =
+            scene.add_material(Material::Mtlx(MtlxMaterial::with_back(front, Some(back))));
+        scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
+
+        scene.build_qbvh();
+
+        assert_eq!(scene.mtlx_num_locals(), 7);
+    }
+
+    #[test]
     fn closest_hit_returns_none_when_ray_misses_scene() {
         let mut scene = Scene::new();
         let mesh_index = scene.add_mesh(unit_mesh(0.0));
@@ -1002,7 +1104,11 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(2.0, 2.0, 1.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray, &mut rand::rng())
+            .closest_hit(
+                &ray,
+                &mut rand::rng(),
+                &mut crate::material::MtlxScratch::default(),
+            )
             .expect("BVH should be built");
 
         assert!(hit.is_none());
@@ -1051,7 +1157,11 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray, &mut rand::rng())
+            .closest_hit(
+                &ray,
+                &mut rand::rng(),
+                &mut crate::material::MtlxScratch::default(),
+            )
             .expect("BVH should be built")
             .expect("expected hit");
 
@@ -1081,7 +1191,11 @@ mod tests {
 
         let ray = Ray::new(Vec3::new(0.25, 0.25, 2.0), Vec3::NEG_Z);
         let hit = scene
-            .closest_hit(&ray, &mut rand::rng())
+            .closest_hit(
+                &ray,
+                &mut rand::rng(),
+                &mut crate::material::MtlxScratch::default(),
+            )
             .expect("BVH should be built")
             .expect("ray must reach the opaque triangle behind the transparent one");
 

@@ -2,7 +2,7 @@ use glam::Vec2;
 
 use super::{LightLiSample, LightSampleContext, LightType};
 use crate::{
-    material::ShadingVertex,
+    material::{MtlxScratch, ShadingVertex},
     scene::{Scene, TriangleRef},
 };
 
@@ -14,6 +14,7 @@ pub(super) fn sample_li_for_triangle(
     triangle: TriangleRef,
     ctx: &LightSampleContext,
     us: Vec2,
+    mtlx_scratch: &mut MtlxScratch,
 ) -> Option<LightLiSample> {
     let point = scene.sample_triangle_point(triangle, us);
     if point.pdf_area <= 0.0 {
@@ -33,8 +34,9 @@ pub(super) fn sample_li_for_triangle(
         return None;
     }
 
-    let lvtx = scene.shading_vertex_from_triangle_sample(triangle, point.barycentric, wi);
-    let le = light_material.le(&lvtx)?;
+    let mut lvtx = scene.shading_vertex_from_triangle_sample(triangle, point.barycentric, wi);
+    light_material.precompute_shading(&mut lvtx, mtlx_scratch);
+    let le = light_material.le(&lvtx, mtlx_scratch)?;
 
     let cos_light = lvtx.ng.dot(-wi).max(0.0);
     if cos_light <= 0.0 {
@@ -65,7 +67,7 @@ mod tests {
     use super::super::test_helpers::unit_mesh;
     use super::sample_li_for_triangle;
     use crate::{
-        material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
+        material::{EmissiveMaterial, Material, MtlxScratch, NormalizedLambertMaterial},
         scene::{Scene, TriangleRef},
     };
 
@@ -93,7 +95,8 @@ mod tests {
             instance_index: light_instance,
             triangle_index: 0,
         };
-        let li = sample_li_for_triangle(&scene, triangle, &ctx, Vec2::new(0.25, 0.5))
+        let mut scratch = MtlxScratch::default();
+        let li = sample_li_for_triangle(&scene, triangle, &ctx, Vec2::new(0.25, 0.5), &mut scratch)
             .expect("expected a sample");
 
         assert!((li.pdf - 2.0).abs() < 1.0e-4);
