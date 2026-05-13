@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<materialx version="1.39" colorspace="lin_rec709">
+  <nodegraph name="NG_Anodized_Titanium">
+    <texcoord name="uv_in" type="vector2">
+      <input name="index" type="integer" value="0" />
+    </texcoord>
+    <multiply name="uv_scaled" type="vector2">
+      <input name="in1" type="vector2" nodename="uv_in" />
+      <input name="in2" type="float" value="2.0" />
+    </multiply>
+
+    <constant name="titanium_f0" type="color3">
+      <input name="value" type="color3" value="0.616, 0.582, 0.544" />
+    </constant>
+    <image name="roughness_tex" type="vector4">
+      <input name="texcoord" type="vector2" nodename="uv_scaled" />
+      <input name="file" type="filename" value="textures/Anodized_Titanium_roughness.png" />
+      <input name="default" type="vector4" value="0.0, 0.0, 0.0, 0.0" />
+      <input name="uaddressmode" type="string" value="periodic" />
+      <input name="vaddressmode" type="string" value="periodic" />
+    </image>
+    <extract name="roughness_r" type="float">
+      <input name="in" type="vector4" nodename="roughness_tex" />
+      <input name="index" type="integer" value="0" />
+    </extract>
+    <image name="normal_tex" type="vector3">
+      <input name="texcoord" type="vector2" nodename="uv_scaled" />
+      <input name="file" type="filename" value="textures/Anodized_Titanium_normal.png" />
+      <input name="default" type="vector3" value="0.5, 0.5, 1.0" />
+      <input name="uaddressmode" type="string" value="periodic" />
+      <input name="vaddressmode" type="string" value="periodic" />
+    </image>
+    <normalmap name="normal_map" type="vector3">
+      <input name="in" type="vector3" nodename="normal_tex" />
+    </normalmap>
+
+    <output name="base_color_out" type="color3" nodename="titanium_f0" />
+    <output name="roughness_final" type="float" nodename="roughness_r" />
+    <output name="normal_final" type="vector3" nodename="normal_map" />
+  </nodegraph>
+
+  <standard_surface name="SR_Anodized_Titanium" type="surfaceshader">
+    <input name="base" type="float" value="1.0" />
+    <input name="base_color" type="color3" output="base_color_out" nodegraph="NG_Anodized_Titanium" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular" type="float" value="1.0" />
+    <input name="specular_color" type="color3" value="1.0, 1.0, 1.0" />
+    <input name="specular_roughness" type="float" output="roughness_final" nodegraph="NG_Anodized_Titanium" />
+    <input name="specular_IOR" type="float" value="1.5" />
+    <input name="coat" type="float" value="0.0" />
+    <input name="thin_film_thickness" type="float" value="200.0" />
+    <input name="thin_film_IOR" type="float" value="2.0" />
+    <input name="normal" type="vector3" output="normal_final" nodegraph="NG_Anodized_Titanium" />
+  </standard_surface>
+
+  <surfacematerial name="Anodized_Titanium" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR_Anodized_Titanium" />
+  </surfacematerial>
+</materialx>
