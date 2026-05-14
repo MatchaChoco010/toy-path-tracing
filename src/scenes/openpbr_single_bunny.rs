@@ -15,11 +15,33 @@ use super::uniform_scale_for_height;
 pub(super) fn create_single_openpbr_bunny_scene(
     bunny_material: OpenPbrMaterial,
 ) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+    create_single_openpbr_bunny_scene_impl(
+        bunny_material,
+        Path::new("assets/models/bunny.glb"),
+        Some(std::f32::consts::PI * -0.45),
+    )
+}
+
+pub(super) fn create_single_openpbr_low_bunny_scene(
+    bunny_material: OpenPbrMaterial,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+    create_single_openpbr_bunny_scene_impl(
+        bunny_material,
+        Path::new("assets/models/bunny-low.glb"),
+        Some(std::f32::consts::PI * -0.5),
+    )
+}
+
+fn create_single_openpbr_bunny_scene_impl(
+    bunny_material: OpenPbrMaterial,
+    bunny_path: &Path,
+    environment_rotation: Option<f32>,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor = load_obj(Path::new("assets/mori-knob/floor.obj"))?;
     let light = load_obj(Path::new("assets/mori-knob/light.obj"))?;
-    let bunny = load_gltf(Path::new("assets/models/bunny.glb"))?;
+    let bunny = load_gltf(bunny_path)?;
 
     let bunny_height = 0.94_f32;
     let bunny_scale = uniform_scale_for_height(&bunny, bunny_height);
@@ -60,12 +82,14 @@ pub(super) fn create_single_openpbr_bunny_scene(
         bunny_ground_pivot,
     );
 
-    let env = EnvironmentLight::from_hdr_file(
-        "assets/sky/brown_photostudio_02_4k.hdr",
-        1.2,
-        std::f32::consts::PI * -0.45,
-    )?;
-    scene.set_environment_light(env);
+    if let Some(environment_rotation) = environment_rotation {
+        let env = EnvironmentLight::from_hdr_file(
+            "assets/sky/brown_photostudio_02_4k.hdr",
+            1.2,
+            environment_rotation,
+        )?;
+        scene.set_environment_light(env);
+    }
 
     let camera = PinholeCamera::new(
         Vec3::new(0.0, 0.78, -1.95),

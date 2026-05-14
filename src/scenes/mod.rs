@@ -60,6 +60,9 @@ mod scene_6;
 mod scene_60;
 mod scene_61;
 mod scene_62;
+mod scene_63;
+mod scene_64;
+mod scene_65;
 mod scene_7;
 mod scene_8;
 mod scene_9;
@@ -133,6 +136,9 @@ pub fn load_scene(scene_index: u32) -> Result<(Scene, PinholeCamera), Box<dyn Er
         60 => scene_60::create_scene_60(),
         61 => scene_61::create_scene_61(),
         62 => scene_62::create_scene_62(),
+        63 => scene_63::create_scene_63(),
+        64 => scene_64::create_scene_64(),
+        65 => scene_65::create_scene_65(),
         _ => scene_0::create_scene_0(),
     }
 }
