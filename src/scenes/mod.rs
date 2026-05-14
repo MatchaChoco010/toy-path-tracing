@@ -1,3 +1,5 @@
+mod openpbr_mori_knob;
+mod openpbr_single_bunny;
 mod scene_0;
 mod scene_1;
 mod scene_10;
@@ -39,8 +41,25 @@ mod scene_42;
 mod scene_43;
 mod scene_44;
 mod scene_45;
+mod scene_46;
+mod scene_47;
+mod scene_48;
+mod scene_49;
 mod scene_5;
+mod scene_50;
+mod scene_51;
+mod scene_52;
+mod scene_53;
+mod scene_54;
+mod scene_55;
+mod scene_56;
+mod scene_57;
+mod scene_58;
+mod scene_59;
 mod scene_6;
+mod scene_60;
+mod scene_61;
+mod scene_62;
 mod scene_7;
 mod scene_8;
 mod scene_9;
@@ -97,6 +116,23 @@ pub fn load_scene(scene_index: u32) -> Result<(Scene, PinholeCamera), Box<dyn Er
         43 => scene_43::create_scene_43(),
         44 => scene_44::create_scene_44(),
         45 => scene_45::create_scene_45(),
+        46 => scene_46::create_scene_46(),
+        47 => scene_47::create_scene_47(),
+        48 => scene_48::create_scene_48(),
+        49 => scene_49::create_scene_49(),
+        50 => scene_50::create_scene_50(),
+        51 => scene_51::create_scene_51(),
+        52 => scene_52::create_scene_52(),
+        53 => scene_53::create_scene_53(),
+        54 => scene_54::create_scene_54(),
+        55 => scene_55::create_scene_55(),
+        56 => scene_56::create_scene_56(),
+        57 => scene_57::create_scene_57(),
+        58 => scene_58::create_scene_58(),
+        59 => scene_59::create_scene_59(),
+        60 => scene_60::create_scene_60(),
+        61 => scene_61::create_scene_61(),
+        62 => scene_62::create_scene_62(),
         _ => scene_0::create_scene_0(),
     }
 }
