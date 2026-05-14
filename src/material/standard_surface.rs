@@ -482,6 +482,7 @@ impl StandardSurfaceMaterial {
             thin_film_ior: self.thin_film_ior,
             front_face: shading_vertex.front_face,
             coat_basis_in_base: coat_basis,
+            path_throughput: shading_vertex.path_throughput,
             wavelength_lock: shading_vertex.wavelength_lock,
         };
 
@@ -826,6 +827,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            path_throughput: Vec3::ONE,
             wavelength_lock: None,
             object_to_world: glam::Mat4::IDENTITY,
             world_to_object: glam::Mat4::IDENTITY,

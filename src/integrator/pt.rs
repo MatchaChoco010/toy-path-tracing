@@ -32,6 +32,7 @@ pub fn trace_radiance(
         };
 
         let mut shading_vertex = scene.shading_vertex(hit, &ray);
+        shading_vertex.path_throughput = throughput;
         shading_vertex.wavelength_lock = wavelength_lock;
         let material = scene.instance_material(hit.triangle.instance_index);
         material.precompute_shading(&mut shading_vertex, mtlx_scratch);

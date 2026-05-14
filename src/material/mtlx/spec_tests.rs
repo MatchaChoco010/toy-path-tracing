@@ -49,6 +49,7 @@ fn dummy_sv() -> ShadingVertex {
         dndv: Vec3::ZERO,
         frame: OrthonormalBasis::from_normal(Vec3::Z),
         front_face: true,
+        path_throughput: Vec3::ONE,
         wavelength_lock: None,
         object_to_world: glam::Mat4::IDENTITY,
         world_to_object: glam::Mat4::IDENTITY,

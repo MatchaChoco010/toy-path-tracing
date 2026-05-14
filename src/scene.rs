@@ -142,6 +142,27 @@ impl Scene {
             standard.install_coat_lut(coat_lut);
             standard.install_sheen_lut(sheen_lut);
         }
+        if let Material::OpenPbr(open_pbr) = &mut material {
+            open_pbr.validate_and_warn();
+            let spec_eta = open_pbr.requires_specular_eta();
+            let coat_eta = open_pbr.requires_coat_eta();
+            let spec_lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx(spec_eta);
+            let coat_lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx(coat_eta);
+            let conductor_ec_lut = self
+                .directional_albedo_cache
+                .get_or_build_conductor_ggx_energy_compensation();
+            let dielectric_ec_lut = self
+                .directional_albedo_cache
+                .get_or_build_dielectric_ggx_energy_compensation();
+            open_pbr.install_spec_lut(spec_lut);
+            open_pbr.install_coat_lut(coat_lut);
+            open_pbr.install_conductor_energy_compensation_lut(conductor_ec_lut);
+            open_pbr.install_dielectric_energy_compensation_lut(dielectric_ec_lut);
+        }
         if let Material::Mtlx(mtlx) = &mut material {
             let sheen_lut = self.directional_albedo_cache.get_or_build_sheen();
             let mtlx_dielectric_lut = self
@@ -491,6 +512,7 @@ impl Scene {
             dndv,
             frame,
             front_face,
+            path_throughput: Vec3::ONE,
             wavelength_lock: None,
             object_to_world: instance.local_to_world,
             world_to_object: instance.world_to_local,
