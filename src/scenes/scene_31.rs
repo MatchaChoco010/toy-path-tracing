@@ -1,3 +1,5 @@
+//! puresky 環境光のもと、紙飛行機を subsurface=0 の thin-walled Standard Surface として配置する。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};

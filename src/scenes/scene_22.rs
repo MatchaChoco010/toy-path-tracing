@@ -1,3 +1,5 @@
+//! ローポリ版 San Miguel を puresky HDRI で照らし、OBJ マテリアルを SimplePBR / DielectricGgx / Emissive に振り分ける。
+
 use glam::{Mat4, Vec3};
 use std::{
     collections::HashMap,

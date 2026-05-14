@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋に完全鏡面の銀色バニーと金色の球を配置する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

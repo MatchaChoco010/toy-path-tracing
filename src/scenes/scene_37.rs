@@ -1,3 +1,5 @@
+//! Scene 36 と同じ配置で、Kulla & Conty 2017 energy compensation を有効にした版。
+
 use std::error::Error;
 
 use crate::{camera::PinholeCamera, scene::Scene};

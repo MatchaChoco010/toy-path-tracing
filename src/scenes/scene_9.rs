@@ -1,3 +1,5 @@
+//! Cornell box の中央に金色 Conductor GGX バニーを置き、エリアライトと HDRI 環境光を併用する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

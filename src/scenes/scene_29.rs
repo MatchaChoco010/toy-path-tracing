@@ -1,3 +1,5 @@
+//! puresky 環境光のもと、同じドラゴンモデルを左 SimplePBR / 右 Standard Surface で比較する。
+
 use std::{error::Error, path::Path, sync::Arc};
 
 use glam::{Mat4, Vec3};

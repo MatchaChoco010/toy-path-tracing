@@ -1,3 +1,5 @@
+//! Scene 13 と同じ diffuse バニーを puresky HDRI 環境光で照らす。
+
 use std::error::Error;
 
 use crate::{camera::PinholeCamera, scene::Scene};

@@ -1,3 +1,5 @@
+//! brown_photostudio HDRI のもと、Oren-Nayar と EON のオレンジ色の球を 2 段で roughness スイープして比較する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

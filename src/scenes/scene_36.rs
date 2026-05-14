@@ -1,3 +1,5 @@
+//! HDRI のもと、compensation OFF の Conductor GGX と Dielectric GGX を 9 列 x 2 段で roughness スイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

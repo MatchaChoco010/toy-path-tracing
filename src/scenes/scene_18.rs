@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋にノーマルマップ付き Lambert 球と Conductor GGX 球を斜めに配置する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

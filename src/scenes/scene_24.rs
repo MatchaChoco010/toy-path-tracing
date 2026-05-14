@@ -1,3 +1,5 @@
+//! Amazon Lumberyard Bistro の Exterior + Interior を読み込み、シーン中の emissive ポリゴンだけで照らす。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path, sync::Arc};
 

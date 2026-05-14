@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋に roughness をスイープした透明 Dielectric GGX ガラス球を 5 つ並べる。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

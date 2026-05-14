@@ -1,3 +1,5 @@
+//! Scene 40 と同じ配置で、Glavenus STL モデルのマテリアルを EON に差し替える。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};

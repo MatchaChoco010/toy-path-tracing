@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋に薄青 Lambert バニーと金色 / 銅色の Conductor GGX 球を置き、PointLight と SpotLight で照らす。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

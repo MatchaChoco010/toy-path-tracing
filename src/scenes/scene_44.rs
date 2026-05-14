@@ -1,3 +1,5 @@
+//! mori-knob 風の床に NormalizedLambert と EON のオレンジ色の球を並べ、DirectionalLight で比較する。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};

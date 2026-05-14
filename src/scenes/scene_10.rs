@@ -1,3 +1,5 @@
+//! 一様な白い環境光のもと、Dielectric GGX ガラス球と銀色 Conductor GGX 金属球を 2 段で roughness スイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

@@ -1,3 +1,5 @@
+//! 通常版 San Miguel を scene 22 と同じ配置とマテリアル割り当てで読み込む。
+
 use glam::{Mat4, Vec3};
 use std::{
     collections::HashMap,

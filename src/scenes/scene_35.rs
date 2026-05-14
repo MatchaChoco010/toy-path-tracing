@@ -1,3 +1,5 @@
+//! 一様な白い環境光のもと、SS Conductor / MS Conductor を 9 列 x 2 段で並べ、roughness をスイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

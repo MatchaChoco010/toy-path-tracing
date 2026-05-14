@@ -1,3 +1,5 @@
+//! Lambert 床と HDRI 環境光のもと、Conductor GGX 金属球と Dielectric GGX ガラス球を 2 段で roughness スイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

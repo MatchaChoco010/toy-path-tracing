@@ -1,3 +1,5 @@
+//! HDRI 環境下に sheen=0 の Disney BRDF 球を配置する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

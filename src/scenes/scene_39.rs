@@ -1,3 +1,5 @@
+//! HDRI のもと、ゴールドの Conductor GGX 球を上段 compensation OFF / 下段 ON で roughness スイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

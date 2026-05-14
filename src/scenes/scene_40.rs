@@ -1,3 +1,5 @@
+//! mori-knob 風の白い床に Glavenus STL モデルの 9 パーツを配置し、NormalizedLambert を割り当てる。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};

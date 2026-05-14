@@ -1,3 +1,5 @@
+//! Lambert 床と puresky 環境光のもと、SimplePBR ドラゴン、金色 Conductor GGX バニー、Glass 球、NormalizedLambert バニーを並べる。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
