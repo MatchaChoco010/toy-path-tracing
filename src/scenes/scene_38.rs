@@ -1,3 +1,5 @@
+//! 一様な白い環境光のもと、SS/MS の Conductor と Dielectric を 9 列 x 4 段で roughness スイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

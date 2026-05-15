@@ -6,7 +6,7 @@ use rand::{RngExt, rngs::ThreadRng};
 use crate::math::{OrthonormalBasis, fresnel_dielectric, refract, sg::luminance};
 
 use super::conductor_complex::fresnel_complex;
-use super::dispersion::{cauchy_ior, sample_dispersion_wavelength};
+use super::dispersion::{cauchy_ior, sample_dispersion_wavelength_weighted};
 use super::oren_nayar::OrenNayarBsdf;
 use super::sheen::SheenBsdf;
 use super::smith_ggx::{
@@ -50,6 +50,7 @@ pub struct StandardSurfaceBsdfParams {
     pub thin_film_ior: f32,
     pub front_face: bool,
     pub coat_basis_in_base: Option<OrthonormalBasis>,
+    pub path_throughput: Vec3,
     pub wavelength_lock: Option<f32>,
 }
 
@@ -741,7 +742,8 @@ impl StandardSurfaceBsdf {
                 (eta_lambda, Vec3::ONE, None)
             } else if self.p.front_face {
                 let u_lambda = rng.random::<f32>();
-                let (lambda, basis) = sample_dispersion_wavelength(u_lambda);
+                let (lambda, basis) =
+                    sample_dispersion_wavelength_weighted(u_lambda, self.p.path_throughput);
                 let eta_lambda = cauchy_ior(
                     lambda,
                     self.p.specular_eta,
@@ -1001,6 +1003,7 @@ mod tests {
             thin_film_ior: 1.5,
             front_face: true,
             coat_basis_in_base: None,
+            path_throughput: Vec3::ONE,
             wavelength_lock: None,
         }
     }

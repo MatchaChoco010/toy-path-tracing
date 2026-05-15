@@ -1,3 +1,5 @@
+//! HDRI 環境光のもと、Disney BRDF 球を 11 列 x 10 段で並べ、各段でパラメータをスイープする。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

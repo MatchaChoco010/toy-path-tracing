@@ -1,3 +1,5 @@
+//! テクスチャ付き Lambert 床に完全鏡面の金属球とガラス球を置き、puresky HDRI で照らす。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

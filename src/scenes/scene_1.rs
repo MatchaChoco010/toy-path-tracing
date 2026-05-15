@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋にバニーと 2 つの球を配置する基本シーン。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

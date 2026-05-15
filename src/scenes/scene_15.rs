@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋にテクスチャ付き Conductor GGX 球と Lambert 球を斜めに並べる。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

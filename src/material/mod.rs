@@ -10,6 +10,7 @@ pub mod mtlx;
 mod mtlx_material;
 mod normal_map;
 mod normalized_lambert;
+mod open_pbr;
 mod oren_nayar;
 pub mod pattern;
 mod simple_pbr;
@@ -40,6 +41,7 @@ pub use mtlx::MtlxScratch;
 pub use mtlx_material::MtlxMaterial;
 pub use normal_map::NormalMap;
 pub use normalized_lambert::NormalizedLambertMaterial;
+pub use open_pbr::OpenPbrMaterial;
 pub use oren_nayar::OrenNayarMaterial;
 pub use simple_pbr::SimplePbrMaterial;
 pub use standard_surface::StandardSurfaceMaterial;
@@ -58,6 +60,7 @@ pub enum Material {
     SimplePBR(SimplePbrMaterial),
     DisneyBrdf(DisneyBrdfMaterial),
     StandardSurface(StandardSurfaceMaterial),
+    OpenPbr(OpenPbrMaterial),
     Emissive(EmissiveMaterial),
     Mtlx(MtlxMaterial),
 }
@@ -82,6 +85,7 @@ pub struct ShadingVertex {
     pub dndv: Vec3,
     pub frame: OrthonormalBasis,
     pub front_face: bool,
+    pub path_throughput: Vec3,
     pub wavelength_lock: Option<f32>,
     pub object_to_world: glam::Mat4,
     pub world_to_object: glam::Mat4,
@@ -144,6 +148,7 @@ impl Material {
             Self::SimplePBR(material) => material.prepare_shading_vertex(shading_vertex),
             Self::DisneyBrdf(material) => material.prepare_shading_vertex(shading_vertex),
             Self::StandardSurface(material) => material.prepare_shading_vertex(shading_vertex),
+            Self::OpenPbr(material) => material.prepare_shading_vertex(shading_vertex),
             Self::Emissive(_) => {}
             Self::Mtlx(material) => material.prepare_shading_vertex(shading_vertex),
         }
@@ -167,6 +172,7 @@ impl Material {
             Self::SimplePBR(material) => material.sample(shading_vertex, rng),
             Self::DisneyBrdf(material) => material.sample(shading_vertex, rng),
             Self::StandardSurface(material) => material.sample(shading_vertex, rng),
+            Self::OpenPbr(material) => material.sample(shading_vertex, rng),
             Self::Emissive(material) => material.sample(shading_vertex, rng),
             Self::Mtlx(material) => material.sample(shading_vertex, scratch, rng),
         }
@@ -185,6 +191,7 @@ impl Material {
             Self::SimplePBR(material) => material.le(shading_vertex),
             Self::DisneyBrdf(material) => material.le(shading_vertex),
             Self::StandardSurface(material) => material.le(shading_vertex),
+            Self::OpenPbr(material) => material.le(shading_vertex),
             Self::Emissive(material) => material.le(shading_vertex),
             Self::Mtlx(material) => material.le(shading_vertex, scratch),
         }
@@ -209,6 +216,7 @@ impl Material {
             Self::SimplePBR(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::StandardSurface(material) => material.eval(shading_vertex, wi, internal_rng),
+            Self::OpenPbr(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::Emissive(material) => material.eval(shading_vertex, wi, internal_rng),
             Self::Mtlx(material) => material.eval(shading_vertex, scratch, wi, internal_rng),
         }
@@ -227,6 +235,7 @@ impl Material {
             Self::SimplePBR(material) => material.pdf(shading_vertex, wi),
             Self::DisneyBrdf(material) => material.pdf(shading_vertex, wi),
             Self::StandardSurface(material) => material.pdf(shading_vertex, wi),
+            Self::OpenPbr(material) => material.pdf(shading_vertex, wi),
             Self::Emissive(material) => material.pdf(shading_vertex, wi),
             Self::Mtlx(material) => material.pdf(shading_vertex, scratch, wi),
         }
@@ -265,6 +274,7 @@ impl Material {
             Self::SimplePBR(material) => material.may_emit(),
             Self::DisneyBrdf(material) => material.may_emit(),
             Self::StandardSurface(material) => material.may_emit(),
+            Self::OpenPbr(material) => material.may_emit(),
             Self::Emissive(material) => material.may_emit(),
             Self::Mtlx(material) => material.may_emit(),
         }
@@ -287,6 +297,7 @@ impl Material {
             Self::SimplePBR(material) => material.max_emission(),
             Self::DisneyBrdf(material) => material.max_emission(),
             Self::StandardSurface(material) => material.max_emission(),
+            Self::OpenPbr(material) => material.max_emission(),
             Self::Emissive(material) => material.max_emission(),
             Self::Mtlx(material) => material.max_emission(),
         }
@@ -305,6 +316,7 @@ impl Material {
             Self::SimplePBR(material) => material.has_alpha_test(),
             Self::DisneyBrdf(material) => material.has_alpha_test(),
             Self::StandardSurface(material) => material.has_alpha_test(),
+            Self::OpenPbr(material) => material.has_alpha_test(),
             Self::Emissive(material) => material.has_alpha_test(),
             Self::Mtlx(material) => material.has_alpha_test(),
         }
@@ -328,6 +340,7 @@ impl Material {
             Self::SimplePBR(material) => material.any_hit(shading_vertex, u),
             Self::DisneyBrdf(material) => material.any_hit(shading_vertex, u),
             Self::StandardSurface(material) => material.any_hit(shading_vertex, u),
+            Self::OpenPbr(material) => material.any_hit(shading_vertex, u),
             Self::Emissive(material) => material.any_hit(shading_vertex, u),
             Self::Mtlx(material) => material.any_hit(shading_vertex, scratch, u),
         }
@@ -348,6 +361,7 @@ impl Material {
             Self::SimplePBR(material) => material.light_tree_precompute(shading_vertex),
             Self::DisneyBrdf(material) => material.light_tree_precompute(shading_vertex),
             Self::StandardSurface(material) => material.light_tree_precompute(shading_vertex),
+            Self::OpenPbr(material) => material.light_tree_precompute(shading_vertex),
             Self::Mtlx(material) => material.light_tree_precompute(shading_vertex, scratch),
             Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => None,
         }
@@ -373,6 +387,7 @@ impl Material {
             Self::SimplePBR(material) => material.light_tree_importance(precompute, w, lobe),
             Self::DisneyBrdf(material) => material.light_tree_importance(precompute, w, lobe),
             Self::StandardSurface(material) => material.light_tree_importance(precompute, w, lobe),
+            Self::OpenPbr(material) => material.light_tree_importance(precompute, w, lobe),
             Self::Mtlx(material) => material.light_tree_importance(precompute, w, lobe),
             Self::Mirror(_) | Self::Glass(_) | Self::Emissive(_) => 0.0,
         }
@@ -419,6 +434,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            path_throughput: Vec3::ONE,
             wavelength_lock: None,
             object_to_world: glam::Mat4::IDENTITY,
             world_to_object: glam::Mat4::IDENTITY,

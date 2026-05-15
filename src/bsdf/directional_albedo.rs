@@ -241,6 +241,11 @@ impl DielectricGgxDirectionalAlbedoLut {
     }
 
     #[cfg(test)]
+    pub(crate) fn build_for_tests(eta: f32) -> Self {
+        Self::build(eta)
+    }
+
+    #[cfg(test)]
     pub(crate) fn constant_for_tests(eta: f32, value: f32) -> Self {
         Self {
             eta: sanitize_dielectric_eta(eta),
@@ -759,6 +764,14 @@ impl ConductorGgxEnergyCompensationLut {
     pub(crate) fn build_for_tests() -> Self {
         Self::build()
     }
+
+    #[cfg(test)]
+    pub(crate) fn constant_for_tests(e: f32, e_avg: f32) -> Self {
+        Self {
+            e_values: vec![e.clamp(0.0, 1.0); CONDUCTOR_EC_LEN],
+            e_avg_values: vec![e_avg.clamp(0.0, 1.0); CONDUCTOR_EC_ROUGHNESS_RESOLUTION],
+        }
+    }
 }
 
 fn estimate_conductor_ggx_directional_albedo_white_fresnel(
@@ -946,6 +959,14 @@ impl DielectricGgxEnergyCompensationLut {
     #[cfg(test)]
     pub(crate) fn build_for_tests() -> Self {
         Self::build()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn constant_for_tests(e: f32, e_avg: f32) -> Self {
+        Self {
+            e_values: vec![e.clamp(0.0, 1.0); DIELECTRIC_EC_E_LEN],
+            e_avg_values: vec![e_avg.clamp(0.0, 1.0); DIELECTRIC_EC_EAVG_LEN],
+        }
     }
 }
 

@@ -1,10 +1,6 @@
-// Side-by-side comparison of SimplePBR (scene 20 setup) and Disney BRDF
-// using the same dragon model, identical baseColor / metallic / roughness /
-// normal textures, and the same lighting environment. The Disney dragon
-// adds a light clearcoat layer to make the difference legible.
-//
-// Left dragon (negative X) -- SimplePBR.
-// Right dragon (positive X) -- Disney BRDF.
+//! puresky 環境光のもと、同じドラゴンモデルを左 SimplePBR / 右 Disney BRDF で比較する。
+//!
+//! 両者は同じ baseColor / metallic / roughness / normal テクスチャを使い、Disney 側には差が見えるよう軽い clearcoat を追加する。
 
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};

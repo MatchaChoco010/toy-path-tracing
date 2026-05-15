@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋に透明ガラス球、thin / 通常の水色ガラスバニー、薄青の Lambert バニーを配置する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

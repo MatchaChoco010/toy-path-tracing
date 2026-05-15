@@ -47,58 +47,6 @@ cargo run --release -- --scene 1 --width 1280 --height 720 --spp 128 -o result/s
 | `-i, --integrator <INTEGRATOR>` | `mis` | 使用する integrator を指定します。現在は `mis`、`pt`、`nee` を選べます。存在しない名前を指定するとエラーになります。 |
 | `-h, --help` | なし | ヘルプを表示します。 |
 
-## 現在のシーン番号
-
-現状のソースコードでは、次のシーンが実装されています。
-
-| シーン番号 | 内容 |
-| --- | --- |
-| `0` | Cornell box 風の部屋に箱とバニーを配置。 |
-| `1` | Cornell box 風の部屋にバニーと 2 つの球を配置。 |
-| `2` | Cornell box 風の部屋に完全鏡面の銀色バニーと金色の球を配置。 |
-| `3` | Cornell box 風の部屋に透明ガラス球、左右に thin / 通常の水色ガラスバニー、薄青の Lambert バニーを配置。 |
-| `4` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.25 / 0.5 / 0.75 / 1.0` にした金色 Conductor GGX 球を 5 つ並べる。 |
-| `5` | Cornell box 風の部屋に、roughness `0.3` の銀色 Conductor GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` にする。 |
-| `6` | Cornell box 風の部屋に、roughness を左から `0.0 / 0.15 / 0.3 / 0.45 / 0.6` にした透明 Dielectric GGX ガラス球を 5 つ、少し宙に浮かせて並べる。 |
-| `7` | Cornell box 風の部屋に、roughness `0.3` の薄水色 Dielectric GGX 球を 3 つ並べ、中央を isotropic、左右を `anisotropy = -1.0 / +1.0` にする。 |
-| `8` | Lambert 床に Conductor GGX 金属球と Dielectric GGX ガラス球を 2 段に並べ、各段とも roughness をスイープ。HDRI 環境光。 |
-| `9` | Cornell box の中央に金色 Conductor GGX バニー。エリアライトと HDRI 環境光を併用、カメラはボックスの外。 |
-| `10` | 一様な白い環境光のもと、Dielectric GGX ガラス球と銀色 Conductor GGX 金属球を 2 段に並べ、各段とも roughness をスイープ。 |
-| `11` | Lambert 床に薄青 Lambert バニーを置き、DirectionalLight 1 つで照らす。 |
-| `12` | Cornell box 風の部屋に薄青 Lambert バニーと金色 / 銅色の Conductor GGX 球を配置、PointLight と SpotLight で照らす。 |
-| `13` | Lambert 床に diffuse バニー、HDRI 環境光のみ。 |
-| `14` | Lambert 床に diffuse バニー、puresky HDRI 環境光のみ。 |
-| `15` | Cornell box 風の部屋にテクスチャ付き Conductor GGX 球と Lambert 球を斜めに並べる。 |
-| `16` | Lambert 床と puresky 環境光のもと、テクスチャ付き Lambert バニーと Conductor GGX 球を配置。 |
-| `17` | テクスチャ付き Lambert 床に完全鏡面の金属球とガラス球、puresky HDRI で照らす。 |
-| `18` | Cornell box 風の部屋にノーマルマップ付き Lambert 球と Conductor GGX 球を斜めに配置。 |
-| `19` | Lambert 床と puresky 環境光のもと、ノーマルマップ付き Lambert 球、Conductor GGX 球、Mirror 球を配置。 |
-| `20` | Lambert 床と puresky 環境光のもと、テクスチャ付き SimplePBR ドラゴンを配置。 |
-| `21` | Lambert 床と puresky 環境光のもと、SimplePBR ドラゴン、金色 Conductor GGX バニー、Glass 球、NormalizedLambert バニーを並べる。 |
-| `22` | ローポリ版 San Miguel を puresky HDRI で照らす。OBJ マテリアルは SimplePBR / DielectricGgx / Emissive に振り分け。 |
-| `23` | 通常版 San Miguel、配置とマテリアル割り当ては scene 22 と同じ。 |
-| `24` | Amazon Lumberyard Bistro (Exterior + Interior)、シーン中の emissive ポリゴンだけで照らす。 |
-| `25` | HDRI 環境光のもと、Disney BRDF 球を 11 列 × 10 段で並べ、各段で各パラメータをスイープ。 |
-| `26` | puresky 環境光のもと、同じドラゴンモデルを左 SimplePBR / 右 Disney BRDF で並べる。 |
-| `27` | HDRI 環境下に sheen=0 の Disney BRDF 球を配置。 |
-| `28` | HDRI 環境下に sheen=1 の Disney BRDF 球を配置。 |
-| `29` | puresky 環境光のもと、同じドラゴンモデルを左 SimplePBR / 右 Standard Surface で並べる。 |
-| `30` | mori-knob を 3 × 3 グリッドに配置し、knob だけ Standard Surface のバリエーション (polished gold、iridescent metal、brushed copper、non-dispersive glass、smooth/rough dispersive glass、red velvet sheen、coated plastic、matte ceramic) を割り当てる。 |
-| `31` | puresky 環境光のもと、紙飛行機を subsurface=0 の thin_walled Standard Surface として配置。 |
-| `32` | puresky 環境光のもと、紙飛行機を subsurface=0.5 の thin_walled Standard Surface として配置。 |
-| `33` | 床の上に銀色 single-scattering Conductor GGX 球を 9 個並べ、roughness をスイープ。 |
-| `34` | scene 33 と同じ配置、マテリアルを Cui 2023 multi-scattering Conductor GGX に差し替え。 |
-| `35` | 一様な白い環境光のもと、SS Conductor / MS Conductor を 9 列 × 2 段で並べ、roughness をスイープ。 |
-| `36` | HDRI のもと、Conductor GGX (compensation OFF) と Dielectric GGX (compensation OFF) を 9 列 × 2 段で並べ、roughness をスイープ。 |
-| `37` | scene 36 と同じ配置、Kulla & Conty 2017 energy compensation を有効にした版。 |
-| `38` | 一様な白い環境光のもと、SS Conductor / SS Dielectric / MS Conductor / MS Dielectric を 9 列 × 4 段で並べ、roughness をスイープ。 |
-| `39` | HDRI のもと、ゴールドの Conductor GGX 球を 9 列 × 2 段で並べ、上段 compensation OFF / 下段 ON、roughness をスイープ。 |
-| `40` | mori-knob 風の白い床に Glavenus STL モデルの 9 パーツを配置、 NormalizedLambert を割り当て。 |
-| `41` | scene 40 と同じ配置、 マテリアルを EON (energy-preserving Oren-Nayar) に差し替え。 |
-| `45` | mori-knob を 4×4 グリッドに配置し、各ノブに別々の MaterialX マテリアルを割り当てる。 |
-
-未定義のシーン番号を指定した場合は `scene 0` が読み込まれます。
-
 ## MaterialX サポート
 
 MaterialX 1.39.4 仕様の Volume を除くサブセットを `src/scene_loader/mtlx_loader/` 以下にロード機構として実装しています。`.mtlx` ファイルを読み込み、`<surfacematerial>` を `Material::Mtlx` バリアントとして本リポジトリの BSDF / EDF / Light tree 経路に統合できます。

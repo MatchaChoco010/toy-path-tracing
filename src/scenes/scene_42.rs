@@ -1,3 +1,5 @@
+//! 一様な白い環境光のもと、Oren-Nayar と EON の白い球を 2 段で roughness スイープして比較する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

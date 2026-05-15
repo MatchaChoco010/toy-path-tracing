@@ -1,3 +1,5 @@
+//! Lambert 床と puresky 環境光のもと、ノーマルマップ付き Lambert 球、Conductor GGX 球、Mirror 球を配置する。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

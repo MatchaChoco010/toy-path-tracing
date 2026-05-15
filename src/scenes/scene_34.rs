@@ -1,3 +1,5 @@
+//! Scene 33 と同じ配置で、マテリアルを Cui 2023 multi-scattering Conductor GGX に差し替える。
+
 use std::error::Error;
 
 use crate::{

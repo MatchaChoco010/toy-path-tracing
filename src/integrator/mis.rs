@@ -48,6 +48,7 @@ pub fn trace_radiance(
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
+        vtx.path_throughput = throughput;
         vtx.wavelength_lock = wavelength_lock;
         if should_sample_direct_light(material) {
             let u_root = rng.random::<f32>();
@@ -94,6 +95,7 @@ pub fn trace_radiance(
         match next_hit {
             Some(next_hit) => {
                 let mut next_vtx = scene.shading_vertex(next_hit, &next_ray);
+                next_vtx.path_throughput = throughput;
                 next_vtx.wavelength_lock = wavelength_lock;
                 let next_material = scene.instance_material(next_hit.triangle.instance_index);
                 radiance += emitted_radiance_from_bsdf_sample_area(
@@ -365,6 +367,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            path_throughput: Vec3::ONE,
             wavelength_lock: None,
             object_to_world: Mat4::IDENTITY,
             world_to_object: Mat4::IDENTITY,

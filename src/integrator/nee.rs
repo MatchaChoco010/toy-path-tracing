@@ -40,6 +40,7 @@ pub fn trace_radiance(
         };
 
         let mut vtx = scene.shading_vertex(hit, &ray);
+        vtx.path_throughput = throughput;
         vtx.wavelength_lock = wavelength_lock;
         let material = scene.instance_material(hit.triangle.instance_index);
         material.precompute_shading(&mut vtx, mtlx_scratch);
@@ -265,6 +266,7 @@ mod tests {
             dndv: Vec3::ZERO,
             frame: OrthonormalBasis::from_normal(Vec3::Z),
             front_face: true,
+            path_throughput: Vec3::ONE,
             wavelength_lock: None,
             object_to_world: Mat4::IDENTITY,
             world_to_object: Mat4::IDENTITY,

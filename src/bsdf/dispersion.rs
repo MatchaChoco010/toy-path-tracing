@@ -67,11 +67,34 @@ pub fn cauchy_ior(lambda_nm: f32, n_d: f32, abbe_v: f32) -> f32 {
     a + b / (lambda_nm * lambda_nm)
 }
 
+#[cfg(test)]
 pub fn sample_dispersion_wavelength(u: f32) -> (f32, Vec3) {
-    let u = u.clamp(0.0, 1.0);
-    let lambda = LAMBDA_MIN_NM + u * LAMBDA_RANGE_NM;
-    let basis = gamut_projected_rgb_at(lambda) * normalization_scale() * LAMBDA_RANGE_NM;
-    (lambda, basis)
+    sample_dispersion_wavelength_weighted(u, Vec3::ONE)
+}
+
+pub fn sample_dispersion_wavelength_weighted(u: f32, throughput: Vec3) -> (f32, Vec3) {
+    let throughput = throughput.max(Vec3::ZERO);
+    let weighted = throughput.max_element() > 0.0 && !throughput.abs_diff_eq(Vec3::ONE, 1.0e-6);
+    if !weighted {
+        let u = u.clamp(0.0, 1.0);
+        let lambda = LAMBDA_MIN_NM + u * LAMBDA_RANGE_NM;
+        let basis = normalized_rgb_at(lambda) * LAMBDA_RANGE_NM;
+        return (lambda, basis);
+    }
+
+    let cdf = throughput_weighted_cdf(throughput);
+    let u = u.clamp(0.0, 1.0 - f32::EPSILON);
+    let mut index = 0;
+    while index + 1 < TABLE_LEN && u >= cdf[index + 1] {
+        index += 1;
+    }
+    let prev = if index == 0 { 0.0 } else { cdf[index] };
+    let next = cdf[index + 1].max(prev + 1.0e-8);
+    let local = ((u - prev) / (next - prev)).clamp(0.0, 1.0);
+    let lambda = (LAMBDA_MIN_NM + LAMBDA_STEP_NM * (index as f32 + local))
+        .clamp(LAMBDA_MIN_NM, LAMBDA_MAX_NM);
+    let pdf = ((next - prev) / LAMBDA_STEP_NM).max(1.0e-8);
+    (lambda, normalized_rgb_at(lambda) / pdf)
 }
 
 // Project the spectral chromaticity into the sRGB gamut triangle by sliding
@@ -89,6 +112,33 @@ fn gamut_projected_rgb_at(lambda_nm: f32) -> Vec3 {
     } else {
         rgb
     }
+}
+
+fn normalized_rgb_at(lambda_nm: f32) -> Vec3 {
+    gamut_projected_rgb_at(lambda_nm) * normalization_scale()
+}
+
+fn throughput_weighted_cdf(throughput: Vec3) -> [f32; TABLE_LEN + 1] {
+    let mut cdf = [0.0; TABLE_LEN + 1];
+    let mut sum = 0.0;
+    for i in 0..TABLE_LEN {
+        let lambda = LAMBDA_MIN_NM + LAMBDA_STEP_NM * i as f32;
+        let rgb = normalized_rgb_at(lambda);
+        let score = rgb.dot(throughput).max(0.0);
+        sum += score;
+        cdf[i + 1] = sum;
+    }
+    if sum <= 0.0 {
+        for (i, v) in cdf.iter_mut().enumerate() {
+            *v = i as f32 / TABLE_LEN as f32;
+        }
+        return cdf;
+    }
+    for v in &mut cdf {
+        *v /= sum;
+    }
+    cdf[TABLE_LEN] = 1.0;
+    cdf
 }
 
 fn normalization_scale() -> Vec3 {

@@ -1,3 +1,5 @@
+//! mori-knob を 3 x 3 グリッドに配置し、knob に Standard Surface の各種バリエーションを割り当てる。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};

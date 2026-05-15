@@ -1,3 +1,5 @@
+//! Lambert 床に薄青 Lambert バニーを置き、DirectionalLight 1 つで照らす。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

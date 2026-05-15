@@ -1,3 +1,5 @@
+//! mori-knob を 4 x 4 グリッドに配置し、各ノブに別々の MaterialX マテリアルを割り当てる。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};

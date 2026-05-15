@@ -1,3 +1,5 @@
+//! Lambert 床に diffuse バニーを置き、HDRI 環境光のみで照らす。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

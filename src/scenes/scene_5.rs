@@ -1,3 +1,5 @@
+//! Cornell box 風の部屋に roughness 0.3 の銀色 Conductor GGX 球を isotropic / anisotropic で 3 つ並べる。
+
 use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 

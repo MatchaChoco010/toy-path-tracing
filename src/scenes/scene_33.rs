@@ -1,3 +1,5 @@
+//! 床の上に銀色 single-scattering Conductor GGX 球を 9 個並べ、roughness をスイープする。
+
 use std::{error::Error, path::Path};
 
 use glam::{Mat4, Vec3};
