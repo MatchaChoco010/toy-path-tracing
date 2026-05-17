@@ -4,15 +4,17 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     material::{ConductorGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial},
-    mesh::load_gltf,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_gltf,
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_18() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_18(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
     let normal_strength = 0.2;
     let wall_gray = scene.add_material(Material::NormalizedLambert(
@@ -44,6 +46,7 @@ pub fn create_scene_18() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.72, 0.76, 0.82),
         None,
         Some(normal_map_path),
+        _ocio,
     )?;
     lambert_material.normal_strength = normal_strength;
     let lambert = scene.add_material(Material::NormalizedLambert(lambert_material));
@@ -55,6 +58,7 @@ pub fn create_scene_18() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         None,
         None,
         Some(normal_map_path),
+        _ocio,
     )?;
     metal_material.normal_strength = normal_strength;
     let metal = scene.add_material(Material::ConductorGgx(metal_material));

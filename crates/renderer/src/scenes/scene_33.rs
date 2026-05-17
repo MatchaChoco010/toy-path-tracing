@@ -5,16 +5,18 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{ConductorGgxMaterial, EmissiveMaterial, Material, StandardSurfaceMaterial},
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::Scene,
+    scene::{load_gltf, load_obj},
 };
 
 use super::uniform_scale_for_height;
 
-pub fn create_scene_33() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_33(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     create_conductor_roughness_row(|color, roughness| {
         Material::ConductorGgx(ConductorGgxMaterial::new(color, roughness, 0.0))
     })

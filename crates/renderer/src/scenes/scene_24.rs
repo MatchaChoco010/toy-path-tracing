@@ -4,14 +4,13 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, sync::Arc};
 
 use crate::{
-    camera::PinholeCamera,
-    color::srgb_to_linear,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
         ScalarTexture, SimplePbrMaterial, Texture,
     },
+    scene::PinholeCamera,
     scene::Scene,
-    scene_loader::gltf_scene::{
+    scenes::helper::gltf_scene_loader::{
         GltfAlphaMode, GltfImage, GltfMaterial, GltfMaterialMesh, GltfScene, load_gltf_scene,
     },
 };
@@ -31,7 +30,9 @@ struct ImageCache {
     roughness: Vec<Option<Arc<ScalarTexture>>>,
 }
 
-pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_24(
+    ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
     let mut total_emissive_meshes = 0usize;
     let mut total_emissive_tris = 0usize;
@@ -42,7 +43,7 @@ pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut found_any_glb = false;
 
     for path in BISTRO_GLTF_FILES {
-        let glb_path = crate::paths::workspace_path(path);
+        let glb_path = crate::utils::workspace_path(path);
         if !glb_path.exists() {
             continue;
         }
@@ -53,7 +54,7 @@ pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         for slot in &gltf_scene.material_meshes {
             let tris = slot.mesh.triangle_count();
             total_tris += tris;
-            let material = build_material(slot, &gltf_scene, &mut cache);
+            let material = build_material(slot, &gltf_scene, &mut cache, ocio);
             match &material {
                 Material::Emissive(_) => {
                     total_emissive_meshes += 1;
@@ -116,11 +117,16 @@ impl ImageCache {
         }
     }
 
-    fn srgb_color(&mut self, images: &[GltfImage], index: usize) -> Arc<Texture> {
+    fn srgb_color(
+        &mut self,
+        images: &[GltfImage],
+        index: usize,
+        ocio: &crate::color::OcioColorPipeline,
+    ) -> Arc<Texture> {
         if let Some(texture) = &self.color[index] {
             return Arc::clone(texture);
         }
-        let texture = Arc::new(decode_srgb_color(&images[index]));
+        let texture = Arc::new(decode_srgb_color(&images[index], ocio));
         self.color[index] = Some(Arc::clone(&texture));
         texture
     }
@@ -165,7 +171,7 @@ impl ImageCache {
     }
 }
 
-fn decode_srgb_color(image: &GltfImage) -> Texture {
+fn decode_srgb_color(image: &GltfImage, ocio: &crate::color::OcioColorPipeline) -> Texture {
     let mut pixels = Vec::with_capacity(image.width * image.height);
     for chunk in image.rgba.chunks_exact(4) {
         let rgb = Vec3::new(
@@ -173,7 +179,14 @@ fn decode_srgb_color(image: &GltfImage) -> Texture {
             chunk[1] as f32 / 255.0,
             chunk[2] as f32 / 255.0,
         );
-        pixels.push(srgb_to_linear(rgb));
+        pixels.push(
+            ocio.transform_rgb(
+                rgb,
+                crate::color::ColorSpaceRef::Texture,
+                crate::color::ColorSpaceRef::Rendering,
+            )
+            .expect("glTF texture color transform"),
+        );
     }
     Texture::from_pixels(image.width, image.height, pixels)
 }
@@ -202,6 +215,7 @@ fn build_material(
     slot: &GltfMaterialMesh,
     gltf_scene: &GltfScene,
     cache: &mut ImageCache,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Material {
     let Some(material_index) = slot.material_index else {
         return Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::splat(0.7)));
@@ -210,7 +224,7 @@ fn build_material(
         return Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::splat(0.7)));
     };
 
-    if let Some(emissive) = build_emissive(material, &gltf_scene.images, cache) {
+    if let Some(emissive) = build_emissive(material, &gltf_scene.images, cache, ocio) {
         return emissive;
     }
 
@@ -218,13 +232,14 @@ fn build_material(
         return build_dielectric(material);
     }
 
-    build_simple_pbr(material, &gltf_scene.images, cache)
+    build_simple_pbr(material, &gltf_scene.images, cache, ocio)
 }
 
 fn build_emissive(
     material: &GltfMaterial,
     images: &[GltfImage],
     cache: &mut ImageCache,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Option<Material> {
     let factor = material.emissive_factor * material.emissive_strength;
     let factor_max = factor.max_element();
@@ -237,11 +252,11 @@ fn build_emissive(
     let (color, strength, texture) = if factor_max > 0.0 {
         let strength = factor_max;
         let chroma = (factor / strength).clamp(Vec3::ZERO, Vec3::ONE);
-        let texture = texture_index.map(|index| cache.srgb_color(images, index));
+        let texture = texture_index.map(|index| cache.srgb_color(images, index, ocio));
         (chroma, strength, texture)
     } else {
         let index = texture_index?;
-        (Vec3::ONE, 1.0, Some(cache.srgb_color(images, index)))
+        (Vec3::ONE, 1.0, Some(cache.srgb_color(images, index, ocio)))
     };
 
     let mut emissive_material = EmissiveMaterial::new(color, strength * EMISSIVE_SCALE);
@@ -251,8 +266,9 @@ fn build_emissive(
 
 fn build_dielectric(material: &GltfMaterial) -> Material {
     let factor: Vec3 = material.base_color_factor.truncate();
-    let color =
-        srgb_to_linear(factor.clamp(Vec3::ZERO, Vec3::ONE)).clamp(Vec3::splat(0.05), Vec3::ONE);
+    let color = factor
+        .clamp(Vec3::ZERO, Vec3::ONE)
+        .clamp(Vec3::splat(0.05), Vec3::ONE);
     Material::DielectricGgx(DielectricGgxMaterial::new(
         color,
         1.5,
@@ -266,9 +282,10 @@ fn build_simple_pbr(
     material: &GltfMaterial,
     images: &[GltfImage],
     cache: &mut ImageCache,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Material {
     let factor: Vec3 = material.base_color_factor.truncate();
-    let base_color = srgb_to_linear(factor.clamp(Vec3::ZERO, Vec3::ONE));
+    let base_color = factor.clamp(Vec3::ZERO, Vec3::ONE);
 
     // glTF metallicRoughness: final = factor * texture_channel. Without a
     // texture we floor the roughness to keep specular lobes finite; with a
@@ -285,7 +302,7 @@ fn build_simple_pbr(
         SimplePbrMaterial::new(base_color, metallic_factor, roughness_factor, 1.5, 0.0);
 
     if let Some(index) = material.base_color_texture {
-        simple_pbr.base_color_texture = Some(cache.srgb_color(images, index));
+        simple_pbr.base_color_texture = Some(cache.srgb_color(images, index, ocio));
         simple_pbr.opacity_texture = cache.alpha(images, index);
     }
 
@@ -304,7 +321,6 @@ mod tests {
 
     fn opaque_gltf_material() -> GltfMaterial {
         GltfMaterial {
-            name: "wall".to_string(),
             base_color_factor: Vec4::new(0.8, 0.7, 0.6, 1.0),
             base_color_texture: None,
             metallic_factor: 0.0,
@@ -314,8 +330,6 @@ mod tests {
             emissive_strength: 1.0,
             emissive_texture: None,
             alpha_mode: GltfAlphaMode::Opaque,
-            double_sided: false,
-            unlit: false,
         }
     }
 
@@ -332,8 +346,8 @@ mod tests {
         let mut cache = ImageCache::new(images.len());
         let slot = GltfMaterialMesh {
             material_index: Some(0),
-            mesh: crate::mesh::Mesh::new(
-                vec![crate::mesh::Vertex {
+            mesh: crate::scene::Mesh::new(
+                vec![crate::scene::Vertex {
                     position: Vec3::ZERO,
                     normal: Vec3::Z,
                     uv: glam::Vec2::ZERO,
@@ -341,7 +355,13 @@ mod tests {
                 vec![0, 0, 0],
             ),
         };
-        build_material(&slot, &gltf_scene, &mut cache)
+        let ocio = crate::color::OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
+        build_material(&slot, &gltf_scene, &mut cache, &ocio)
     }
 
     #[test]

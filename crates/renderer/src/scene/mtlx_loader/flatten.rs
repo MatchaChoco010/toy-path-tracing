@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{color::management, color::srgb_to_linear};
+use crate::color;
 
 use super::library::MtlxLibrary;
 use super::types::{
@@ -265,6 +265,23 @@ pub fn flatten_material(
     document: &super::types::RawMtlxDocument,
     material_name: &str,
 ) -> Result<FlatGraph, FlattenError> {
+    let ocio = crate::color::OcioColorPipeline::new(
+        crate::color::DEFAULT_OCIO_CONFIG,
+        Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+        crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+    )
+    .map_err(|error| FlattenError::Unsupported {
+        what: error.to_string(),
+    })?;
+    flatten_material_with_ocio(library, document, material_name, &ocio)
+}
+
+pub fn flatten_material_with_ocio(
+    library: &MtlxLibrary,
+    document: &super::types::RawMtlxDocument,
+    material_name: &str,
+    ocio: &crate::color::OcioColorPipeline,
+) -> Result<FlatGraph, FlattenError> {
     let mut nodegraphs: HashMap<String, &RawNodeGraph> = HashMap::new();
     for ng in &document.nodegraphs {
         nodegraphs.insert(ng.name.clone(), ng);
@@ -320,6 +337,7 @@ pub fn flatten_material(
         document_root_nodes: &document_root_nodes,
         document_nodedefs: &document_nodedefs,
         document_nodedefs_by_category: &document_nodedefs_by_category,
+        ocio,
         nodes: Vec::new(),
         cache: HashMap::new(),
         stack: Vec::new(),
@@ -545,6 +563,7 @@ struct Builder<'a> {
     document_root_nodes: &'a HashMap<String, &'a RawNodeUse>,
     document_nodedefs: &'a HashMap<String, &'a super::types::RawNodeDef>,
     document_nodedefs_by_category: &'a HashMap<String, Vec<&'a super::types::RawNodeDef>>,
+    ocio: &'a crate::color::OcioColorPipeline,
     nodes: Vec<FlatNode>,
     cache: HashMap<NodeKey, FlatNodeId>,
     stack: Vec<NodeKey>,
@@ -766,6 +785,7 @@ impl<'a> Builder<'a> {
                         expected_type,
                         input.colorspace.as_deref(),
                         &input.name,
+                        self.ocio,
                     )?))
                 } else if matches!(
                     expected_type,
@@ -1054,6 +1074,7 @@ impl<'a> Builder<'a> {
                             &decl.ty,
                             decl.colorspace.as_deref(),
                             &decl.name,
+                            self.ocio,
                         )?),
                         &out_ty,
                     )?));
@@ -1330,6 +1351,7 @@ impl<'a> Builder<'a> {
                                 &nd_input.ty,
                                 nd_input.colorspace.as_deref(),
                                 &nd_input.name,
+                                self.ocio,
                             )?)
                         }
                     }
@@ -1476,6 +1498,7 @@ impl<'a> Builder<'a> {
                                 &input.ty,
                                 input.colorspace.as_deref(),
                                 &input.name,
+                                self.ocio,
                             )?)
                         }
                     }
@@ -1710,16 +1733,17 @@ fn apply_input_color_space(
     ty: &MtlxType,
     colorspace: Option<&str>,
     input_name: &str,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Result<MtlxValue, FlattenError> {
     let Some(colorspace) = colorspace else {
         return Ok(value);
     };
     match (value, ty) {
         (MtlxValue::Color3(c), MtlxType::Color3) => Ok(MtlxValue::Color3(convert_color3(
-            c, colorspace, input_name,
+            c, colorspace, input_name, ocio,
         )?)),
         (MtlxValue::Color4(c), MtlxType::Color4) => {
-            let rgb = convert_color3(glam::Vec3::new(c.x, c.y, c.z), colorspace, input_name)?;
+            let rgb = convert_color3(glam::Vec3::new(c.x, c.y, c.z), colorspace, input_name, ocio)?;
             Ok(MtlxValue::Color4(glam::Vec4::new(rgb.x, rgb.y, rgb.z, c.w)))
         }
         (v, _) => Ok(v),
@@ -1730,25 +1754,17 @@ fn convert_color3(
     c: glam::Vec3,
     colorspace: &str,
     input_name: &str,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Result<glam::Vec3, FlattenError> {
     match colorspace {
         "none" | "linear" | "scene_linear" => Ok(c),
-        "lin_rec709" | "lin_rec709_d65" if management::current().is_none() => Ok(c),
-        "srgb_texture" | "g22_rec709" | "g22_ap1" | "srgb_displayp3"
-            if management::current().is_none() =>
-        {
-            Ok(srgb_to_linear(c))
-        }
         other => {
-            let Some(context) = management::current() else {
-                return Err(FlattenError::Unsupported {
-                    what: format!(
-                        "OCIO context is not initialized; cannot transform colorspace `{other}` on value input `{input_name}`"
-                    ),
-                });
-            };
-            context
-                .transform_rgb(c, management::map_materialx_color_space(other))
+            let src = color::map_materialx_color_space(other);
+            ocio.transform_rgb(
+                c,
+                crate::color::ColorSpaceRef::Ocio(src),
+                crate::color::ColorSpaceRef::Rendering,
+            )
                 .map_err(|error| FlattenError::Unsupported {
                     what: format!(
                         "failed to transform colorspace `{other}` on value input `{input_name}`: {error}"
@@ -1959,12 +1975,12 @@ fn zero_value(ty: &MtlxType) -> Option<MtlxValue> {
 mod tests {
     use super::*;
     use crate::material::mtlx::compile;
-    use crate::scene_loader::mtlx_loader::library::load_standard_library;
-    use crate::scene_loader::mtlx_loader::parser::parse_str;
+    use crate::scene::mtlx_loader::library::load_standard_library;
+    use crate::scene::mtlx_loader::parser::parse_str;
     use std::path::{Path, PathBuf};
 
     fn lib_root() -> PathBuf {
-        crate::paths::workspace_path("lib/materialx/libraries")
+        crate::utils::workspace_path("lib/materialx/libraries")
     }
 
     const SAMPLE_LAMBERT: &str = r#"<?xml version="1.0"?>
@@ -2032,7 +2048,19 @@ mod tests {
             .iter()
             .find(|input| input.name == "value")
             .expect("constant value input");
-        let expected = crate::color::srgb_to_linear(glam::Vec3::splat(0.5));
+        let ocio = crate::color::OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
+        let expected = ocio
+            .transform_rgb(
+                glam::Vec3::splat(0.5),
+                crate::color::ColorSpaceRef::Texture,
+                crate::color::ColorSpaceRef::Rendering,
+            )
+            .expect("default texture color transform");
         match &value.binding {
             FlatInput::Value(MtlxValue::Color3(c)) => {
                 assert!(c.abs_diff_eq(expected, 1.0e-6));

@@ -4,13 +4,13 @@ use std::sync::Arc;
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
 use crate::bsdf::mtlx::{ScatterMode, SheenMode};
-use crate::color::management;
+use crate::color::{self, ColorSpaceRef, OcioColorPipeline};
 use crate::material::pattern::noise::{hsv_to_rgb, rgb_to_hsv};
 use crate::material::{ScalarTexture, Texture, TextureColorSpace};
-use crate::scene_loader::mtlx_loader::flatten::{
+use crate::scene::mtlx_loader::flatten::{
     FlatGraph, FlatInput, FlatNode, FlatNodeId, FlatNodeKind, GeometricKind as FgKind,
 };
-use crate::scene_loader::mtlx_loader::{MtlxType, MtlxValue};
+use crate::scene::mtlx_loader::{MtlxType, MtlxValue};
 
 use super::compiled::{
     AddressMode, ArithOp, ArtisticIorOutput, BlendOp, ChiangHairRoughnessOutput, ClosureKind,
@@ -44,12 +44,38 @@ pub fn compile(
     udim_textures: HashMap<Arc<str>, Arc<UdimTiles>>,
     scalar_textures: HashMap<Arc<str>, Arc<ScalarTexture>>,
 ) -> Result<CompiledMaterial, CompileError> {
+    let ocio = OcioColorPipeline::new(
+        color::DEFAULT_OCIO_CONFIG,
+        Some(color::DEFAULT_RENDERING_SPACE.to_string()),
+        color::DEFAULT_TEXTURE_COLOR_SPACE,
+    )
+    .map_err(|error| CompileError::Unsupported(error.to_string()))?;
+    compile_with_ocio(
+        graph,
+        &ocio,
+        color_textures,
+        alpha_textures,
+        udim_textures,
+        scalar_textures,
+    )
+}
+
+pub fn compile_with_ocio(
+    graph: &FlatGraph,
+    ocio: &OcioColorPipeline,
+    color_textures: HashMap<Arc<str>, Arc<Texture>>,
+    alpha_textures: HashMap<Arc<str>, Arc<ScalarTexture>>,
+    udim_textures: HashMap<Arc<str>, Arc<UdimTiles>>,
+    scalar_textures: HashMap<Arc<str>, Arc<ScalarTexture>>,
+) -> Result<CompiledMaterial, CompileError> {
     let mut builder = Builder {
         graph,
         color_textures: &color_textures,
         alpha_textures: &alpha_textures,
         udim_textures: &udim_textures,
         scalar_textures: &scalar_textures,
+        ocio,
+        color_processors: Vec::new(),
         instructions: Vec::new(),
         operand_pool: Vec::new(),
         value_pool: Vec::new(),
@@ -81,6 +107,7 @@ pub fn compile(
         &mut builder.instructions,
         &builder.operand_pool,
         &mut builder.value_pool,
+        &builder.color_processors,
         builder.next_vreg,
     );
 
@@ -108,6 +135,7 @@ pub fn compile(
     let raw_instructions = builder.instructions;
     let raw_operand_pool = builder.operand_pool;
     let raw_closure_nodes = builder.closure_nodes;
+    let color_processors = builder.color_processors;
     let mut value_pool = builder.value_pool;
     let pre_alloc_vregs = builder.next_vreg;
 
@@ -123,6 +151,7 @@ pub fn compile(
                 &mut instructions,
                 &operand_pool,
                 &mut value_pool,
+                &color_processors,
                 pre_alloc_vregs,
             );
             if opacity_folded > 0 {
@@ -160,6 +189,7 @@ pub fn compile(
         &mut instructions,
         &operand_pool,
         &mut value_pool,
+        &color_processors,
         pre_alloc_vregs,
     );
     if full_folded > 0 {
@@ -182,6 +212,7 @@ pub fn compile(
         instructions,
         operand_pool,
         value_pool,
+        color_processors,
         opacity_instructions,
         opacity_operand_pool,
         opacity_closure_nodes,
@@ -2150,6 +2181,7 @@ fn fold_constant_instructions(
     instructions: &mut [Instruction],
     operand_pool: &[Operand],
     value_pool: &mut Vec<Value>,
+    color_processors: &[Arc<color::OcioColorProcessor>],
     num_vregs: u32,
 ) -> usize {
     let mut constants = vec![None; num_vregs as usize];
@@ -2170,9 +2202,13 @@ fn fold_constant_instructions(
             }
             continue;
         }
-        if let Some((dst, value)) =
-            constant_instruction_value(instr, operand_pool, &constants, value_pool)
-            && inline_constant_value(value)
+        if let Some((dst, value)) = constant_instruction_value(
+            instr,
+            operand_pool,
+            &constants,
+            value_pool,
+            color_processors,
+        ) && inline_constant_value(value)
         {
             let value_pool_idx = value_pool.len() as u32;
             value_pool.push(value);
@@ -2201,6 +2237,7 @@ fn constant_instruction_value(
     operand_pool: &[Operand],
     constants: &[Option<Value>],
     value_pool: &[Value],
+    color_processors: &[Arc<color::OcioColorProcessor>],
 ) -> Option<(u16, Value)> {
     use Instruction::*;
     let c = |op| operand_constant(op, constants, value_pool);
@@ -2437,7 +2474,15 @@ fn constant_instruction_value(
                 super::runtime::convert_value(v, super::runtime::value_type_of(v), *ty),
             )
         }
-        _ => return constant_instruction_value_tail(instr, operand_pool, constants, value_pool),
+        _ => {
+            return constant_instruction_value_tail(
+                instr,
+                operand_pool,
+                constants,
+                value_pool,
+                color_processors,
+            );
+        }
     })
 }
 
@@ -2446,6 +2491,7 @@ fn constant_instruction_value_tail(
     operand_pool: &[Operand],
     constants: &[Option<Value>],
     value_pool: &[Value],
+    color_processors: &[Arc<color::OcioColorProcessor>],
 ) -> Option<(u16, Value)> {
     use Instruction::*;
     let c = |op| operand_constant(op, constants, value_pool);
@@ -2665,13 +2711,10 @@ fn constant_instruction_value_tail(
             let v = c(*src)?;
             let out = match op {
                 ColorXform::Identity => v,
-                ColorXform::SrgbToLinear => {
-                    color_xform_constant(v, *ty, crate::color::srgb_to_linear)
+                ColorXform::TextureToRendering | ColorXform::RenderingToTexture => v,
+                ColorXform::Ocio { processor } => {
+                    ocio_xform_constant(v, *ty, &color_processors[*processor as usize])
                 }
-                ColorXform::LinearToSrgb => {
-                    color_xform_constant(v, *ty, crate::color::linear_to_srgb)
-                }
-                ColorXform::Ocio { from, to } => ocio_xform_constant(v, *ty, from, to),
             };
             (*dst, out)
         }
@@ -2922,52 +2965,24 @@ fn combine_constant(
     })
 }
 
-fn color_xform_constant(v: Value, ty: ValueType, f: impl Fn(Vec3) -> Vec3) -> Value {
-    match ty {
-        ValueType::Color3 => Value::Color3(f(v.as_color3())),
-        ValueType::Color4 => {
-            let c = v.as_color4();
-            let rgb = f(Vec3::new(c.x, c.y, c.z));
-            Value::Color4(Vec4::new(rgb.x, rgb.y, rgb.z, c.w))
-        }
-        _ => v,
-    }
-}
-
 fn materialx_color_space_to_ocio(name: &str, rendering_space: &str) -> String {
     match name {
         "" | "linear" | "scene_linear" => rendering_space.to_string(),
         "none" => rendering_space.to_string(),
         "g22" => "g22_rec709".to_string(),
-        other => management::map_materialx_color_space(other).to_string(),
+        other => color::map_materialx_color_space(other).to_string(),
     }
 }
 
-fn legacy_color_space_name(name: &str) -> Option<&'static str> {
-    match name {
-        "" => None,
-        "lin_rec709" | "linear" | "scene_linear" | "lin_rec709_d65" => Some("linear"),
-        "srgb_texture" | "srgb" | "sRGB" | "srgb_displayp3" => Some("srgb"),
-        "g22" | "g22_rec709" | "g22_ap1" => Some("srgb"),
-        _ => Some("unsupported"),
-    }
-}
-
-fn ocio_xform_constant(v: Value, ty: ValueType, from: &str, to: &str) -> Value {
-    let Some(context) = management::current() else {
-        return v;
-    };
+fn ocio_xform_constant(v: Value, ty: ValueType, processor: &color::OcioColorProcessor) -> Value {
     match ty {
-        ValueType::Color3 => context
-            .transform_rgb_between(v.as_color3(), from, to)
+        ValueType::Color3 => processor
+            .apply_rgb(v.as_color3())
             .map(Value::Color3)
             .unwrap_or(v),
         ValueType::Color4 => {
             let c = v.as_color4();
-            context
-                .transform_rgba_between(c, from, to)
-                .map(Value::Color4)
-                .unwrap_or(v)
+            processor.apply_rgba(c).map(Value::Color4).unwrap_or(v)
         }
         _ => v,
     }
@@ -3179,6 +3194,8 @@ struct Builder<'a> {
     alpha_textures: &'a HashMap<Arc<str>, Arc<ScalarTexture>>,
     udim_textures: &'a HashMap<Arc<str>, Arc<UdimTiles>>,
     scalar_textures: &'a HashMap<Arc<str>, Arc<ScalarTexture>>,
+    ocio: &'a OcioColorPipeline,
+    color_processors: Vec<Arc<color::OcioColorProcessor>>,
 
     instructions: Vec<Instruction>,
     operand_pool: Vec<Operand>,
@@ -3480,57 +3497,48 @@ impl<'a> Builder<'a> {
                     Some("none") | Some("linear") | Some("scene_linear") => {
                         TextureColorSpace::Linear
                     }
-                    Some(other) => TextureColorSpace::ocio(
-                        management::map_materialx_color_space(other).to_string(),
-                    ),
+                    Some(other) => {
+                        TextureColorSpace::ocio(color::map_materialx_color_space(other).to_string())
+                    }
                 };
             }
         }
         TextureColorSpace::DefaultColor
     }
 
-    fn color_xform_to_rendering(src: &str) -> Result<ColorXform, CompileError> {
-        let Some(context) = management::current() else {
-            return Ok(match src {
-                "srgb_texture" | "g22" => ColorXform::SrgbToLinear,
-                _ => ColorXform::Identity,
-            });
-        };
-        let src = materialx_color_space_to_ocio(src, context.rendering_space());
-        if src == context.rendering_space() {
+    fn color_xform_to_rendering(&mut self, src: &str) -> Result<ColorXform, CompileError> {
+        let rendering_space = self.ocio.rendering_space().to_string();
+        let src = materialx_color_space_to_ocio(src, &rendering_space);
+        if src == rendering_space {
             return Ok(ColorXform::Identity);
         }
-        context
-            .validate_color_space(&src, context.rendering_space())
+        let processor = self
+            .ocio
+            .color_space_processor(ColorSpaceRef::Ocio(&src), ColorSpaceRef::Rendering)
             .map_err(|error| CompileError::Unsupported(format!("{src}: {error}")))?;
-        Ok(ColorXform::Ocio {
-            from: Arc::from(src),
-            to: Arc::from(context.rendering_space()),
-        })
+        Ok(self.intern_color_processor(processor))
     }
 
-    fn color_xform_between(from: &str, to: &str) -> Result<ColorXform, CompileError> {
-        let Some(context) = management::current() else {
-            let from = legacy_color_space_name(from);
-            let to = legacy_color_space_name(to);
-            return Ok(match (from, to) {
-                (Some("srgb"), Some("linear")) | (Some("srgb"), None) => ColorXform::SrgbToLinear,
-                (Some("linear"), Some("srgb")) | (None, Some("srgb")) => ColorXform::LinearToSrgb,
-                _ => ColorXform::Identity,
-            });
-        };
-        let from = materialx_color_space_to_ocio(from, context.rendering_space());
-        let to = materialx_color_space_to_ocio(to, context.rendering_space());
+    fn color_xform_between(&mut self, from: &str, to: &str) -> Result<ColorXform, CompileError> {
+        let rendering_space = self.ocio.rendering_space().to_string();
+        let from = materialx_color_space_to_ocio(from, &rendering_space);
+        let to = materialx_color_space_to_ocio(to, &rendering_space);
         if from == to {
             return Ok(ColorXform::Identity);
         }
-        context
-            .validate_color_space(&from, &to)
+        let processor = self
+            .ocio
+            .color_space_processor(ColorSpaceRef::Ocio(&from), ColorSpaceRef::Ocio(&to))
             .map_err(|error| CompileError::Unsupported(format!("{from} -> {to}: {error}")))?;
-        Ok(ColorXform::Ocio {
-            from: Arc::from(from),
-            to: Arc::from(to),
-        })
+        Ok(self.intern_color_processor(processor))
+    }
+
+    fn intern_color_processor(&mut self, processor: Arc<color::OcioColorProcessor>) -> ColorXform {
+        let index = self.color_processors.len();
+        self.color_processors.push(processor);
+        ColorXform::Ocio {
+            processor: index as u16,
+        }
     }
 
     fn warn_animated_image_inputs(node: &FlatNode, category: &str) -> Result<(), CompileError> {
@@ -6273,7 +6281,7 @@ impl<'a> Builder<'a> {
                 let v = self
                     .input_value_param(node, "in", Some(out_color_ty))?
                     .unwrap_or(zero_param(Some(out_color_ty)));
-                let op = Self::color_xform_to_rendering(category)?;
+                let op = self.color_xform_to_rendering(category)?;
                 let v_op = self.param_to_operand(&v);
                 let dst = self.alloc_vreg();
                 self.instructions.push(Instruction::TransformColor {
@@ -6835,7 +6843,7 @@ impl<'a> Builder<'a> {
                     .unwrap_or(zero_param(Some(out_color_ty)));
                 let from = Self::input_static_string(node, category, "fromspace")?.unwrap_or("");
                 let to = Self::input_static_string(node, category, "tospace")?.unwrap_or("");
-                let op = Self::color_xform_between(from, to)?;
+                let op = self.color_xform_between(from, to)?;
                 let v_op = self.param_to_operand(&v);
                 let dst = self.alloc_vreg();
                 self.instructions.push(Instruction::TransformColor {

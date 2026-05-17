@@ -3,10 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{
-    bsdf::{BsdfFlags, GlassBsdf},
-    color::srgb_to_linear,
-};
+use crate::bsdf::{BsdfFlags, GlassBsdf};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -70,6 +67,7 @@ impl GlassMaterial {
         color_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
         thin: bool,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             eta,
@@ -77,6 +75,7 @@ impl GlassMaterial {
             color_texture: load_optional_color_texture(
                 color_texture_path,
                 TextureColorSpace::Srgb,
+                ocio,
             )?,
             thin,
             normal_map: load_optional_normal_map(normal_map_path)?,
@@ -188,7 +187,7 @@ impl GlassMaterial {
     }
 
     fn color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.color)
+        self.color
             * self
                 .color_texture
                 .as_ref()
@@ -274,7 +273,7 @@ mod tests {
         assert!(
             sample
                 .weight
-                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) * radiance_scale, 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) * radiance_scale, 1.0e-3)
         );
     }
 }

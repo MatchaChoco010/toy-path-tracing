@@ -36,7 +36,7 @@ impl std::error::Error for ParseError {}
 
 pub fn parse_document(path: &Path) -> Result<RawMtlxDocument, ParseError> {
     let mut visited = HashSet::new();
-    let canonical = canonicalize(&crate::paths::workspace_path(path));
+    let canonical = canonicalize(&crate::utils::workspace_path(path));
     visited.insert(canonical.clone());
     parse_recursive(&canonical, &mut visited, None)
 }

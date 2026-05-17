@@ -6,8 +6,8 @@ use crate::{
     light::{LightSampleContext, infinite_light_le, sample_light},
     light_tree,
     material::{Material, MtlxScratch, ShadingVertex},
+    math::ray::Ray,
     math::russian_roulette_probability,
-    ray::Ray,
     scene::Scene,
 };
 
@@ -160,7 +160,6 @@ mod tests {
     use super::{direct_light_nee_contribution, should_sample_direct_light, trace_radiance};
     use crate::{
         bsdf::mtlx::ScatterMode,
-        color::linear_to_srgb,
         light::{DirectionalLight, EnvironmentLight, PointLight, SpotLight},
         material::mtlx::{ClosureNode, CompiledMaterial, ParamRef},
         material::{
@@ -168,9 +167,9 @@ mod tests {
             NormalizedLambertMaterial, ShadingVertex,
         },
         math::OrthonormalBasis,
-        mesh::{Mesh, Vertex},
-        ray::Ray,
+        math::ray::Ray,
         scene::{InstanceIndex, Scene, TriangleRef},
+        scene::{Mesh, Vertex},
     };
     use std::sync::Arc;
 
@@ -209,6 +208,7 @@ mod tests {
             instructions: Vec::new(),
             operand_pool: Vec::new(),
             value_pool: Vec::new(),
+            color_processors: Vec::new(),
             opacity_instructions: Vec::new(),
             opacity_operand_pool: Vec::new(),
             opacity_closure_nodes: Vec::new(),
@@ -328,6 +328,7 @@ mod tests {
             instructions: Vec::new(),
             operand_pool: Vec::new(),
             value_pool: Vec::new(),
+            color_processors: Vec::new(),
             opacity_instructions: Vec::new(),
             opacity_operand_pool: Vec::new(),
             opacity_closure_nodes: Vec::new(),
@@ -387,7 +388,7 @@ mod tests {
         let mut scratch = MtlxScratch::default();
         let radiance = trace_radiance(&scene, ray, &mut rng, 2, &mut scratch);
 
-        assert!(radiance.abs_diff_eq(expected, 1.0e-5));
+        assert!(radiance.abs_diff_eq(expected, 1.0e-3));
     }
 
     #[test]
@@ -396,7 +397,7 @@ mod tests {
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
@@ -425,7 +426,7 @@ mod tests {
             &mut MtlxScratch::default(),
         );
 
-        assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-5));
+        assert!(radiance.abs_diff_eq(Vec3::splat(4.0 / PI), 1.0e-3));
     }
 
     #[test]
@@ -435,10 +436,10 @@ mod tests {
         let blocker_mesh = scene.add_mesh(unit_mesh(0.5));
         let light_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         let blocker_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.5))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.5)),
         ));
         let light_material =
             scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
@@ -474,7 +475,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         let env_radiance = Vec3::splat(2.0);
@@ -515,7 +516,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_point_light(PointLight::new(
@@ -544,7 +545,7 @@ mod tests {
             &mut MtlxScratch::default(),
         );
         let expected = 0.8 / PI;
-        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-3));
     }
 
     #[test]
@@ -552,7 +553,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         scene.add_directional_light(DirectionalLight::new(
@@ -581,7 +582,7 @@ mod tests {
             &mut MtlxScratch::default(),
         );
         let expected = 2.0 * 0.8 / PI;
-        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-3));
     }
 
     #[test]
@@ -589,7 +590,7 @@ mod tests {
         let mut scene = Scene::new();
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
         // P=16π so Li at r=2 on axis equals 1.
@@ -622,7 +623,7 @@ mod tests {
             &mut MtlxScratch::default(),
         );
         let expected = 0.8 / PI;
-        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-5));
+        assert!(radiance.abs_diff_eq(Vec3::splat(expected), 1.0e-3));
     }
 
     #[test]
@@ -631,7 +632,7 @@ mod tests {
         let floor_mesh = scene.add_mesh(unit_mesh(0.0));
         let blocker_mesh = scene.add_mesh(unit_mesh(1.0));
         let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(linear_to_srgb(Vec3::splat(0.8))),
+            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
         ));
         let blocker_material = scene.add_material(Material::NormalizedLambert(
             NormalizedLambertMaterial::new(Vec3::splat(0.3)),

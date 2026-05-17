@@ -3,8 +3,6 @@ use std::sync::Arc;
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use crate::color::srgb_to_linear;
-
 use super::{MaterialSample, ScalarTexture, ShadingVertex, Texture};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +73,7 @@ impl EmissiveMaterial {
                 )
             })
             .unwrap_or(Vec3::ONE);
-        Some(srgb_to_linear(self.color) * self.strength * texture_factor)
+        Some(self.color * self.strength * texture_factor)
     }
 
     pub fn may_emit(&self) -> bool {
@@ -88,7 +86,7 @@ impl EmissiveMaterial {
             .as_ref()
             .map(|texture| texture.max_value())
             .unwrap_or(1.0);
-        ((srgb_to_linear(self.color) * self.strength).max_element() * texture_factor).max(0.0)
+        ((self.color * self.strength).max_element() * texture_factor).max(0.0)
     }
 
     pub fn opacity_at_uv(&self, shading_vertex: &ShadingVertex) -> f32 {

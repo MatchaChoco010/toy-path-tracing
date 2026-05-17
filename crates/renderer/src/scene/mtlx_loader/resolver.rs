@@ -89,12 +89,12 @@ pub fn collect_input_types(use_node: &RawNodeUse) -> Vec<(String, MtlxType)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene_loader::mtlx_loader::library::load_standard_library;
-    use crate::scene_loader::mtlx_loader::types::{InputBinding, RawInput, RawNodeDef, RawOutput};
+    use crate::scene::mtlx_loader::library::load_standard_library;
+    use crate::scene::mtlx_loader::types::{InputBinding, RawInput, RawNodeDef, RawOutput};
     use std::path::PathBuf;
 
     fn lib_root() -> PathBuf {
-        crate::paths::workspace_path("lib/materialx/libraries")
+        crate::utils::workspace_path("lib/materialx/libraries")
     }
 
     #[test]

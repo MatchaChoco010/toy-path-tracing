@@ -4,16 +4,18 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{ConductorGgxMaterial, Material, MirrorMaterial, NormalizedLambertMaterial},
-    mesh::load_gltf,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_gltf,
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_19() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_19(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
     let normal_strength = 0.2;
 
@@ -32,6 +34,7 @@ pub fn create_scene_19() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         None,
         None,
         Some(normal_map_path),
+        _ocio,
     )?;
     metal_material.normal_strength = normal_strength;
     let metal = scene.add_material(Material::ConductorGgx(metal_material));
@@ -40,12 +43,17 @@ pub fn create_scene_19() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
         Vec3::new(0.56, 0.72, 0.92),
         None,
         Some(normal_map_path),
+        _ocio,
     )?;
     lambert_material.normal_strength = normal_strength;
     let lambert = scene.add_material(Material::NormalizedLambert(lambert_material));
 
-    let mut mirror_material =
-        MirrorMaterial::try_new_with_texture_path(Vec3::splat(0.92), None, Some(normal_map_path))?;
+    let mut mirror_material = MirrorMaterial::try_new_with_texture_path(
+        Vec3::splat(0.92),
+        None,
+        Some(normal_map_path),
+        _ocio,
+    )?;
     mirror_material.normal_strength = normal_strength;
     let mirror = scene.add_material(Material::Mirror(mirror_material));
 

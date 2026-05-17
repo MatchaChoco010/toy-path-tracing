@@ -2,8 +2,20 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 use std::fmt;
 
+pub mod camera;
+pub mod mesh;
+pub mod mtlx_loader;
+
+pub use camera::PinholeCamera;
+pub use mesh::{Bounds, LoadMeshError, Mesh, Vertex, load_gltf, load_obj, load_stl};
+pub(crate) use mesh::{
+    ObjVertexKey, append_obj_vertex, generate_vertex_normals, obj_error, parse_obj_face_corner,
+    parse_obj_float,
+};
+
 use crate::{
     bsdf::DirectionalAlbedoCache,
+    color::{ColorSpaceRef, OcioColorPipeline},
     light::{
         DirectionalLight, DirectionalLightIndex, EnvironmentLight, LightSampler, PointLight,
         PointLightIndex, SpotLight, SpotLightIndex,
@@ -13,10 +25,9 @@ use crate::{
     math::{
         OrthonormalBasis, compute_surface_partials, difference_of_products, face_forward,
         interpolate_vec2, interpolate_vec3,
+        ray::{Ray, intersect_triangle},
     },
-    mesh::{Bounds, Mesh},
     qbvh::{Qbvh, build_qbvh, traverse_qbvh},
-    ray::{Ray, intersect_triangle},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,6 +122,15 @@ struct MeshHit {
 impl Scene {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn prepare_color(&mut self, ocio: &OcioColorPipeline) -> crate::color::Result<()> {
+        let texture_to_rendering =
+            ocio.color_space_processor(ColorSpaceRef::Texture, ColorSpaceRef::Rendering)?;
+        for material in &mut self.materials {
+            material.convert_constant_colors_to_rendering(&texture_to_rendering)?;
+        }
+        Ok(())
     }
 
     pub fn add_mesh(&mut self, mesh: Mesh) -> MeshIndex {
@@ -877,17 +897,14 @@ mod tests {
 
     use glam::{Mat4, Vec2, Vec3};
 
-    use super::{
-        AreaLightTriangle, ClosestHitError, InstanceIndex, MaterialIndex, Scene, SceneHit,
-        TriangleRef,
-    };
+    use super::{ClosestHitError, InstanceIndex, MaterialIndex, Scene, SceneHit, TriangleRef};
     use crate::{
         material::mtlx::{ClosureNode, CompiledMaterial},
         material::{
             EmissiveMaterial, Material, MtlxMaterial, NormalMap, NormalizedLambertMaterial, Texture,
         },
-        mesh::{Mesh, Vertex},
-        ray::{Ray, RayCone, RayDifferential},
+        math::ray::{Ray, RayCone, RayDifferential},
+        scene::{Mesh, Vertex},
     };
 
     fn unit_mesh(z: f32) -> Mesh {
@@ -962,6 +979,7 @@ mod tests {
             instructions: Vec::new(),
             operand_pool: Vec::new(),
             value_pool: Vec::new(),
+            color_processors: Vec::new(),
             opacity_instructions: Vec::new(),
             opacity_operand_pool: Vec::new(),
             opacity_closure_nodes: Vec::new(),
@@ -1401,19 +1419,19 @@ mod tests {
 
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
 
+        assert_eq!(scene.area_light_triangles.len(), 1);
+        let light = scene.area_light_triangles[0];
         assert_eq!(
-            scene.area_light_triangles,
-            vec![AreaLightTriangle {
-                triangle: TriangleRef {
-                    instance_index: InstanceIndex(0),
-                    triangle_index: 0,
-                },
-                area: 0.5,
-                weight: 6.0,
-                prefix_weight: 6.0,
-            }]
+            light.triangle,
+            TriangleRef {
+                instance_index: InstanceIndex(0),
+                triangle_index: 0,
+            }
         );
-        assert_eq!(scene.area_light_weight_sum, 6.0);
+        assert!((light.area - 0.5).abs() < 1.0e-6);
+        assert!((light.weight - 6.0).abs() < 1.0e-3);
+        assert!((light.prefix_weight - 6.0).abs() < 1.0e-3);
+        assert!((scene.area_light_weight_sum - 6.0).abs() < 1.0e-3);
     }
 
     #[test]

@@ -9,7 +9,6 @@ use crate::{
         DielectricGgxEnergyCompensationLut, OpenPbrBsdf, OpenPbrBsdfParams,
         artist_friendly_complex_ior,
     },
-    color::srgb_to_linear,
     math::{OrthonormalBasis, fresnel_dielectric, sg},
 };
 
@@ -367,7 +366,7 @@ impl OpenPbrMaterial {
             })
             .unwrap_or(Vec3::ONE);
         Some(
-            srgb_to_linear(self.emission_color)
+            self.emission_color
                 * texture_factor
                 * self.emission_luminance.max(0.0)
                 * self.emission_exit_tint(shading_vertex),
@@ -387,10 +386,7 @@ impl OpenPbrMaterial {
             .as_ref()
             .map(|t| t.max_value())
             .unwrap_or(1.0);
-        (srgb_to_linear(self.emission_color).max_element()
-            * self.emission_luminance
-            * texture_factor)
-            .max(0.0)
+        (self.emission_color.max_element() * self.emission_luminance * texture_factor).max(0.0)
     }
 
     fn make_bsdf(&self, shading_vertex: &ShadingVertex) -> OpenPbrBsdf {
@@ -414,16 +410,15 @@ impl OpenPbrMaterial {
         let transmission_abbe = self.transmission_dispersion_abbe();
 
         let coat_weight = self.coat_weight.clamp(0.0, 1.0);
-        let coat_color = srgb_to_linear(self.coat_color).clamp(Vec3::ZERO, Vec3::ONE);
+        let coat_color = self.coat_color.clamp(Vec3::ZERO, Vec3::ONE);
         let darkening = self.coat_darkening_factor(base_color, shading_vertex);
-        let specular_color = srgb_to_linear(self.specular_color).clamp(Vec3::ZERO, Vec3::ONE);
-        let transmission_color =
-            srgb_to_linear(self.transmission_color).clamp(Vec3::ZERO, Vec3::ONE);
+        let specular_color = self.specular_color.clamp(Vec3::ZERO, Vec3::ONE);
+        let transmission_color = self.transmission_color.clamp(Vec3::ZERO, Vec3::ONE);
         let specular_eta = modulated_eta_from_specular_weight(
             self.specular_ior.max(1.0e-4),
             self.specular_weight.max(0.0),
         );
-        let subsurface_color = srgb_to_linear(self.subsurface_color).clamp(Vec3::ZERO, Vec3::ONE);
+        let subsurface_color = self.subsurface_color.clamp(Vec3::ZERO, Vec3::ONE);
         let (metal_n, metal_k) = artist_friendly_complex_ior(
             base_color.clamp(Vec3::ZERO, Vec3::ONE),
             specular_color.clamp(Vec3::ZERO, Vec3::ONE),
@@ -448,7 +443,7 @@ impl OpenPbrMaterial {
             coat_alpha_y,
             coat_eta: self.coat_ior.max(1.0e-4),
             fuzz: fuzz_weight,
-            fuzz_color: srgb_to_linear(self.fuzz_color).clamp(Vec3::ZERO, Vec3::ONE),
+            fuzz_color: self.fuzz_color.clamp(Vec3::ZERO, Vec3::ONE),
             fuzz_roughness,
             transmission: self.transmission_weight.clamp(0.0, 1.0),
             transmission_color,
@@ -611,7 +606,7 @@ impl OpenPbrMaterial {
                 .max(0.0)
                 .sqrt()
                 .max(1.0e-4);
-            let coat_color = srgb_to_linear(self.coat_color).clamp(Vec3::ZERO, Vec3::ONE);
+            let coat_color = self.coat_color.clamp(Vec3::ZERO, Vec3::ONE);
             let coat_transmittance = vec3_powf(coat_color, 1.0 / mu_t);
             tint *= lerp_vec3(Vec3::ONE, coat_transmittance, coat_weight);
         }
@@ -656,7 +651,7 @@ impl OpenPbrMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.base_color)
+        self.base_color
             * self
                 .base_color_texture
                 .as_ref()
@@ -761,7 +756,7 @@ impl OpenPbrMaterial {
         if fuzz_weight <= 0.0 {
             return roughness;
         }
-        let fuzz_color = srgb_to_linear(self.fuzz_color).clamp(Vec3::ZERO, Vec3::ONE);
+        let fuzz_color = self.fuzz_color.clamp(Vec3::ZERO, Vec3::ONE);
         let e_fuzz = zeltner_dir_albedo(1.0, fuzz_roughness);
         let r_f = sg::luminance(fuzz_color * e_fuzz).clamp(0.0, 1.0);
         let roughened = (roughness.powi(4) + 2.0 * r_f.powi(4)).min(1.0).powf(0.25);
@@ -826,7 +821,7 @@ impl OpenPbrMaterial {
         let rb = lerp(rd, r_spec, self.base_metalness_at(shading_vertex));
         let k = lerp(ks, kr, rb).clamp(0.0, 1.0);
         let base_weighted = base_color * self.base_weight.clamp(0.0, 1.0);
-        let subsurface = srgb_to_linear(self.subsurface_color).clamp(Vec3::ZERO, Vec3::ONE);
+        let subsurface = self.subsurface_color.clamp(Vec3::ZERO, Vec3::ONE);
         let e_dielec = lerp_vec3(
             lerp_vec3(
                 base_weighted,
@@ -839,7 +834,7 @@ impl OpenPbrMaterial {
         let e_metal = (base_weighted * self.specular_weight.max(0.0)).clamp(Vec3::ZERO, Vec3::ONE);
         let e_base = lerp_vec3(e_dielec, e_metal, self.base_metalness_at(shading_vertex))
             .clamp(Vec3::ZERO, Vec3::ONE);
-        let coat_color = srgb_to_linear(self.coat_color).clamp(Vec3::ZERO, Vec3::ONE);
+        let coat_color = self.coat_color.clamp(Vec3::ZERO, Vec3::ONE);
         let denom = (Vec3::ONE - e_base * (k * coat_color)).max(Vec3::splat(1.0e-4));
         let delta_factor = Vec3::splat((1.0 - k).max(0.0)) / denom;
         lerp_vec3(Vec3::ONE, delta_factor, coat_weight * delta).clamp(Vec3::ZERO, Vec3::ONE)

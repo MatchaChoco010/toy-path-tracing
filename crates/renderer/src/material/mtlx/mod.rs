@@ -7,7 +7,7 @@ mod spec_tests;
 
 use std::cell::Cell;
 
-pub use compile::compile;
+pub use compile::{compile, compile_with_ocio};
 pub use compiled::{
     AddressMode, ArithOp, ArtisticIorOutput, BlendOp, ClosureKind, ClosureNode, CombineKind,
     CompareOp, CompiledMaterial, GeomSpace, GeometricKind, ImageKind, ImageTexture, Instruction,

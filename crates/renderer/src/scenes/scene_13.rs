@@ -4,15 +4,17 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{Material, NormalizedLambertMaterial},
-    mesh::load_gltf,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_gltf,
     scenes::{game_rotation_degrees, uniform_scale_for_height},
 };
 
-pub fn create_scene_13() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_13(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     create_sky_bunny_scene("assets/sky/brown_photostudio_02_4k.hdr", 1.0)
 }
 

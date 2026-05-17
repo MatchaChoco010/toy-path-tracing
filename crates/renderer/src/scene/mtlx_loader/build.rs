@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use super::flatten::{FlatGraph, FlatInput, FlatNodeKind};
 use super::types::{MtlxType, MtlxValue};
-use super::{MtlxLibrary, flatten_material, parse_document};
-use crate::color::management;
+use super::{MtlxLibrary, flatten_material_with_ocio, parse_document};
+use crate::color::{self, OcioColorPipeline};
 use crate::material::mtlx::compiled::{UdimTile, UdimTiles};
 use crate::material::{MtlxMaterial, ScalarTexture, Texture, TextureColorSpace};
 
@@ -32,6 +32,7 @@ pub fn load_mtlx_material(
     library: &MtlxLibrary,
     mtlx_path: &Path,
     material_name: &str,
+    ocio: &OcioColorPipeline,
 ) -> Result<MtlxMaterial, LoadError> {
     let document = parse_document(mtlx_path).map_err(|e| LoadError::Parse(format!("{}", e)))?;
     // The document may declare custom nodedefs (e.g. shader_ops.mtlx
@@ -57,10 +58,11 @@ pub fn load_mtlx_material(
         });
     }
     merged.add_document(document.clone());
-    let graph = flatten_material(&merged, &document, material_name)
+    let graph = flatten_material_with_ocio(&merged, &document, material_name, ocio)
         .map_err(|e| LoadError::Flatten(format!("{}", e)))?;
-    let (textures, alpha_textures, mut udim_textures) = collect_color_textures(&graph, mtlx_path);
-    let (scalar_textures, scalar_udim_textures) = collect_scalar_textures(&graph, mtlx_path);
+    let (textures, alpha_textures, mut udim_textures) =
+        collect_color_textures(&graph, mtlx_path, ocio);
+    let (scalar_textures, scalar_udim_textures) = collect_scalar_textures(&graph, mtlx_path, ocio);
     merge_udim_tile_sets(&mut udim_textures, scalar_udim_textures);
     let arc_color: HashMap<Arc<str>, Arc<Texture>> = textures
         .into_iter()
@@ -78,8 +80,9 @@ pub fn load_mtlx_material(
         .into_iter()
         .map(|(k, v)| (Arc::from(k.as_str()), v))
         .collect();
-    let compiled = crate::material::mtlx::compile(
+    let compiled = crate::material::mtlx::compile_with_ocio(
         &graph,
+        ocio,
         arc_color.clone(),
         arc_alpha.clone(),
         arc_udim.clone(),
@@ -92,8 +95,15 @@ pub fn load_mtlx_material(
         back_graph.root = back_root;
         back_graph.back_root = None;
         Some(
-            crate::material::mtlx::compile(&back_graph, arc_color, arc_alpha, arc_udim, arc_scalar)
-                .map_err(|e| LoadError::Material(format!("{}", e)))?,
+            crate::material::mtlx::compile_with_ocio(
+                &back_graph,
+                ocio,
+                arc_color,
+                arc_alpha,
+                arc_udim,
+                arc_scalar,
+            )
+            .map_err(|e| LoadError::Material(format!("{}", e)))?,
         )
     } else {
         None
@@ -147,7 +157,7 @@ fn pick_color_space(output_type: &MtlxType, colorspace: Option<&str>) -> Texture
             None => TextureColorSpace::DefaultColor,
             Some("none") | Some("linear") | Some("scene_linear") => TextureColorSpace::Linear,
             Some(other) => {
-                TextureColorSpace::ocio(management::map_materialx_color_space(other).to_string())
+                TextureColorSpace::ocio(color::map_materialx_color_space(other).to_string())
             }
         },
         _ => TextureColorSpace::Linear,
@@ -160,7 +170,11 @@ type ColorTextureCollection = (
     HashMap<String, Arc<UdimTiles>>,
 );
 
-fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCollection {
+fn collect_color_textures(
+    graph: &FlatGraph,
+    mtlx_path: &Path,
+    ocio: &OcioColorPipeline,
+) -> ColorTextureCollection {
     let parent = mtlx_path.parent().unwrap_or_else(|| Path::new("."));
     let mut out: HashMap<String, Arc<Texture>> = HashMap::new();
     let mut alpha_out: HashMap<String, Arc<ScalarTexture>> = HashMap::new();
@@ -188,7 +202,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
         if filename.contains("<UDIM>") || filename.contains("<UVTILE>") {
             if udim_out.contains_key(filename) {
                 if wants_alpha {
-                    match load_udim_tiles(parent, filename, space.clone(), true) {
+                    match load_udim_tiles(parent, filename, space.clone(), true, ocio) {
                         Ok(tiles) if !tiles.tiles.is_empty() => {
                             merge_udim_tile_sets(
                                 &mut udim_out,
@@ -207,7 +221,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                 }
                 continue;
             }
-            match load_udim_tiles(parent, filename, space.clone(), wants_alpha) {
+            match load_udim_tiles(parent, filename, space.clone(), wants_alpha, ocio) {
                 Ok(tiles) if !tiles.tiles.is_empty() => {
                     udim_out.insert(filename.clone(), Arc::new(tiles));
                 }
@@ -231,7 +245,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
         if out.contains_key(filename) {
             if wants_alpha && !alpha_out.contains_key(filename) {
                 let resolved = resolve_path(parent, filename);
-                match Texture::from_file_with_alpha(&resolved, space.clone()) {
+                match Texture::from_file_with_alpha(&resolved, space.clone(), ocio) {
                     Ok((tex, alpha)) => {
                         out.insert(filename.clone(), Arc::new(tex));
                         if let Some(a) = alpha {
@@ -253,7 +267,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
 
         let resolved = resolve_path(parent, filename);
         if wants_alpha {
-            match Texture::from_file_with_alpha(&resolved, space.clone()) {
+            match Texture::from_file_with_alpha(&resolved, space.clone(), ocio) {
                 Ok((tex, alpha)) => {
                     out.insert(filename.clone(), Arc::new(tex));
                     if let Some(a) = alpha {
@@ -270,7 +284,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                 }
             }
         } else {
-            match Texture::from_file_with_color_space(&resolved, space.clone()) {
+            match Texture::from_file_with_color_space(&resolved, space.clone(), ocio) {
                 Ok(tex) => {
                     out.insert(filename.clone(), Arc::new(tex));
                 }
@@ -298,6 +312,7 @@ fn load_udim_tiles(
     pattern: &str,
     space: TextureColorSpace,
     wants_alpha: bool,
+    ocio: &OcioColorPipeline,
 ) -> std::io::Result<UdimTiles> {
     let mut tiles: HashMap<u32, UdimTile> = HashMap::new();
     // Iterate the entries of the directory the file lives in once and try
@@ -324,7 +339,7 @@ fn load_udim_tiles(
         };
         let path = entry.path();
         if wants_alpha {
-            match Texture::from_file_with_alpha(&path, space.clone()) {
+            match Texture::from_file_with_alpha(&path, space.clone(), ocio) {
                 Ok((tex, alpha)) => {
                     tiles.insert(
                         udim_id,
@@ -345,7 +360,7 @@ fn load_udim_tiles(
                 }
             }
         } else {
-            match Texture::from_file_with_color_space(&path, space.clone()) {
+            match Texture::from_file_with_color_space(&path, space.clone(), ocio) {
                 Ok(tex) => {
                     tiles.insert(
                         udim_id,
@@ -428,7 +443,11 @@ type ScalarTextureCollection = (
     HashMap<String, Arc<UdimTiles>>,
 );
 
-fn collect_scalar_textures(graph: &FlatGraph, mtlx_path: &Path) -> ScalarTextureCollection {
+fn collect_scalar_textures(
+    graph: &FlatGraph,
+    mtlx_path: &Path,
+    ocio: &OcioColorPipeline,
+) -> ScalarTextureCollection {
     let parent = mtlx_path.parent().unwrap_or_else(|| Path::new("."));
     let mut out: HashMap<String, Arc<ScalarTexture>> = HashMap::new();
     let mut udim_out: HashMap<String, Arc<UdimTiles>> = HashMap::new();
@@ -450,7 +469,7 @@ fn collect_scalar_textures(graph: &FlatGraph, mtlx_path: &Path) -> ScalarTexture
             if udim_out.contains_key(filename) {
                 continue;
             }
-            match load_scalar_udim_tiles(parent, filename) {
+            match load_scalar_udim_tiles(parent, filename, ocio) {
                 Ok(tiles) if !tiles.tiles.is_empty() => {
                     udim_out.insert(filename.clone(), Arc::new(tiles));
                 }
@@ -491,7 +510,11 @@ fn collect_scalar_textures(graph: &FlatGraph, mtlx_path: &Path) -> ScalarTexture
     (out, udim_out)
 }
 
-fn load_scalar_udim_tiles(parent: &Path, pattern: &str) -> std::io::Result<UdimTiles> {
+fn load_scalar_udim_tiles(
+    parent: &Path,
+    pattern: &str,
+    ocio: &OcioColorPipeline,
+) -> std::io::Result<UdimTiles> {
     let mut tiles: HashMap<u32, UdimTile> = HashMap::new();
     let probe_path = resolve_path(
         parent,
@@ -514,7 +537,7 @@ fn load_scalar_udim_tiles(parent: &Path, pattern: &str) -> std::io::Result<UdimT
         };
         let path = entry.path();
         match (
-            Texture::from_file_with_color_space(&path, TextureColorSpace::Linear),
+            Texture::from_file_with_color_space(&path, TextureColorSpace::Linear, ocio),
             ScalarTexture::from_file(&path),
         ) {
             (Ok(rgb), Ok(scalar)) => {
@@ -585,10 +608,10 @@ fn is_scalar_image(node: &super::flatten::FlatNode) -> bool {
 #[cfg(test)]
 mod udim_tests {
     use super::{collect_color_textures, match_udim_pattern, pick_color_space};
-    use crate::scene_loader::mtlx_loader::flatten::{
+    use crate::scene::mtlx_loader::flatten::{
         FlatGraph, FlatInput, FlatNode, FlatNodeInput, FlatNodeKind,
     };
-    use crate::scene_loader::mtlx_loader::types::{MtlxType, MtlxValue};
+    use crate::scene::mtlx_loader::types::{MtlxType, MtlxValue};
 
     #[test]
     fn matches_udim_4digit_mari_style() {
@@ -661,7 +684,13 @@ mod udim_tests {
             material_name: "test".to_string(),
         };
         let mtlx_path = dir.join("mat.mtlx");
-        let (_rgb, alpha, _udim) = collect_color_textures(&graph, &mtlx_path);
+        let ocio = crate::color::OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
+        let (_rgb, alpha, _udim) = collect_color_textures(&graph, &mtlx_path, &ocio);
         assert!(alpha.contains_key("shared.png"));
     }
 

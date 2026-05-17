@@ -400,13 +400,20 @@ mod tests {
 
     fn load_shader_ops_thin_walled() -> MtlxMaterial {
         use crate::bsdf::DirectionalAlbedoCache;
-        use crate::scene_loader::mtlx_loader::{load_mtlx_material, load_standard_library};
+        use crate::scene::mtlx_loader::{load_mtlx_material, load_standard_library};
         let lib = load_standard_library(Path::new("lib/materialx/libraries"))
             .expect("standard library should load");
+        let ocio = crate::color::OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
         let mut material = load_mtlx_material(
             &lib,
             Path::new("assets/mtlx/shader_ops.mtlx"),
             "material_checker_opacity",
+            &ocio,
         )
         .expect("shader_ops material should load");
         let mut cache = DirectionalAlbedoCache::default();
@@ -428,6 +435,7 @@ mod tests {
             instructions: vec![],
             operand_pool: vec![],
             value_pool: vec![],
+            color_processors: Vec::new(),
             opacity_instructions: Vec::new(),
             opacity_operand_pool: Vec::new(),
             opacity_closure_nodes: Vec::new(),
@@ -456,6 +464,7 @@ mod tests {
             instructions: vec![],
             operand_pool: vec![],
             value_pool: vec![],
+            color_processors: Vec::new(),
             opacity_instructions: Vec::new(),
             opacity_operand_pool: Vec::new(),
             opacity_closure_nodes: Vec::new(),

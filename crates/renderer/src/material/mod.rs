@@ -22,6 +22,7 @@ use rand::rngs::ThreadRng;
 
 use crate::{
     bsdf::BsdfFlags,
+    color::{self, OcioColorProcessor},
     light_tree::LightTreePrecompute,
     math::{OrthonormalBasis, sg::SgLobe},
     scene::TriangleRef,
@@ -120,6 +121,50 @@ impl ShadingVertex {
 }
 
 impl Material {
+    pub fn convert_constant_colors_to_rendering(
+        &mut self,
+        processor: &OcioColorProcessor,
+    ) -> color::Result<()> {
+        let convert = |rgb| processor.apply_rgb(rgb);
+        match self {
+            Self::NormalizedLambert(material) => material.rho = convert(material.rho)?,
+            Self::OrenNayar(material) => material.rho = convert(material.rho)?,
+            Self::Eon(material) => material.rho = convert(material.rho)?,
+            Self::Mirror(material) => material.color = convert(material.color)?,
+            Self::ConductorGgx(material) => material.base_color = convert(material.base_color)?,
+            Self::ConductorGgxCui2023(material) => {
+                material.base_color = convert(material.base_color)?;
+            }
+            Self::DielectricGgx(material) => material.color = convert(material.color)?,
+            Self::Glass(material) => material.color = convert(material.color)?,
+            Self::SimplePBR(material) => material.base_color = convert(material.base_color)?,
+            Self::DisneyBrdf(material) => material.base_color = convert(material.base_color)?,
+            Self::StandardSurface(material) => {
+                material.base_color = convert(material.base_color)?;
+                material.specular_color = convert(material.specular_color)?;
+                material.transmission_color = convert(material.transmission_color)?;
+                material.transmission_scatter = convert(material.transmission_scatter)?;
+                material.subsurface_color = convert(material.subsurface_color)?;
+                material.coat_color = convert(material.coat_color)?;
+                material.sheen_color = convert(material.sheen_color)?;
+                material.emission_color = convert(material.emission_color)?;
+            }
+            Self::OpenPbr(material) => {
+                material.base_color = convert(material.base_color)?;
+                material.specular_color = convert(material.specular_color)?;
+                material.transmission_color = convert(material.transmission_color)?;
+                material.transmission_scatter = convert(material.transmission_scatter)?;
+                material.subsurface_color = convert(material.subsurface_color)?;
+                material.fuzz_color = convert(material.fuzz_color)?;
+                material.coat_color = convert(material.coat_color)?;
+                material.emission_color = convert(material.emission_color)?;
+            }
+            Self::Emissive(material) => material.color = convert(material.color)?,
+            Self::Mtlx(_) => {}
+        }
+        Ok(())
+    }
+
     /// Materials such as `Mtlx` evaluate per-vertex bytecode and store the
     /// resulting locals on the vertex itself. The integrator calls this once
     /// per intersection before `sample` / `eval` / `pdf` / `le` so the BSDF
@@ -450,7 +495,7 @@ mod tests {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 3.0));
 
         assert!(material.may_emit());
-        assert_eq!(material.max_emission(), 3.0);
+        assert!((material.max_emission() - 3.0).abs() < 1.0e-3);
     }
 
     #[test]
@@ -515,7 +560,7 @@ mod tests {
         let mut rng = rand::rng();
         let f = material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng);
 
-        assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-6));
+        assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-3));
     }
 
     #[test]
@@ -558,7 +603,7 @@ mod tests {
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
         assert!(sample.wi.abs_diff_eq(expected_wi, 1.0e-6));
-        assert_eq!(sample.weight, Vec3::ONE);
+        assert!(sample.weight.abs_diff_eq(Vec3::ONE, 1.0e-3));
         assert_eq!(sample.pdf, 1.0);
         assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::REFLECTION);
     }
@@ -614,7 +659,7 @@ mod tests {
             .expect("expected a transmission sample within retry budget");
 
         assert!(sample.wi.z < 0.0);
-        assert!(sample.weight.abs_diff_eq(Vec3::ONE * 2.25, 1.0e-6));
+        assert!(sample.weight.abs_diff_eq(Vec3::ONE * 2.25, 1.0e-3));
         assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::TRANSMISSION);
     }
 

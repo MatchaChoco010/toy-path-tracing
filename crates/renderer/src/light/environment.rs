@@ -86,7 +86,7 @@ impl EnvironmentLight {
         scale: f32,
         rotate_y: f32,
     ) -> image::ImageResult<Self> {
-        let dynamic = image::open(crate::paths::workspace_path(path))?;
+        let dynamic = image::open(crate::utils::workspace_path(path))?;
         let rgb32f = dynamic.into_rgb32f();
         let width = rgb32f.width() as usize;
         let height = rgb32f.height() as usize;

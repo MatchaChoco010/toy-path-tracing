@@ -9,14 +9,14 @@ use glam::{Vec2, Vec3, Vec4};
 use crate::material::pattern::noise::{cellnoise2d, hsv_to_rgb};
 use crate::material::{ScalarTexture, ShadingVertex, Texture};
 use crate::math::OrthonormalBasis;
-use crate::scene::{InstanceIndex, TriangleRef};
-use crate::scene_loader::mtlx_loader::flatten::{
+use crate::scene::mtlx_loader::flatten::{
     FlatGraph, FlatInput, FlatNode, FlatNodeInput, FlatNodeKind,
     GeometricKind as FlatGeometricKind, flatten_material,
 };
-use crate::scene_loader::mtlx_loader::library::load_standard_library;
-use crate::scene_loader::mtlx_loader::parser::parse_str;
-use crate::scene_loader::mtlx_loader::types::{MtlxType, MtlxValue};
+use crate::scene::mtlx_loader::library::load_standard_library;
+use crate::scene::mtlx_loader::parser::parse_str;
+use crate::scene::mtlx_loader::types::{MtlxType, MtlxValue};
+use crate::scene::{InstanceIndex, TriangleRef};
 
 use super::MtlxScratch;
 use super::compiled::{
@@ -61,7 +61,7 @@ fn dummy_sv() -> ShadingVertex {
 }
 
 fn lib_root() -> PathBuf {
-    crate::paths::workspace_path("lib/materialx/libraries")
+    crate::utils::workspace_path("lib/materialx/libraries")
 }
 
 fn run(
@@ -91,6 +91,7 @@ fn run_with_sv(
         instructions,
         operand_pool,
         value_pool,
+        color_processors: Vec::new(),
         opacity_instructions: Vec::new(),
         opacity_operand_pool: Vec::new(),
         opacity_closure_nodes: Vec::new(),
@@ -5513,6 +5514,7 @@ fn spec_closure_ifequal_uses_exact_mdl_equality() {
         instructions: Vec::new(),
         operand_pool: Vec::new(),
         value_pool: Vec::new(),
+        color_processors: Vec::new(),
         opacity_instructions: Vec::new(),
         opacity_operand_pool: Vec::new(),
         opacity_closure_nodes: Vec::new(),
@@ -7115,6 +7117,7 @@ fn spec_add_bsdf_matches_mdl_equal_mix() {
         instructions: vec![],
         operand_pool: vec![],
         value_pool: vec![],
+        color_processors: Vec::new(),
         opacity_instructions: Vec::new(),
         opacity_operand_pool: Vec::new(),
         opacity_closure_nodes: Vec::new(),
@@ -7164,6 +7167,7 @@ fn spec_add_edf_matches_mdl_unbounded_shape_and_intensity_add() {
         instructions: vec![],
         operand_pool: vec![],
         value_pool: vec![],
+        color_processors: Vec::new(),
         opacity_instructions: Vec::new(),
         opacity_operand_pool: Vec::new(),
         opacity_closure_nodes: Vec::new(),
@@ -7289,6 +7293,7 @@ fn spec_mix_bsdf_clamps_mix_like_mdl() {
         instructions: vec![],
         operand_pool: vec![],
         value_pool: vec![],
+        color_processors: Vec::new(),
         opacity_instructions: Vec::new(),
         opacity_operand_pool: Vec::new(),
         opacity_closure_nodes: Vec::new(),

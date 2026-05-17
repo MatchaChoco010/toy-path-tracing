@@ -5,14 +5,16 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{EmissiveMaterial, Material, StandardSurfaceMaterial},
-    mesh::load_obj,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_obj,
 };
 
-pub fn create_scene_30() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_30(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor = load_obj(Path::new("assets/mori-knob/floor.obj"))?;

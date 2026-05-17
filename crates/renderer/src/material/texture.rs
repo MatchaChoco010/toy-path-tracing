@@ -6,10 +6,7 @@ use std::{
 
 use glam::{Vec2, Vec3};
 
-use crate::color::{
-    management::{self, DEFAULT_TEXTURE_COLOR_SPACE},
-    srgb_to_linear,
-};
+use crate::color::{self, ColorSpaceRef, OcioColorPipeline};
 
 /// Pixel types that a [`Texture`] can hold.
 ///
@@ -330,22 +327,33 @@ impl<P: TexturePixel> Texture<P> {
 
 impl Texture<Vec3> {
     pub fn from_file(path: impl AsRef<Path>) -> image::ImageResult<Self> {
-        Self::from_file_with_color_space(path, TextureColorSpace::Linear)
+        let image = image::open(crate::utils::workspace_path(path))?.into_rgba32f();
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+        let pixels = image
+            .pixels()
+            .map(|pixel| Vec3::new(pixel[0], pixel[1], pixel[2]))
+            .collect();
+        Ok(Self::from_pixels(width, height, pixels))
     }
 
-    pub fn from_srgb_file(path: impl AsRef<Path>) -> image::ImageResult<Self> {
-        Self::from_file_with_color_space(path, TextureColorSpace::Srgb)
+    pub fn from_srgb_file(
+        path: impl AsRef<Path>,
+        ocio: &OcioColorPipeline,
+    ) -> image::ImageResult<Self> {
+        Self::from_file_with_color_space(path, TextureColorSpace::Srgb, ocio)
     }
 
     pub fn from_file_with_color_space(
         path: impl AsRef<Path>,
         color_space: TextureColorSpace,
+        ocio: &OcioColorPipeline,
     ) -> image::ImageResult<Self> {
-        let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
+        let image = image::open(crate::utils::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let mut packed = packed_rgba_pixels(&image);
-        decode_rgba_pixels(&mut packed, width, height, &color_space)?;
+        decode_rgba_pixels(&mut packed, width, height, &color_space, ocio)?;
         let pixels = packed
             .chunks_exact(4)
             .map(|pixel| Vec3::new(pixel[0], pixel[1], pixel[2]))
@@ -361,12 +369,13 @@ impl Texture<Vec3> {
     pub fn from_file_with_alpha(
         path: impl AsRef<Path>,
         color_space: TextureColorSpace,
+        ocio: &OcioColorPipeline,
     ) -> image::ImageResult<(Self, Option<ScalarTexture>)> {
-        let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
+        let image = image::open(crate::utils::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let mut packed = packed_rgba_pixels(&image);
-        decode_rgba_pixels(&mut packed, width, height, &color_space)?;
+        decode_rgba_pixels(&mut packed, width, height, &color_space, ocio)?;
         let mut rgb_pixels = Vec::with_capacity(width * height);
         let mut alpha_pixels: Vec<f32> = Vec::with_capacity(width * height);
         let mut has_nontrivial_alpha = false;
@@ -413,7 +422,7 @@ impl Texture<f32> {
     /// image (after sRGB decoding has been skipped — scalar maps are always
     /// linear).
     pub fn from_file(path: impl AsRef<Path>) -> image::ImageResult<Self> {
-        let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
+        let image = image::open(crate::utils::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let pixels = image.pixels().map(|pixel| pixel[0]).collect();
@@ -466,8 +475,9 @@ fn pixel_wrapped_in_level<P: TexturePixel>(level: &TextureLevel<P>, x: isize, y:
 pub(super) fn load_optional_color_texture(
     path: Option<&Path>,
     color_space: TextureColorSpace,
+    ocio: &OcioColorPipeline,
 ) -> image::ImageResult<Option<Arc<Texture<Vec3>>>> {
-    path.map(|path| Texture::from_file_with_color_space(path, color_space).map(Arc::new))
+    path.map(|path| Texture::from_file_with_color_space(path, color_space, ocio).map(Arc::new))
         .transpose()
 }
 
@@ -480,17 +490,26 @@ pub(super) fn load_optional_scalar_texture(
 
 #[cfg(test)]
 fn decode_color_space(rgb: Vec3, color_space: TextureColorSpace) -> Vec3 {
+    let ocio = OcioColorPipeline::new(
+        crate::color::DEFAULT_OCIO_CONFIG,
+        Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+        crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+    )
+    .expect("default OCIO config");
     match color_space {
         TextureColorSpace::Linear => rgb,
-        TextureColorSpace::Srgb => srgb_to_linear(rgb),
-        TextureColorSpace::DefaultColor | TextureColorSpace::Ocio(_) => {
-            if let Some(context) = management::current() {
-                let src = color_space.source_color_space(context.texture_color_space());
-                context.transform_rgb(rgb, src).unwrap_or(rgb)
-            } else {
-                srgb_to_linear(rgb)
-            }
-        }
+        TextureColorSpace::Srgb => ocio
+            .transform_rgb(rgb, ColorSpaceRef::Texture, ColorSpaceRef::Rendering)
+            .unwrap_or(rgb),
+        TextureColorSpace::DefaultColor | TextureColorSpace::Ocio(_) => ocio
+            .transform_rgb(
+                rgb,
+                ColorSpaceRef::Ocio(
+                    color_space.source_color_space(crate::color::DEFAULT_TEXTURE_COLOR_SPACE),
+                ),
+                ColorSpaceRef::Rendering,
+            )
+            .unwrap_or(rgb),
     }
 }
 
@@ -507,76 +526,37 @@ fn decode_rgba_pixels(
     width: usize,
     height: usize,
     color_space: &TextureColorSpace,
+    ocio: &OcioColorPipeline,
 ) -> image::ImageResult<()> {
     match color_space {
         TextureColorSpace::Linear => Ok(()),
-        TextureColorSpace::Srgb => {
-            if let Some(context) = management::current() {
-                context
-                    .transform_rgba_pixels_to_rendering(
-                        pixels,
-                        width,
-                        height,
-                        DEFAULT_TEXTURE_COLOR_SPACE,
-                    )
-                    .map_err(management::image_error)
-            } else {
-                for pixel in pixels.chunks_exact_mut(4) {
-                    let rgb = srgb_to_linear(Vec3::new(pixel[0], pixel[1], pixel[2]));
-                    pixel[0] = rgb.x;
-                    pixel[1] = rgb.y;
-                    pixel[2] = rgb.z;
-                }
-                Ok(())
-            }
-        }
-        TextureColorSpace::DefaultColor => {
-            if let Some(context) = management::current() {
-                context
-                    .transform_rgba_pixels_to_rendering(
-                        pixels,
-                        width,
-                        height,
-                        context.texture_color_space(),
-                    )
-                    .map_err(management::image_error)
-            } else {
-                for pixel in pixels.chunks_exact_mut(4) {
-                    let rgb = srgb_to_linear(Vec3::new(pixel[0], pixel[1], pixel[2]));
-                    pixel[0] = rgb.x;
-                    pixel[1] = rgb.y;
-                    pixel[2] = rgb.z;
-                }
-                Ok(())
-            }
-        }
-        TextureColorSpace::Ocio(name) => {
-            if let Some(context) = management::current() {
-                context
-                    .transform_rgba_pixels_to_rendering(pixels, width, height, name)
-                    .map_err(management::image_error)
-            } else {
-                decode_known_color_space_without_ocio(pixels, name)
-            }
-        }
-    }
-}
-
-fn decode_known_color_space_without_ocio(pixels: &mut [f32], name: &str) -> image::ImageResult<()> {
-    match name {
-        DEFAULT_TEXTURE_COLOR_SPACE | "srgb_texture" | "srgb" | "sRGB" => {
-            for pixel in pixels.chunks_exact_mut(4) {
-                let rgb = srgb_to_linear(Vec3::new(pixel[0], pixel[1], pixel[2]));
-                pixel[0] = rgb.x;
-                pixel[1] = rgb.y;
-                pixel[2] = rgb.z;
-            }
-            Ok(())
-        }
-        "linear" | "scene_linear" | "lin_rec709" | "ACEScg" => Ok(()),
-        other => Err(management::image_error(format!(
-            "OCIO context is not initialized; cannot transform texture color space `{other}`"
-        ))),
+        TextureColorSpace::Srgb => ocio
+            .transform_rgba_pixels(
+                pixels,
+                width,
+                height,
+                ColorSpaceRef::Texture,
+                ColorSpaceRef::Rendering,
+            )
+            .map_err(color::image_error),
+        TextureColorSpace::DefaultColor => ocio
+            .transform_rgba_pixels(
+                pixels,
+                width,
+                height,
+                ColorSpaceRef::Texture,
+                ColorSpaceRef::Rendering,
+            )
+            .map_err(color::image_error),
+        TextureColorSpace::Ocio(name) => ocio
+            .transform_rgba_pixels(
+                pixels,
+                width,
+                height,
+                ColorSpaceRef::Ocio(name),
+                ColorSpaceRef::Rendering,
+            )
+            .map_err(color::image_error),
     }
 }
 
@@ -585,7 +565,7 @@ impl TextureColorSpace {
     fn source_color_space<'a>(&'a self, default_color_space: &'a str) -> &'a str {
         match self {
             TextureColorSpace::Linear => "linear",
-            TextureColorSpace::Srgb => DEFAULT_TEXTURE_COLOR_SPACE,
+            TextureColorSpace::Srgb => crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
             TextureColorSpace::DefaultColor => default_color_space,
             TextureColorSpace::Ocio(name) => name,
         }
@@ -611,6 +591,8 @@ fn wrap_index(index: isize, size: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use glam::{Vec2, Vec3};
+
+    use crate::color::{ColorSpaceRef, DEFAULT_TEXTURE_COLOR_SPACE, OcioColorPipeline};
 
     use super::{ScalarTexture, Texture, TextureColorSpace, decode_color_space};
 
@@ -715,8 +697,21 @@ mod tests {
     #[test]
     fn srgb_decode_converts_color_channels_to_linear() {
         let decoded = decode_color_space(Vec3::splat(0.5), TextureColorSpace::Srgb);
+        let ocio = OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
+        let expected = ocio
+            .transform_rgb(
+                Vec3::splat(0.5),
+                ColorSpaceRef::Texture,
+                ColorSpaceRef::Rendering,
+            )
+            .expect("default texture color transform");
 
-        assert!(decoded.abs_diff_eq(Vec3::splat(0.21404114), 1.0e-6));
+        assert!(decoded.abs_diff_eq(expected, 1.0e-6));
     }
 
     #[test]

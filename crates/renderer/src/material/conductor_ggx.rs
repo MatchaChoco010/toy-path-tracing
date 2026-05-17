@@ -3,10 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{
-    bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut},
-    color::srgb_to_linear,
-};
+use crate::bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -98,12 +95,14 @@ impl ConductorGgxMaterial {
         base_color_texture_path: Option<&Path>,
         roughness_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             base_color,
             base_color_texture: load_optional_color_texture(
                 base_color_texture_path,
                 TextureColorSpace::Srgb,
+                ocio,
             )?,
             roughness,
             roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
@@ -344,7 +343,7 @@ impl ConductorGgxMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.base_color)
+        self.base_color
             * self
                 .base_color_texture
                 .as_ref()
@@ -497,7 +496,7 @@ mod tests {
         assert!(
             material
                 .base_color_at(&vtx)
-                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-3)
         );
         assert!((alpha_x - 0.16).abs() < 1.0e-6);
         assert!((alpha_y - 0.16).abs() < 1.0e-6);

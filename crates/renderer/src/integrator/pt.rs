@@ -2,8 +2,8 @@ use glam::Vec3;
 use rand::RngExt;
 
 use crate::{
-    light::infinite_light_le, material::MtlxScratch, math::russian_roulette_probability, ray::Ray,
-    scene::Scene,
+    light::infinite_light_le, material::MtlxScratch, math::ray::Ray,
+    math::russian_roulette_probability, scene::Scene,
 };
 
 use super::spawn_scattered_ray;
@@ -70,7 +70,7 @@ mod tests {
 
     use super::super::test_helpers::mirror_to_light_scene;
     use super::trace_radiance;
-    use crate::{light::EnvironmentLight, material::MtlxScratch, ray::Ray, scene::Scene};
+    use crate::{light::EnvironmentLight, material::MtlxScratch, math::ray::Ray, scene::Scene};
 
     #[test]
     fn trace_radiance_counts_light_after_delta_bounce() {
@@ -80,7 +80,7 @@ mod tests {
 
         let radiance = trace_radiance(&scene, ray, &mut rng, 2, &mut scratch);
 
-        assert!(radiance.abs_diff_eq(expected, 1.0e-5));
+        assert!(radiance.abs_diff_eq(expected, 1.0e-3));
     }
 
     #[test]

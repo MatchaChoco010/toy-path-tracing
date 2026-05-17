@@ -3,10 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use crate::{
-    bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf},
-    color::srgb_to_linear,
-};
+use crate::bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -82,12 +79,14 @@ impl ConductorGgxCui2023Material {
         base_color_texture_path: Option<&Path>,
         roughness_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             base_color,
             base_color_texture: load_optional_color_texture(
                 base_color_texture_path,
                 TextureColorSpace::Srgb,
+                ocio,
             )?,
             roughness,
             roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
@@ -273,7 +272,7 @@ impl ConductorGgxCui2023Material {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.base_color)
+        self.base_color
             * self
                 .base_color_texture
                 .as_ref()

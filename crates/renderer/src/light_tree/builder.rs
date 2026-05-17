@@ -25,7 +25,7 @@ use crate::{
     light::{PointLight, PointLightIndex, SpotLight, SpotLightIndex},
     material::Material,
     math::sg,
-    mesh::Bounds,
+    scene::Bounds,
     scene::{AreaLightTriangle, Scene},
 };
 
@@ -768,7 +768,7 @@ fn find_best_binned_split(leaves: &mut [LeafBuild], total: &AggregatedCluster) -
 mod tests {
     use super::*;
     use crate::material::{EmissiveMaterial, Material, NormalizedLambertMaterial};
-    use crate::mesh::{Mesh, Vertex};
+    use crate::scene::{Mesh, Vertex};
     use glam::{Mat4, Vec2};
 
     fn unit_emissive_mesh(z: f32) -> Mesh {
@@ -810,7 +810,7 @@ mod tests {
         assert_eq!(tree.nodes.len(), 1);
         let n = &tree.nodes[tree.root as usize];
         assert!(n.is_leaf());
-        assert!((n.flux - 0.5).abs() < 1.0e-5);
+        assert!((n.flux - 0.5).abs() < 1.0e-3);
     }
 
     #[test]

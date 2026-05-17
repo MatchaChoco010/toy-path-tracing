@@ -3,8 +3,11 @@ use std::sync::Arc;
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
 use crate::bsdf::mtlx::{ScatterMode, SheenMode};
-use crate::material::{ScalarTexture, Texture, TextureColorSpace};
-use crate::scene_loader::mtlx_loader::MtlxType;
+use crate::scene::mtlx_loader::MtlxType;
+use crate::{
+    color::OcioColorProcessor,
+    material::{ScalarTexture, Texture, TextureColorSpace},
+};
 
 /// 32-byte tagged value used by both the bytecode stack and `mtlx_registers`.
 /// Matrix variants store a `u32` index into `MtlxScratch`'s matrix pools to
@@ -371,9 +374,9 @@ pub enum FilterType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColorXform {
     Identity,
-    SrgbToLinear,
-    LinearToSrgb,
-    Ocio { from: Arc<str>, to: Arc<str> },
+    TextureToRendering,
+    RenderingToTexture,
+    Ocio { processor: u16 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1136,6 +1139,7 @@ pub struct CompiledMaterial {
     pub instructions: Vec<Instruction>,
     pub operand_pool: Vec<Operand>,
     pub value_pool: Vec<Value>,
+    pub color_processors: Vec<Arc<OcioColorProcessor>>,
     pub opacity_instructions: Vec<Instruction>,
     pub opacity_operand_pool: Vec<Operand>,
     pub opacity_closure_nodes: Vec<ClosureNode>,

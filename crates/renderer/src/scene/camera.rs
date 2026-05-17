@@ -1,8 +1,8 @@
 use glam::{UVec2, Vec2, Vec3};
 
 use crate::{
+    math::ray::{Ray, RayCone, RayDifferential},
     math::sample_tent_2d,
-    ray::{Ray, RayCone, RayDifferential},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]

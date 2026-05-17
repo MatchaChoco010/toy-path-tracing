@@ -4,16 +4,18 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{ConductorGgxMaterial, Material, NormalizedLambertMaterial},
-    mesh::load_gltf,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_gltf,
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_16(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor_material = scene.add_material(Material::NormalizedLambert(
@@ -28,6 +30,7 @@ pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             Vec3::ONE,
             Some(Path::new("assets/models/bunny-color.png")),
             None,
+            _ocio,
         )?,
     ));
     let bunny = load_gltf(Path::new("assets/models/bunny.glb"))?;
@@ -52,6 +55,7 @@ pub fn create_scene_16() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             Some(Path::new("assets/models/sphere-color.png")),
             Some(Path::new("assets/models/sphere-roughness.png")),
             None,
+            _ocio,
         )?,
     ));
     let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;

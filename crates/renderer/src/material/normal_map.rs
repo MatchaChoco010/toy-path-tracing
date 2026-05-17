@@ -4,7 +4,7 @@ use glam::Vec3;
 
 use crate::math::OrthonormalBasis;
 
-use super::{ShadingVertex, Texture, TextureColorSpace};
+use super::{ShadingVertex, Texture};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalMap {
@@ -17,9 +17,9 @@ impl NormalMap {
     }
 
     pub fn from_file(path: impl AsRef<Path>) -> image::ImageResult<Self> {
-        Ok(Self::from_texture(Arc::new(
-            Texture::from_file_with_color_space(path, TextureColorSpace::Linear)?,
-        )))
+        Ok(Self::from_texture(Arc::new(Texture::<Vec3>::from_file(
+            path,
+        )?)))
     }
 
     pub fn apply(&self, shading_vertex: &mut ShadingVertex, strength: f32) {

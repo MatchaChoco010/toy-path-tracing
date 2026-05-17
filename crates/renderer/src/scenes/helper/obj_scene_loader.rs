@@ -6,7 +6,7 @@ use std::{
 
 use glam::{Vec2, Vec3};
 
-use crate::mesh::{
+use crate::scene::{
     LoadMeshError, Mesh, ObjVertexKey, Vertex, append_obj_vertex, generate_vertex_normals,
     obj_error, parse_obj_face_corner, parse_obj_float,
 };
@@ -109,7 +109,7 @@ impl From<LoadMeshError> for LoadObjSceneError {
 }
 
 pub fn load_obj_scene(obj_path: &Path) -> Result<ObjScene, LoadObjSceneError> {
-    let obj_path = crate::paths::workspace_path(obj_path);
+    let obj_path = crate::utils::workspace_path(obj_path);
     let source = fs::read_to_string(&obj_path)?;
     let dir = obj_path.parent().map(Path::to_path_buf).unwrap_or_default();
     let scene = parse_obj_scene_source(&source, &dir)?;

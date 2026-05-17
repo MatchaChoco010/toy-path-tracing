@@ -7,7 +7,7 @@ use image::{
 };
 use jc_libavif_sys as avif;
 
-use crate::color::management::OcioRenderContext;
+use crate::color::OcioColorPipeline;
 
 #[derive(Debug, Clone)]
 pub enum OutputTransform {
@@ -19,7 +19,7 @@ pub fn save_output(
     path: &Path,
     resolution: UVec2,
     rendering_pixels: &[f32],
-    ocio: &OcioRenderContext,
+    ocio: &OcioColorPipeline,
     transform: &OutputTransform,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let extension = path
@@ -65,7 +65,7 @@ pub fn save_output(
 fn transform_display_pixels(
     rendering_pixels: &[f32],
     resolution: UVec2,
-    ocio: &OcioRenderContext,
+    ocio: &OcioColorPipeline,
     transform: &OutputTransform,
 ) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
     let mut pixels = rendering_pixels.to_vec();
@@ -87,7 +87,7 @@ fn transform_display_pixels(
 }
 
 fn icc_profile_for_transform(
-    ocio: &OcioRenderContext,
+    ocio: &OcioColorPipeline,
     transform: &OutputTransform,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     match transform {

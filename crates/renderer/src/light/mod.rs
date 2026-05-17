@@ -454,7 +454,7 @@ mod test_helpers {
     use glam::{Vec2, Vec3};
 
     use super::EnvironmentLight;
-    use crate::mesh::{Mesh, Vertex};
+    use crate::scene::{Mesh, Vertex};
 
     pub fn unit_mesh(z: f32) -> Mesh {
         Mesh::new(

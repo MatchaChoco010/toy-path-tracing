@@ -4,18 +4,20 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{
         ConductorGgxMaterial, GlassMaterial, Material, NormalizedLambertMaterial, SimplePbrMaterial,
     },
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::Scene,
+    scene::{load_gltf, load_obj},
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_21(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor_material = scene.add_material(Material::NormalizedLambert(
@@ -36,6 +38,7 @@ pub fn create_scene_21() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             Some(Path::new("assets/models/dragon-Metallic.png")),
             Some(Path::new("assets/models/dragon-Roughness.png")),
             Some(Path::new("assets/models/dragon-Normal.png")),
+            _ocio,
         )?,
     ));
 

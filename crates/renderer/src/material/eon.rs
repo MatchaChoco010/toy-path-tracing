@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{bsdf::EonBsdf, color::srgb_to_linear};
+use crate::bsdf::EonBsdf;
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -76,11 +76,16 @@ impl EonMaterial {
         rho_texture_path: Option<&Path>,
         roughness_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             rho,
             roughness,
-            rho_texture: load_optional_color_texture(rho_texture_path, TextureColorSpace::Srgb)?,
+            rho_texture: load_optional_color_texture(
+                rho_texture_path,
+                TextureColorSpace::Srgb,
+                ocio,
+            )?,
             roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
@@ -234,7 +239,7 @@ impl EonMaterial {
     }
 
     fn rho_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.rho)
+        self.rho
             * self
                 .rho_texture
                 .as_ref()

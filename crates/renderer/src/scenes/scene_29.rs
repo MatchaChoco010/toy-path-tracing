@@ -5,19 +5,21 @@ use std::{error::Error, path::Path, sync::Arc};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{
         Material, NormalMap, NormalizedLambertMaterial, ScalarTexture, SimplePbrMaterial,
         StandardSurfaceMaterial, Texture, TextureColorSpace,
     },
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::Scene,
+    scene::{load_gltf, load_obj},
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_29() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_29(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor_material = scene.add_material(Material::NormalizedLambert(
@@ -38,12 +40,14 @@ pub fn create_scene_29() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             Some(Path::new("assets/models/dragon-Metallic.png")),
             Some(Path::new("assets/models/dragon-Roughness.png")),
             Some(Path::new("assets/models/dragon-Normal.png")),
+            _ocio,
         )?,
     ));
 
     let base_color_tex = Arc::new(Texture::from_file_with_color_space(
         "assets/models/dragon-BaseColor.png",
         TextureColorSpace::Srgb,
+        _ocio,
     )?);
     let metalness_tex = Arc::new(ScalarTexture::from_file(
         "assets/models/dragon-Metallic.png",

@@ -2,7 +2,7 @@ use std::{error::Error, fmt, path::Path};
 
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
-use crate::mesh::{LoadMeshError, Mesh, Vertex, generate_vertex_normals};
+use crate::scene::{LoadMeshError, Mesh, Vertex, generate_vertex_normals};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GltfAlphaMode {
@@ -13,7 +13,6 @@ pub enum GltfAlphaMode {
 
 #[derive(Debug, Clone)]
 pub struct GltfMaterial {
-    pub name: String,
     pub base_color_factor: Vec4,
     pub base_color_texture: Option<usize>,
     pub metallic_factor: f32,
@@ -23,8 +22,6 @@ pub struct GltfMaterial {
     pub emissive_strength: f32,
     pub emissive_texture: Option<usize>,
     pub alpha_mode: GltfAlphaMode,
-    pub double_sided: bool,
-    pub unlit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -99,7 +96,7 @@ impl From<LoadMeshError> for LoadGltfSceneError {
 }
 
 pub fn load_gltf_scene(path: &Path) -> Result<GltfScene, LoadGltfSceneError> {
-    let path = crate::paths::workspace_path(path);
+    let path = crate::utils::workspace_path(path);
     let (document, buffers, images) = gltf::import(path)?;
 
     let mut material_meshes = Vec::new();
@@ -239,7 +236,6 @@ fn build_material(material: gltf::Material<'_>) -> GltfMaterial {
     };
 
     GltfMaterial {
-        name: material.name().unwrap_or("").to_string(),
         base_color_factor,
         base_color_texture: pbr
             .base_color_texture()
@@ -255,8 +251,6 @@ fn build_material(material: gltf::Material<'_>) -> GltfMaterial {
             .emissive_texture()
             .map(|info| info.texture().source().index()),
         alpha_mode,
-        double_sided: material.double_sided(),
-        unlit: false,
     }
 }
 
@@ -344,7 +338,6 @@ mod tests {
     #[test]
     fn alpha_mode_default_is_opaque() {
         let material = GltfMaterial {
-            name: String::new(),
             base_color_factor: Vec4::ONE,
             base_color_texture: None,
             metallic_factor: 1.0,
@@ -354,8 +347,6 @@ mod tests {
             emissive_strength: 1.0,
             emissive_texture: None,
             alpha_mode: GltfAlphaMode::Opaque,
-            double_sided: false,
-            unlit: false,
         };
         assert!(matches!(material.alpha_mode, GltfAlphaMode::Opaque));
     }

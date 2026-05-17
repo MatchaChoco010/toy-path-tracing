@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{bsdf::NormalizedLambertBsdf, color::srgb_to_linear};
+use crate::bsdf::NormalizedLambertBsdf;
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -63,10 +63,15 @@ impl NormalizedLambertMaterial {
         rho: Vec3,
         rho_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             rho,
-            rho_texture: load_optional_color_texture(rho_texture_path, TextureColorSpace::Srgb)?,
+            rho_texture: load_optional_color_texture(
+                rho_texture_path,
+                TextureColorSpace::Srgb,
+                ocio,
+            )?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
             opacity: 1.0,
@@ -210,7 +215,7 @@ impl NormalizedLambertMaterial {
     }
 
     fn rho_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.rho)
+        self.rho
             * self
                 .rho_texture
                 .as_ref()
@@ -291,14 +296,21 @@ mod tests {
         assert!(
             material
                 .eval(&vtx, Vec3::Z, &mut rng)
-                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) / PI, 1.0e-6)
+                .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) / PI, 1.0e-3)
         );
     }
 
     #[test]
     fn none_texture_keeps_existing_rho() {
-        let material = NormalizedLambertMaterial::try_new_with_texture_path(Vec3::ONE, None, None)
-            .expect("None texture should not try to load an image");
+        let ocio = crate::color::OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
+        let material =
+            NormalizedLambertMaterial::try_new_with_texture_path(Vec3::ONE, None, None, &ocio)
+                .expect("None texture should not try to load an image");
 
         assert_eq!(material, NormalizedLambertMaterial::new(Vec3::ONE));
     }

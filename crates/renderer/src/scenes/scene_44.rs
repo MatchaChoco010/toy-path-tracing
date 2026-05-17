@@ -5,16 +5,18 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::DirectionalLight,
     material::{EonMaterial, Material, NormalizedLambertMaterial},
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::Scene,
+    scene::{load_gltf, load_obj},
 };
 
 use super::uniform_scale_for_height;
 
-pub fn create_scene_44() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_44(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let world_scale = 0.55_f32;

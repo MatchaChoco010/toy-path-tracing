@@ -4,16 +4,18 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{Material, NormalizedLambertMaterial, SimplePbrMaterial},
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::Scene,
+    scene::{load_gltf, load_obj},
 };
 
 use super::{game_rotation_degrees, uniform_scale_for_height};
 
-pub fn create_scene_20() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_20(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let world_rotation = Mat4::from_rotation_y(45.0_f32.to_radians());
@@ -36,6 +38,7 @@ pub fn create_scene_20() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             Some(Path::new("assets/models/dragon-Metallic.png")),
             Some(Path::new("assets/models/dragon-Roughness.png")),
             Some(Path::new("assets/models/dragon-Normal.png")),
+            _ocio,
         )?,
     ));
 

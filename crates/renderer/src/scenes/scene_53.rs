@@ -4,11 +4,13 @@ use std::error::Error;
 
 use glam::Vec3;
 
-use crate::{camera::PinholeCamera, material::OpenPbrMaterial, scene::Scene};
+use crate::{material::OpenPbrMaterial, scene::PinholeCamera, scene::Scene};
 
-use super::openpbr_single_bunny::create_single_openpbr_bunny_scene;
+use super::helper::create_single_openpbr_bunny_scene;
 
-pub fn create_scene_53() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_53(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     create_single_openpbr_bunny_scene(
         OpenPbrMaterial::new(Vec3::new(0.72, 0.7, 0.76))
             .with_base_metalness(1.0)

@@ -5,14 +5,16 @@ use std::{error::Error, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    camera::PinholeCamera,
     material::{OpenPbrMaterial, ScalarTexture},
+    scene::PinholeCamera,
     scene::Scene,
 };
 
-use super::openpbr_mori_knob::create_openpbr_mori_knob_scene;
+use super::helper::create_openpbr_mori_knob_scene;
 
-pub fn create_scene_58() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_58(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let fuzz_weight = Arc::new(ScalarTexture::from_file(
         "assets/models/mori_knob_perlin_noise.png",
     )?);

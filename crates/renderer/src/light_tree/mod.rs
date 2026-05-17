@@ -36,7 +36,7 @@ use glam::Vec3;
 
 use crate::{
     light::{PointLightIndex, SpotLightIndex},
-    mesh::Bounds,
+    scene::Bounds,
     scene::TriangleRef,
 };
 

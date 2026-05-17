@@ -4,15 +4,17 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::{PointLight, SpotLight},
     material::{ConductorGgxMaterial, Material, NormalizedLambertMaterial},
-    mesh::load_gltf,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_gltf,
     scenes::{game_rotation_degrees, uniform_scale_for_height},
 };
 
-pub fn create_scene_12() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_12(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let wall_gray = scene.add_material(Material::NormalizedLambert(

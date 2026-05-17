@@ -3,12 +3,9 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 use rand::{RngExt, rngs::ThreadRng};
 
-use crate::{
-    bsdf::{
-        BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
-        DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
-    },
-    color::srgb_to_linear,
+use crate::bsdf::{
+    BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
+    DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
 };
 
 use super::{
@@ -101,6 +98,7 @@ impl SimplePbrMaterial {
         metallic_texture_path: Option<&Path>,
         roughness_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             metallic,
@@ -111,6 +109,7 @@ impl SimplePbrMaterial {
             base_color_texture: load_optional_color_texture(
                 base_color_texture_path,
                 TextureColorSpace::Srgb,
+                ocio,
             )?,
             metallic_texture: load_optional_scalar_texture(metallic_texture_path)?,
             roughness_texture: load_optional_scalar_texture(roughness_texture_path)?,
@@ -484,7 +483,7 @@ impl SimplePbrMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.base_color)
+        self.base_color
             * self
                 .base_color_texture
                 .as_ref()

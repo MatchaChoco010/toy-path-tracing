@@ -5,15 +5,17 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{EmissiveMaterial, Material, NormalizedLambertMaterial},
-    mesh::load_obj,
+    scene::PinholeCamera,
     scene::Scene,
-    scene_loader::mtlx_loader::{load_mtlx_material, load_standard_library},
+    scene::load_obj,
+    scene::mtlx_loader::{load_mtlx_material, load_standard_library},
 };
 
-pub fn create_scene_45() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_45(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let library_root = Path::new("lib/materialx/libraries");
@@ -116,7 +118,8 @@ pub fn create_scene_45() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
                 base_material
             };
             scene.add_instance(base_mesh, cell_base_material, cell);
-            let mtlx_material = load_mtlx_material(&library, Path::new(path), material_name)?;
+            let mtlx_material =
+                load_mtlx_material(&library, Path::new(path), material_name, _ocio)?;
             let knob_material = scene.add_material(Material::Mtlx(mtlx_material));
             scene.add_instance(knob_mesh, knob_material, cell);
         }

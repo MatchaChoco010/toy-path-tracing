@@ -9,15 +9,14 @@ use std::{
 };
 
 use crate::{
-    camera::PinholeCamera,
-    color::srgb_to_linear,
     light::EnvironmentLight,
     material::{
         DielectricGgxMaterial, EmissiveMaterial, Material, NormalizedLambertMaterial,
         ScalarTexture, SimplePbrMaterial, Texture, TextureColorSpace,
     },
+    scene::PinholeCamera,
     scene::Scene,
-    scene_loader::obj_scene::{ObjMaterial, ObjScene, load_obj_scene},
+    scenes::helper::obj_scene_loader::{ObjMaterial, ObjScene, load_obj_scene},
 };
 
 struct DiffuseTextureCacheEntry {
@@ -28,10 +27,12 @@ struct DiffuseTextureCacheEntry {
 const SAN_MIGUEL_OBJ: &str = "assets/san_miguel_2.0/san-miguel-low-poly.obj";
 const SAN_MIGUEL_HDR: &str = "assets/sky/kloofendal_48d_partly_cloudy_puresky_4k.hdr";
 
-pub fn create_scene_22() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_22(
+    ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
     let obj_scene = load_obj_scene(Path::new(SAN_MIGUEL_OBJ))?;
-    add_san_miguel_to_scene(&mut scene, &obj_scene);
+    add_san_miguel_to_scene(&mut scene, &obj_scene, ocio);
 
     let env = EnvironmentLight::from_hdr_file(SAN_MIGUEL_HDR, 10.0, 0.0)?;
     scene.set_environment_light(env);
@@ -47,14 +48,19 @@ pub fn create_scene_22() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     Ok((scene, camera))
 }
 
-fn add_san_miguel_to_scene(scene: &mut Scene, obj_scene: &ObjScene) {
+fn add_san_miguel_to_scene(
+    scene: &mut Scene,
+    obj_scene: &ObjScene,
+    ocio: &crate::color::OcioColorPipeline,
+) {
     let mut texture_cache: HashMap<PathBuf, DiffuseTextureCacheEntry> = HashMap::new();
     for slot in &obj_scene.material_meshes {
         let obj_material = slot
             .material_name
             .as_deref()
             .and_then(|name| obj_scene.material(name));
-        let material = san_miguel_material(obj_material, &obj_scene.mtl_dir, &mut texture_cache);
+        let material =
+            san_miguel_material(obj_material, &obj_scene.mtl_dir, &mut texture_cache, ocio);
         let material_index = scene.add_material(material);
         let mesh_index = scene.add_mesh(slot.mesh.clone());
         scene.add_instance(mesh_index, material_index, Mat4::IDENTITY);
@@ -65,6 +71,7 @@ fn san_miguel_material(
     obj_material: Option<&ObjMaterial>,
     mtl_dir: &Path,
     texture_cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Material {
     let Some(material) = obj_material else {
         return Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::splat(0.7)));
@@ -74,15 +81,15 @@ fn san_miguel_material(
         let ke = material.emission;
         let strength = ke.max_element().max(1.0);
         let chroma = (ke / strength).clamp(Vec3::ZERO, Vec3::ONE);
-        let color = srgb_to_linear(chroma);
+        let color = chroma;
         return Material::Emissive(EmissiveMaterial::new(color, strength));
     }
 
     if is_transparent(material) {
         let color = if material.transmission_filter.length_squared() > 0.0 {
-            srgb_to_linear(material.transmission_filter)
+            material.transmission_filter
         } else {
-            srgb_to_linear(material.diffuse)
+            material.diffuse
         };
         let color = color.clamp(Vec3::splat(0.05), Vec3::ONE);
         return Material::DielectricGgx(DielectricGgxMaterial::new(
@@ -97,10 +104,12 @@ fn san_miguel_material(
     let textures = material
         .diffuse_texture_path
         .as_deref()
-        .and_then(|relative_path| load_diffuse_texture(mtl_dir, relative_path, texture_cache));
+        .and_then(|relative_path| {
+            load_diffuse_texture(mtl_dir, relative_path, texture_cache, ocio)
+        });
 
     let mut simple_pbr = SimplePbrMaterial::new(
-        srgb_to_linear(material.diffuse).clamp(Vec3::ZERO, Vec3::ONE),
+        material.diffuse.clamp(Vec3::ZERO, Vec3::ONE),
         0.0,
         roughness_from_phong_exponent(material.specular_exponent),
         1.5,
@@ -117,6 +126,7 @@ fn load_diffuse_texture(
     mtl_dir: &Path,
     relative_path: &Path,
     cache: &mut HashMap<PathBuf, DiffuseTextureCacheEntry>,
+    ocio: &crate::color::OcioColorPipeline,
 ) -> Option<DiffuseTextureCacheEntry> {
     let absolute_path = mtl_dir.join(relative_path);
     if let Some(entry) = cache.get(&absolute_path) {
@@ -125,7 +135,7 @@ fn load_diffuse_texture(
             alpha: entry.alpha.as_ref().map(Arc::clone),
         });
     }
-    match Texture::from_file_with_alpha(&absolute_path, TextureColorSpace::Srgb) {
+    match Texture::from_file_with_alpha(&absolute_path, TextureColorSpace::Srgb, ocio) {
         Ok((color, alpha)) => {
             let entry = DiffuseTextureCacheEntry {
                 color: Arc::new(color),
@@ -171,7 +181,7 @@ mod tests {
 
     use glam::Vec3;
 
-    use crate::{material::Material, scene_loader::obj_scene::ObjMaterial};
+    use crate::{material::Material, scenes::helper::obj_scene_loader::ObjMaterial};
 
     use super::{is_transparent, roughness_from_phong_exponent, san_miguel_material};
 
@@ -191,7 +201,13 @@ mod tests {
 
     fn build(material: Option<&ObjMaterial>) -> Material {
         let mut cache = HashMap::new();
-        san_miguel_material(material, Path::new("."), &mut cache)
+        let ocio = crate::color::OcioColorPipeline::new(
+            crate::color::DEFAULT_OCIO_CONFIG,
+            Some(crate::color::DEFAULT_RENDERING_SPACE.to_string()),
+            crate::color::DEFAULT_TEXTURE_COLOR_SPACE,
+        )
+        .expect("default OCIO config");
+        san_miguel_material(material, Path::new("."), &mut cache, &ocio)
     }
 
     #[test]

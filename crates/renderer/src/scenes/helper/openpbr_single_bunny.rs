@@ -3,16 +3,16 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{Material, OpenPbrMaterial},
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::{MaterialIndex, MeshIndex, Scene},
+    scene::{load_gltf, load_obj},
 };
 
-use super::uniform_scale_for_height;
+use super::super::uniform_scale_for_height;
 
-pub(super) fn create_single_openpbr_bunny_scene(
+pub(in crate::scenes) fn create_single_openpbr_bunny_scene(
     bunny_material: OpenPbrMaterial,
 ) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     create_single_openpbr_bunny_scene_impl(
@@ -22,7 +22,7 @@ pub(super) fn create_single_openpbr_bunny_scene(
     )
 }
 
-pub(super) fn create_single_openpbr_low_bunny_scene(
+pub(in crate::scenes) fn create_single_openpbr_low_bunny_scene(
     bunny_material: OpenPbrMaterial,
 ) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     create_single_openpbr_bunny_scene_impl(

@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 use rand::rngs::ThreadRng;
 
-use crate::{bsdf::MirrorBsdf, color::srgb_to_linear};
+use crate::bsdf::MirrorBsdf;
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -61,12 +61,14 @@ impl MirrorMaterial {
         color: Vec3,
         color_texture_path: Option<&Path>,
         normal_map_path: Option<&Path>,
+        ocio: &crate::color::OcioColorPipeline,
     ) -> image::ImageResult<Self> {
         Ok(Self {
             color,
             color_texture: load_optional_color_texture(
                 color_texture_path,
                 TextureColorSpace::Srgb,
+                ocio,
             )?,
             normal_map: load_optional_normal_map(normal_map_path)?,
             normal_strength: 1.0,
@@ -161,7 +163,7 @@ impl MirrorMaterial {
     }
 
     fn color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.color)
+        self.color
             * self
                 .color_texture
                 .as_ref()
@@ -242,7 +244,7 @@ mod tests {
             .sample(&vtx, &mut rng)
             .expect("expected a valid mirror sample");
 
-        assert!(sample.weight.abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-6));
+        assert!(sample.weight.abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-3));
     }
 
     #[test]

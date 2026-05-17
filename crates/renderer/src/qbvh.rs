@@ -2,7 +2,7 @@ use glam::Vec3;
 use rayon::prelude::*;
 use wide::{CmpLe, f32x4};
 
-use crate::{mesh::Bounds, ray::Ray};
+use crate::{math::ray::Ray, scene::Bounds};
 
 const BIN_COUNT: usize = 16;
 const TARGET_LEAF_PRIMS: usize = 4;

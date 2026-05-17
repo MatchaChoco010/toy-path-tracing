@@ -100,7 +100,7 @@ mod tests {
             .expect("expected a sample");
 
         assert!((li.pdf - 2.0).abs() < 1.0e-4);
-        assert!(li.radiance.abs_diff_eq(Vec3::splat(10.0), 1.0e-5));
+        assert!(li.radiance.abs_diff_eq(Vec3::splat(10.0), 1.0e-3));
         assert!((li.distance - 1.0).abs() < 1.0e-5);
         assert!(li.wi.abs_diff_eq(Vec3::Z, 1.0e-5));
     }

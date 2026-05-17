@@ -6,7 +6,7 @@ use crate::{
     bsdf::BsdfFlags,
     light::LightLiSample,
     material::{MaterialSample, MtlxScratch, ShadingVertex},
-    ray::{Ray, RayCone, RayDifferential},
+    math::ray::{Ray, RayCone, RayDifferential},
     scene::{Scene, TriangleRef},
 };
 
@@ -264,20 +264,18 @@ pub(super) mod test_helpers {
     use glam::{Vec2, Vec3};
 
     use crate::{
-        color::linear_to_srgb,
         material::{EmissiveMaterial, Material, MirrorMaterial},
-        mesh::{Mesh, Vertex},
-        ray::Ray,
+        math::ray::Ray,
         scene::Scene,
+        scene::{Mesh, Vertex},
     };
 
     pub(super) fn mirror_to_light_scene() -> (Scene, Ray, Vec3) {
         let mut scene = Scene::new();
         let mirror_color_linear = Vec3::new(0.25, 0.5, 0.75);
         let light_strength = 4.0;
-        let mirror_material = scene.add_material(Material::Mirror(MirrorMaterial::new(
-            linear_to_srgb(mirror_color_linear),
-        )));
+        let mirror_material =
+            scene.add_material(Material::Mirror(MirrorMaterial::new(mirror_color_linear)));
         let light_material = scene.add_material(Material::Emissive(EmissiveMaterial::new(
             Vec3::ONE,
             light_strength,
@@ -360,7 +358,7 @@ mod tests {
         bsdf::BsdfFlags,
         material::{MaterialSample, ShadingVertex},
         math::OrthonormalBasis,
-        ray::{Ray, RayCone, RayDifferential},
+        math::ray::{Ray, RayCone, RayDifferential},
         scene::{InstanceIndex, TriangleRef},
     };
 

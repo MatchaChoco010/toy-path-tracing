@@ -5,16 +5,18 @@ use std::{error::Error, path::Path, sync::Arc};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{Material, NormalMap, OpenPbrMaterial, ScalarTexture, Texture},
-    mesh::{load_gltf, load_obj},
+    scene::PinholeCamera,
     scene::{MaterialIndex, MeshIndex, Scene},
+    scene::{load_gltf, load_obj},
 };
 
 use super::uniform_scale_for_height;
 
-pub fn create_scene_46() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_46(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let floor = load_obj(Path::new("assets/mori-knob/floor.obj"))?;
@@ -53,6 +55,7 @@ pub fn create_scene_46() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
 
     let wood_texture = Arc::new(Texture::from_srgb_file(
         "assets/models/bunny_wood_texture_BaseColor.png",
+        _ocio,
     )?);
     let wood_roughness = Arc::new(ScalarTexture::from_file(
         "assets/models/bunny_wood_texture_Roughness.png",

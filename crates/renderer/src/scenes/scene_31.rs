@@ -5,14 +5,16 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{Material, StandardSurfaceMaterial},
-    mesh::load_obj,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_obj,
 };
 
-pub fn create_scene_31() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_31(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     create_paper_plane_scene(0.0)
 }
 

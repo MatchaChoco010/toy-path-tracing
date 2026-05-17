@@ -310,7 +310,7 @@ fn parse_version(s: &str) -> Option<(u32, u32)> {
 }
 
 pub fn load_standard_library(root: &Path) -> Result<MtlxLibrary, ParseError> {
-    let root = crate::paths::workspace_path(root);
+    let root = crate::utils::workspace_path(root);
     let mut lib = MtlxLibrary::new();
     let order = [
         "stdlib/stdlib_defs.mtlx",
@@ -349,11 +349,11 @@ pub fn load_standard_library(root: &Path) -> Result<MtlxLibrary, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene_loader::mtlx_loader::types::{InputBinding, RawInput, RawOutput};
+    use crate::scene::mtlx_loader::types::{InputBinding, RawInput, RawOutput};
     use std::path::PathBuf;
 
     fn lib_root() -> PathBuf {
-        crate::paths::workspace_path("lib/materialx/libraries")
+        crate::utils::workspace_path("lib/materialx/libraries")
     }
 
     #[test]

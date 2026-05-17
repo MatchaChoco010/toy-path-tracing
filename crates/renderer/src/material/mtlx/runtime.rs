@@ -44,6 +44,7 @@ pub fn run_instructions(
         &compiled.instructions,
         &compiled.operand_pool,
         &compiled.value_pool,
+        &compiled.color_processors,
     );
 }
 
@@ -60,6 +61,7 @@ pub fn run_opacity_instructions(
         &compiled.opacity_instructions,
         &compiled.opacity_operand_pool,
         &compiled.value_pool,
+        &compiled.color_processors,
     );
 }
 
@@ -70,6 +72,7 @@ fn run_instruction_stream(
     instrs: &[Instruction],
     op_pool: &[Operand],
     value_pool: &[Value],
+    color_processors: &[std::sync::Arc<crate::color::OcioColorProcessor>],
 ) {
     // field-destructure で regs slice と matrix pools の同時 mut borrow を可能にする。
     let MtlxScratch {
@@ -89,6 +92,7 @@ fn run_instruction_stream(
             regs,
             op_pool,
             value_pool,
+            color_processors,
             matrix3_pool,
             matrix4_pool,
         );
@@ -204,6 +208,7 @@ fn execute_instruction(
     regs: &mut [Value],
     op_pool: &[Operand],
     value_pool: &[Value],
+    color_processors: &[std::sync::Arc<crate::color::OcioColorProcessor>],
     matrix3_pool: &mut Vec<glam::Mat3>,
     matrix4_pool: &mut Vec<glam::Mat4>,
 ) {
@@ -728,14 +733,10 @@ fn execute_instruction(
             let v = read_operand(*src, regs, value_pool);
             let out = match op {
                 super::compiled::ColorXform::Identity => v,
-                super::compiled::ColorXform::SrgbToLinear => {
-                    apply_color_xform(v, *ty, crate::color::srgb_to_linear)
-                }
-                super::compiled::ColorXform::LinearToSrgb => {
-                    apply_color_xform(v, *ty, crate::color::linear_to_srgb)
-                }
-                super::compiled::ColorXform::Ocio { from, to } => {
-                    apply_ocio_color_xform(v, *ty, from, to)
+                super::compiled::ColorXform::TextureToRendering
+                | super::compiled::ColorXform::RenderingToTexture => v,
+                super::compiled::ColorXform::Ocio { processor } => {
+                    apply_ocio_color_xform(v, *ty, &color_processors[*processor as usize])
                 }
             };
             write_reg(regs, *dst, out);
@@ -1657,33 +1658,19 @@ fn execute_instruction(
     }
 }
 
-fn apply_color_xform<F: Fn(Vec3) -> Vec3>(v: Value, ty: ValueType, f: F) -> Value {
+fn apply_ocio_color_xform(
+    v: Value,
+    ty: ValueType,
+    processor: &crate::color::OcioColorProcessor,
+) -> Value {
     match ty {
-        ValueType::Color3 => Value::Color3(f(v.as_color3())),
-        ValueType::Color4 => {
-            let c = v.as_color4();
-            let rgb = f(Vec3::new(c.x, c.y, c.z));
-            Value::Color4(Vec4::new(rgb.x, rgb.y, rgb.z, c.w))
-        }
-        _ => v,
-    }
-}
-
-fn apply_ocio_color_xform(v: Value, ty: ValueType, from: &str, to: &str) -> Value {
-    let Some(context) = crate::color::management::current() else {
-        return v;
-    };
-    match ty {
-        ValueType::Color3 => context
-            .transform_rgb_between(v.as_color3(), from, to)
+        ValueType::Color3 => processor
+            .apply_rgb(v.as_color3())
             .map(Value::Color3)
             .unwrap_or(v),
         ValueType::Color4 => {
             let c = v.as_color4();
-            context
-                .transform_rgba_between(c, from, to)
-                .map(Value::Color4)
-                .unwrap_or(v)
+            processor.apply_rgba(c).map(Value::Color4).unwrap_or(v)
         }
         _ => v,
     }

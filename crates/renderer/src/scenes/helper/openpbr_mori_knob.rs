@@ -3,14 +3,14 @@ use std::{error::Error, path::Path};
 use glam::{Mat4, Vec3};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{Material, OpenPbrMaterial},
-    mesh::load_obj,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_obj,
 };
 
-pub(super) fn create_openpbr_mori_knob_scene(
+pub(in crate::scenes) fn create_openpbr_mori_knob_scene(
     knob_material: OpenPbrMaterial,
 ) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();

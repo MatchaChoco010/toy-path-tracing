@@ -8,7 +8,6 @@ use crate::{
         BsdfFlags, DielectricGgxDirectionalAlbedoLut, SheenDirectionalAlbedoLut,
         StandardSurfaceBsdf, StandardSurfaceBsdfParams, artist_friendly_complex_ior,
     },
-    color::srgb_to_linear,
     light_tree::{
         DiffuseLobePrecompute, LightTreePrecompute, btdf_importance, diffuse_importance,
         glossy_importance, make_glossy_lobe, merge_glossy_roughness,
@@ -396,7 +395,7 @@ impl StandardSurfaceMaterial {
                 )
             })
             .unwrap_or(Vec3::ONE);
-        Some(srgb_to_linear(self.emission_color) * self.emission * texture_factor)
+        Some(self.emission_color * self.emission * texture_factor)
     }
 
     pub fn may_emit(&self) -> bool {
@@ -412,8 +411,7 @@ impl StandardSurfaceMaterial {
             .as_ref()
             .map(|t| t.max_value())
             .unwrap_or(1.0);
-        ((srgb_to_linear(self.emission_color) * self.emission).max_element() * texture_factor)
-            .max(0.0)
+        ((self.emission_color * self.emission).max_element() * texture_factor).max(0.0)
     }
 
     fn make_bsdf(&self, shading_vertex: &ShadingVertex) -> StandardSurfaceBsdf {
@@ -428,7 +426,7 @@ impl StandardSurfaceMaterial {
 
         let color_pow = 1.0 + coat_factor * coat_affect_color;
         let modulated_base_color = vec3_pow(base_color, color_pow);
-        let modulated_subsurface_color = vec3_pow(srgb_to_linear(self.subsurface_color), color_pow);
+        let modulated_subsurface_color = vec3_pow(self.subsurface_color, color_pow);
 
         let roughness_modulator = coat_factor * coat_affect_roughness * coat_roughness_clamped;
         let modulated_spec_roughness = lerp(specular_roughness, 1.0, roughness_modulator);
@@ -445,7 +443,7 @@ impl StandardSurfaceMaterial {
 
         let (metal_n, metal_k) = artist_friendly_complex_ior(
             base_color.clamp(Vec3::ZERO, Vec3::ONE),
-            srgb_to_linear(self.specular_color).clamp(Vec3::ZERO, Vec3::ONE),
+            self.specular_color.clamp(Vec3::ZERO, Vec3::ONE),
         );
 
         let coat_basis = self.coat_basis_in_base(shading_vertex);
@@ -454,7 +452,7 @@ impl StandardSurfaceMaterial {
             base_color: modulated_base_color,
             base: self.base,
             specular: self.specular,
-            specular_color: srgb_to_linear(self.specular_color),
+            specular_color: self.specular_color,
             specular_alpha_x: spec_alpha_x,
             specular_alpha_y: spec_alpha_y,
             specular_eta: self.specular_ior,
@@ -462,15 +460,15 @@ impl StandardSurfaceMaterial {
             metal_n,
             metal_k,
             coat: coat_factor,
-            coat_color: srgb_to_linear(self.coat_color),
+            coat_color: self.coat_color,
             coat_alpha_x,
             coat_alpha_y,
             coat_eta: self.coat_ior,
             sheen: self.sheen,
-            sheen_color: srgb_to_linear(self.sheen_color),
+            sheen_color: self.sheen_color,
             sheen_roughness: self.sheen_roughness,
             transmission: self.transmission,
-            transmission_color: srgb_to_linear(self.transmission_color),
+            transmission_color: self.transmission_color,
             transmission_alpha_x: btdf_alpha_x,
             transmission_alpha_y: btdf_alpha_y,
             transmission_dispersion_abbe: self.transmission_dispersion,
@@ -594,7 +592,7 @@ impl StandardSurfaceMaterial {
         let (coat_alpha_x, coat_alpha_y) =
             alpha_xy_from_roughness(self.coat_roughness, self.coat_anisotropy);
 
-        let coat_color_lin = srgb_to_linear(self.coat_color);
+        let coat_color_lin = self.coat_color;
         let under_coat = lerp_vec3(Vec3::ONE, coat_color_lin, self.coat * 0.5);
 
         let base_color_lin = base_color;
@@ -609,7 +607,7 @@ impl StandardSurfaceMaterial {
         };
 
         let rho_metal = metalness * sg::luminance(base_color_lin * under_coat);
-        let spec_color_lin = srgb_to_linear(self.specular_color);
+        let spec_color_lin = self.specular_color;
         let f0_dielectric = ((self.specular_ior - 1.0) / (self.specular_ior + 1.0)).powi(2);
         let rho_spec = (1.0 - metalness)
             * self.specular
@@ -646,7 +644,7 @@ impl StandardSurfaceMaterial {
         };
 
         let btdf = if !self.thin_walled && self.transmission > 0.0 {
-            let trans_color_lin = srgb_to_linear(self.transmission_color);
+            let trans_color_lin = self.transmission_color;
             let rho_t =
                 self.transmission * sg::luminance(trans_color_lin * under_coat) * (1.0 - metalness);
             let trans_rough = (spec_rough + self.transmission_extra_roughness).clamp(0.0, 1.0);
@@ -715,7 +713,7 @@ impl StandardSurfaceMaterial {
     }
 
     fn base_color_at(&self, shading_vertex: &ShadingVertex) -> Vec3 {
-        srgb_to_linear(self.base_color)
+        self.base_color
             * self
                 .base_color_texture
                 .as_ref()

@@ -5,13 +5,12 @@ use rayon::prelude::*;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
     time::{Duration, Instant},
 };
 use toy_path_tracing::{
-    color::management::{
+    color::{
         DEFAULT_OCIO_CONFIG, DEFAULT_OUTPUT_DISPLAY, DEFAULT_OUTPUT_VIEW,
-        DEFAULT_TEXTURE_COLOR_SPACE, OcioRenderContext, set_current,
+        DEFAULT_TEXTURE_COLOR_SPACE, OcioColorPipeline,
     },
     integrator::IntegratorKind,
     output_image::{OutputTransform, save_output},
@@ -64,21 +63,21 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     init_tracing(args.log_filter.as_deref())?;
-    let ocio = Arc::new(OcioRenderContext::new(
+    let ocio = OcioColorPipeline::new(
         &args.ocio_config,
         args.ocio_rendering_space.clone(),
         &args.texture_color_space,
-    )?);
+    )?;
     tracing::info!(
         ocio_config = ocio.config_source(),
         rendering_space = ocio.rendering_space(),
         texture_color_space = ocio.texture_color_space(),
         "initialized OCIO"
     );
-    set_current(Arc::clone(&ocio))?;
     let output_transform = output_transform(&args, &ocio)?;
     let resolution = UVec2::new(args.width, args.height);
-    let (mut scene, camera) = load_scene(args.scene)?;
+    let (mut scene, camera) = load_scene(args.scene, &ocio)?;
+    scene.prepare_color(&ocio)?;
     let build_bvh_start = Instant::now();
     scene.build_qbvh();
     tracing::info!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
@@ -127,7 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn output_transform(
     args: &Args,
-    ocio: &OcioRenderContext,
+    ocio: &OcioColorPipeline,
 ) -> Result<OutputTransform, Box<dyn std::error::Error>> {
     if output_extension(&args.output).as_deref() == Some("exr")
         && args.output_display.is_none()

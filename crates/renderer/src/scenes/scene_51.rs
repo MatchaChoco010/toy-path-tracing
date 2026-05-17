@@ -5,14 +5,16 @@ use std::{error::Error, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    camera::PinholeCamera,
     material::{OpenPbrMaterial, ScalarTexture},
+    scene::PinholeCamera,
     scene::Scene,
 };
 
-use super::openpbr_single_bunny::create_single_openpbr_bunny_scene;
+use super::helper::create_single_openpbr_bunny_scene;
 
-pub fn create_scene_51() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_51(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let thickness = Arc::new(ScalarTexture::from_file(
         "assets/models/bunny_soap_thin_film_thickness.png",
     )?);

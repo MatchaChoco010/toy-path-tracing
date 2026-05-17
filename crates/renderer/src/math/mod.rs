@@ -3,6 +3,7 @@ use std::f32::consts::{PI, TAU};
 use glam::{Vec2, Vec3};
 
 pub mod orthonormal_basis;
+pub mod ray;
 pub mod sg;
 
 pub use orthonormal_basis::OrthonormalBasis;
@@ -159,10 +160,6 @@ pub fn permute_vec3(v: Vec3, x: usize, y: usize, z: usize) -> Vec3 {
     Vec3::new(a[x], a[y], a[z])
 }
 
-pub fn reinhard(color: Vec3) -> Vec3 {
-    color / (Vec3::ONE + color)
-}
-
 pub fn balance_heuristic(pdf_a: f32, pdf_b: f32) -> f32 {
     let pdf_sum = pdf_a + pdf_b;
 
@@ -192,7 +189,7 @@ mod tests {
     use super::{
         balance_heuristic, compute_surface_partials, cosine_weighted_hemisphere_pdf,
         difference_of_products, face_forward, fresnel_dielectric, gamma, interpolate_vec2,
-        interpolate_vec3, max_component_index, permute_vec3, reflect, refract, reinhard,
+        interpolate_vec3, max_component_index, permute_vec3, reflect, refract,
         russian_roulette_probability, sample_cosine_weighted_hemisphere, sample_tent_1d,
         schlick_fresnel, smoothstep,
     };
@@ -303,11 +300,6 @@ mod tests {
             permute_vec3(Vec3::new(1.0, 2.0, 3.0), 2, 0, 1),
             Vec3::new(3.0, 1.0, 2.0)
         );
-    }
-
-    #[test]
-    fn reinhard_maps_white_to_half_gray() {
-        assert!(reinhard(Vec3::ONE).abs_diff_eq(Vec3::splat(0.5), 1.0e-6));
     }
 
     #[test]

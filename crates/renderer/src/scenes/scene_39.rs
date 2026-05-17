@@ -4,16 +4,18 @@ use glam::{Mat4, Vec3};
 use std::{error::Error, path::Path};
 
 use crate::{
-    camera::PinholeCamera,
     light::EnvironmentLight,
     material::{ConductorGgxMaterial, Material},
-    mesh::load_gltf,
+    scene::PinholeCamera,
     scene::Scene,
+    scene::load_gltf,
 };
 
 use super::uniform_scale_for_height;
 
-pub fn create_scene_39() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
+pub fn create_scene_39(
+    _ocio: &crate::color::OcioColorPipeline,
+) -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut scene = Scene::new();
 
     let sphere = load_gltf(Path::new("assets/models/sphere.glb"))?;
