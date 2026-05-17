@@ -1,0 +1,12 @@
+[package]
+name = "ocio-sys"
+version = "0.1.0"
+edition = "2024"
+links = "OpenColorIO"
+
+[build-dependencies]
+cc = "1.2"
+cmake = "0.1"
+
+[lints.clippy]
+too_many_arguments = "allow"

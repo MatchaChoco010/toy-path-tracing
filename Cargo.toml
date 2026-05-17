@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/ocio",
+    "crates/ocio-sys",
     "crates/renderer",
 ]
 default-members = [
