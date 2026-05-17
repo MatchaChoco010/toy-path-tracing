@@ -1,0 +1,79 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "ocio-config-generator"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "opencolorio" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "opencolorio", specifier = ">=2.5.2" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.14.7" }]
+
+[[package]]
+name = "opencolorio"
+version = "2.5.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/ea/9d930df6740f9b09b0b342f40a5ef165da5050141e496081ef80b302e566/opencolorio-2.5.2.tar.gz", hash = "sha256:fecebd0914089b0c8238c55648f8eb2ccd2702ab4b2eea53856a0e368ded8262", size = 13946157, upload-time = "2026-05-13T18:49:47.351Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/a3/35608bec4739d4d056a89400323e26e29f497591b82514c3a686e572bb9c/opencolorio-2.5.2-cp311-cp311-macosx_10_15_x86_64.whl", hash = "sha256:11636d2ae5d90d676023a24bd12622833b3221ee5bb57e7df62cdfca2de6998d", size = 6326953, upload-time = "2026-05-13T18:49:00.682Z" },
+    { url = "https://files.pythonhosted.org/packages/72/ed/6d3132666d3ac5913a96da1f5582748f36a7bdf13f968506527d814f0a88/opencolorio-2.5.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d764b3064498974624f68be6182f10f0a5fd8f084a38f468eab7ec6cc6db078d", size = 5699336, upload-time = "2026-05-13T18:49:02.241Z" },
+    { url = "https://files.pythonhosted.org/packages/09/49/04ed8e93bac305e9eceba55a06d958c6ab83dbb22823e5cd7a02c7382afd/opencolorio-2.5.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:8e6a53e12605e929ba3c7dfbfbbe03664f3427f2119aaec495265aad275a6391", size = 6273589, upload-time = "2026-05-13T18:49:03.825Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/52/168c51de1837e6987ecd8a21badb157bf371e3fd0391bd4c0534d2b91c3a/opencolorio-2.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:18d76fee8e245af2d3302462ca2f9baafa6cb3fc11578e8888063a7f32774061", size = 6845852, upload-time = "2026-05-13T18:49:05.5Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/65/485d96a4a4273dd2448d3be5585b46d0a58caac472050889f415120317e5/opencolorio-2.5.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:35488faa982d89933cd430697ab68f40c439f1456780f46d09fec7c4b981fea3", size = 6897301, upload-time = "2026-05-13T18:49:06.889Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/14/39e65d4cdbba0f453384e77ce9e67568dc1e651145141338020a6d4bb3c0/opencolorio-2.5.2-cp311-cp311-win_amd64.whl", hash = "sha256:a1f0f18fe0897255059296782a895c57ca639e37d2ba3022cf39bf2b26e01155", size = 3863270, upload-time = "2026-05-13T18:49:08.724Z" },
+    { url = "https://files.pythonhosted.org/packages/82/70/ee3ada349863f668cbd4897f01d8dd6305407572111c5355f28dc5b5001a/opencolorio-2.5.2-cp312-cp312-macosx_10_15_x86_64.whl", hash = "sha256:72c5ff68430f11d1cef8fb792d1167cb840ccd6da2aade6bbe6c3c9d7088eb56", size = 6358645, upload-time = "2026-05-13T18:49:10.037Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/a0/d427d4e921389a1b119b22fc9296313f9006af789e8e29531f52132bdfcc/opencolorio-2.5.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:53f8098188a8fe434c4831138e818e6b53ae00599b8a537ef4eb1f3288af276b", size = 5720088, upload-time = "2026-05-13T18:49:11.418Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/68/6b9b5d4bd54de8933cfcf9b1854967da0740d7b493783f9f9f7f41f43d6e/opencolorio-2.5.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:b84e0653e59686ccbdbec1b4b857946f2f126f3bccbb25921649beefdb4bd763", size = 6251103, upload-time = "2026-05-13T18:49:13.088Z" },
+    { url = "https://files.pythonhosted.org/packages/63/a5/ea77ac1f8ba17503b113b4334d3b1f10cba32104d0f741d6694e8ee2564a/opencolorio-2.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:cc34db609bd91fb43747d2f425d020d6d17afed406669703bab2af08c149ddac", size = 6828941, upload-time = "2026-05-13T18:49:14.594Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/57/29ffadf7bf9c6a65a884be18933864a1a3e6ff165127bf1acff9930b97ee/opencolorio-2.5.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3d0ab1c398d560513c651c7b9c676e68f264a63b97e29fec21722d4270f865aa", size = 6932093, upload-time = "2026-05-13T18:49:16.252Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/1d/1f1f5ce05a55168d0528ed0fdc89dd60a82664fff0cbc4061a05689406cf/opencolorio-2.5.2-cp312-cp312-win_amd64.whl", hash = "sha256:96b0b01713d759c2ddc0f57229a1bb599d72298746cdeff9512abc46a079494f", size = 3865142, upload-time = "2026-05-13T18:49:17.57Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/20/0c1fef5372e7184bd37eccb240f2ce80347cb8feb15373d721722c082786/opencolorio-2.5.2-cp313-cp313-macosx_10_15_x86_64.whl", hash = "sha256:d1a5ca15950a56bfaa6e061865e5550659522a86c31b4459fe29c6cc4f11eec4", size = 6358789, upload-time = "2026-05-13T18:49:19.21Z" },
+    { url = "https://files.pythonhosted.org/packages/70/c4/5f0aef0fc6e89cf518eea6fbc0942542d54a80ce0a46a02abdae911bb2bf/opencolorio-2.5.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bdc60c73e35e9fa25ecb777906b68d098fc7845b9ffbeaf6bc67b73e42bee79b", size = 5720294, upload-time = "2026-05-13T18:49:20.903Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/98/ce372b2eb35079dea3b1f088b514082bf92d9642d425e29227d5efa869c1/opencolorio-2.5.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0a690efa269a5310b5e70c930380be02d56ffdb287a33b13f81bcdbcbfe27566", size = 6251862, upload-time = "2026-05-13T18:49:22.282Z" },
+    { url = "https://files.pythonhosted.org/packages/14/cd/64994fa3d24bf4f76fbd8517249fd3e5b0983f552a5c784b3a1f42cdf4dc/opencolorio-2.5.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:36265c9539ef8317e6b4a7750c155286b6376626f7af67f98c536a5a20273871", size = 6825599, upload-time = "2026-05-13T18:49:23.654Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/6c/bca59902d1cf151dab890ca75312b85f3a86724230348de2447a1cc93475/opencolorio-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b7d7494a311bf38bd3311d2bcb37c1409c5a0961559bcb802c90656edf96e379", size = 6941010, upload-time = "2026-05-13T18:49:25.267Z" },
+    { url = "https://files.pythonhosted.org/packages/46/3b/4ba827c2d740a904cc93376694c5ac735d3e90bb7128783970f8c3807856/opencolorio-2.5.2-cp313-cp313-win_amd64.whl", hash = "sha256:47a68600bb159c2a4a824752c25554ca4f3847089cbc226d05478e284cec17c3", size = 3865124, upload-time = "2026-05-13T18:49:26.825Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/96/ac466b577fe45334381848ef5cebbcaa1ad7c716a2f225627b53362f0a0d/opencolorio-2.5.2-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:43957589095a3fa5cbfa1faa3d7da39da6c898b9a2d98207adc5ab92734e10b3", size = 6358779, upload-time = "2026-05-13T18:49:28.176Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/62/22d9fc33dafd72f40f9320db119e68c6ca8e5031702f334ffa8f7814cb0b/opencolorio-2.5.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:142eafd6c31aa7da3c97d2af5ce0403ccd2859be1252336ef9a2aea9a5082dce", size = 5713109, upload-time = "2026-05-13T18:49:29.716Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/3e/d8bff675d02fada4b8b68fb5c2334de11f8829ccc3afd45aa42e75d237a0/opencolorio-2.5.2-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:91a831f3ebcb1b3a67320a022f927c6a1811df68bad8d2c9730462b76b113b88", size = 6264662, upload-time = "2026-05-13T18:49:31.611Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/45/cd3b391843bb4dd2fbe4b8e324472cbbdcb5d198abfda0d81948a83532bb/opencolorio-2.5.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b5f8c408f6dfb8561f6b30471eb0591742921edbc8b9e4caaa2b92cebe580c38", size = 6827981, upload-time = "2026-05-13T18:49:32.945Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/90/6e8f3a0bba909754112514fce6f2baf9d5ba99fff71cc2bea00e621e6bba/opencolorio-2.5.2-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e1ede691d5263d3fc3c796bfff29f07042ac724d25675b031dd305ff5461366f", size = 6943716, upload-time = "2026-05-13T18:49:34.436Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/db/5327b1e96d4bdfd5793976f8626edc9c81497b95f50b67f5a5f8a11ce6f0/opencolorio-2.5.2-cp314-cp314-win_amd64.whl", hash = "sha256:076536f95c02911dcd32a5fd7033e5c3261d88a1aca7e40f4fd6093b99622f4b", size = 4032919, upload-time = "2026-05-13T18:49:36.219Z" },
+]
+
+[[package]]
+name = "ruff"
+version = "0.15.13"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/21/a7d5c126d5b557715ef81098f3db2fe20f622a039ff2e626af28d674ab80/ruff-0.15.13.tar.gz", hash = "sha256:f9d89f17f7ba7fb2ed42921f0df75da797a9a5d71bc39049e2c687cf2baf44b7", size = 4678180, upload-time = "2026-05-14T13:44:37.869Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c6/61/11d458dc6ac22504fd8e237b29dfd40504c7fbbcc8930402cfe51a8e63ed/ruff-0.15.13-py3-none-linux_armv6l.whl", hash = "sha256:444b580fc72fd6887e650acd3e575e18cdc79dbcf42fb4030b491057921f61f8", size = 10738279, upload-time = "2026-05-14T13:44:18.7Z" },
+    { url = "https://files.pythonhosted.org/packages/86/ca/caa871ee7be718c45256fada4e16a218ee3e33f0c4a46b729a60a24912e6/ruff-0.15.13-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:6590d009e7cb7ebf36f83dbdd44a3fa48a0994ff6f1cdc1b08006abe58f98dc7", size = 11124798, upload-time = "2026-05-14T13:44:06.427Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/19/43f5f2e568dddde567fc41f8471f9432c09563e19d3e617a48cfa52f8f0a/ruff-0.15.13-py3-none-macosx_11_0_arm64.whl", hash = "sha256:1c26d2f66163deeb6e08d8b39fbbe983ce3c71cea06a6d7591cfd1421793c629", size = 10460761, upload-time = "2026-05-14T13:44:04.375Z" },
+    { url = "https://files.pythonhosted.org/packages/99/df/cf938cd6de3003178f03ad7c1ea2a6c099468c03a35037985070b37e76be/ruff-0.15.13-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9dbd6f94b434f896308e4d57fb7bfde0d02b99f7a64b3bdab0fdfa6a864203a5", size = 10804451, upload-time = "2026-05-14T13:44:25.221Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/7d/5d0973129b154ded2225729169d7068f26b467760b146493fde138415f23/ruff-0.15.13-py3-none-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:bf3259f3be4d181bda591da5db2571aed6853c6a048157756448020bc6c5cd22", size = 10534285, upload-time = "2026-05-14T13:44:08.888Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/e3/6b999bbc66cd51e5f073842bc2a3995e99c5e0e72e16b15e7261f7abf57a/ruff-0.15.13-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:ae9c17e5eb4430c154e76abc25d79a318190f5a997f38fb6b114416c5319ffc9", size = 11312063, upload-time = "2026-05-14T13:44:11.274Z" },
+    { url = "https://files.pythonhosted.org/packages/af/5a/642639e9f5db04f1e97fbd6e091c6fd20725bdf072fb114d00eefb9e6eb8/ruff-0.15.13-py3-none-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:2e2e39bff6c341f4b577a21b801326fab0b11847f48fcaa83f00a113c9b3cb55", size = 12183079, upload-time = "2026-05-14T13:44:01.634Z" },
+    { url = "https://files.pythonhosted.org/packages/19/4c/7585735f6b53b0f12de13618b2f7d250a844f018822efc899df2e7b8295f/ruff-0.15.13-py3-none-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:e8d9a8e08013542e94d3220bc5b62cc3e5ef87c5f74bff367d3fac14fab013e6", size = 11440833, upload-time = "2026-05-14T13:43:59.043Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/31/bf1a0803d077e679cfeee5f2f67290a0fa79c7385b5d9a8c17b9db2c48f0/ruff-0.15.13-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cc411dfebe5eebe55ce041c6ae080eb7668955e866daa2fbb16692a784f1c4ca", size = 11434486, upload-time = "2026-05-14T13:44:27.761Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/4e/62c9b999875d4f14db80f277c030578f5e249c9852d65b7ac7ad0b43c041/ruff-0.15.13-py3-none-manylinux_2_31_riscv64.whl", hash = "sha256:768494eb08b9cee54e2fd27969966f74db5a57f6eaa7a90fcb3306af34dfc4bd", size = 11385189, upload-time = "2026-05-14T13:44:13.704Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/89/7e959047a104df3eb12863447c110140191fc5b6c4f379ea2e803fcdb0e4/ruff-0.15.13-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:fb75f9a3a7e42ffe117d734494e6c5e5cb3565d66e12612cb63d0e572a41a5b6", size = 10781380, upload-time = "2026-05-14T13:43:56.734Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/52/5fd18f3b88cab63e88aa11516b3b4e1e5f720e5c330f8dbe5c26210f41f8/ruff-0.15.13-py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:8cb74dd33bb2f6613faf7fc03b660053b5ac4f80e706d5788c6335e2a8048d51", size = 10540605, upload-time = "2026-05-14T13:44:20.748Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/e0/9e35f338990d3e41a82875ff7053ffe97541dae81c9d02143177f381d572/ruff-0.15.13-py3-none-musllinux_1_2_i686.whl", hash = "sha256:7ef823f817fcd191dc934e984be9cf4094f808effa16f2542ad8e821ba02bbf2", size = 11036554, upload-time = "2026-05-14T13:44:16.256Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/13/070fb048c24080fba188f66371e2a92785be257ad02242066dc7255ac6e9/ruff-0.15.13-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:f345a13937bd7f09f6f5d19fa0721b0c103e00e7f62bc67089a8e5e037719e0b", size = 11528133, upload-time = "2026-05-14T13:44:22.808Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/8c/b1e1666aef7fc6555094d73ae6cd981701781ae85b97ceefc0eebd0b4668/ruff-0.15.13-py3-none-win32.whl", hash = "sha256:4044f94208b3b05ba0fc4a4abd0558cf4d6459bd18325eead7fd8cc66f909b41", size = 10721455, upload-time = "2026-05-14T13:44:35.697Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/a6/870a3e8a50590bb92be184ad928c2922f088b00d9dc5c5ec7b924ee08c22/ruff-0.15.13-py3-none-win_amd64.whl", hash = "sha256:7064884d442b7d477b4e7473d12da7f08851d2b1982763c5d3f388a19468a1a4", size = 11900409, upload-time = "2026-05-14T13:44:30.389Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/36/9c015cd052fca743dae8cb2aeb16b551444787467db42ceab0fc968865af/ruff-0.15.13-py3-none-win_arm64.whl", hash = "sha256:2471da9bd1068c8c064b5fd9c0c4b6dddffd6369cb1cd68b29993b1709ff1b21", size = 11179336, upload-time = "2026-05-14T13:44:33.026Z" },
+]

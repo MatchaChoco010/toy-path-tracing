@@ -73,17 +73,16 @@ fi
 # russimp-sys 2.0.2 ships only headers on crates.io (so its `static-link`
 # feature cannot build assimp from the registry copy) and on Linux x86_64 the
 # build script forgets to add cmake's `lib64/` install path to the rustc link
-# search list. Clone the upstream source with submodules and apply the small
-# in-repo patch that adds the missing search path. The resulting working tree
-# is referenced via `[patch.crates-io]` in the workspace root Cargo.toml.
-RUSSIMP_SYS_REPO="https://github.com/jkvargas/russimp-sys.git"
+# search list. Initialize the upstream submodule and apply the small in-repo
+# patch that adds the missing search path. The resulting working tree is
+# referenced via `[patch.crates-io]` in tools/convert_bistro/Cargo.toml.
 RUSSIMP_SYS_TAG="v2.0.2"
+RUSSIMP_SYS_SUBMODULE="tools/russimp-sys"
 RUSSIMP_SYS_DIR="$REPO_DIR/tools/russimp-sys"
 RUSSIMP_SYS_PATCH="$REPO_DIR/tools/russimp-sys-lib64.patch"
 if [ ! -d "$RUSSIMP_SYS_DIR" ]; then
-    echo "Cloning russimp-sys ${RUSSIMP_SYS_TAG} with assimp submodule ..."
-    git clone --quiet --recurse-submodules --depth 1 \
-        --branch "$RUSSIMP_SYS_TAG" "$RUSSIMP_SYS_REPO" "$RUSSIMP_SYS_DIR"
+    echo "Initializing russimp-sys ${RUSSIMP_SYS_TAG} submodule ..."
+    git -C "$REPO_DIR" submodule update --init --recursive "$RUSSIMP_SYS_SUBMODULE"
 fi
 if ! grep -q 'unpredictable_function_pointer_comparisons' "$RUSSIMP_SYS_DIR/src/lib.rs"; then
     echo "Applying lib64 link-search and lint-suppression patch to russimp-sys ..."
