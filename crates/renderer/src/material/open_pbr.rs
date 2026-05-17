@@ -302,7 +302,7 @@ impl OpenPbrMaterial {
 
     pub fn validate_and_warn(&mut self) {
         if self.transmission_depth > 0.0 || self.transmission_scatter.length_squared() > 0.0 {
-            eprintln!(
+            tracing::warn!(
                 "[OpenPBR] interior medium absorption/scattering requires volume support, which is not supported; falling back to transparent interior."
             );
             self.transmission_depth = 0.0;
@@ -311,7 +311,7 @@ impl OpenPbrMaterial {
             self.transmission_color = Vec3::ONE;
         }
         if self.subsurface_weight > 0.0 {
-            eprintln!(
+            tracing::warn!(
                 "[OpenPBR] subsurface scattering requires volume/BSSRDF support, which is not supported; subsurface_weight forced to 0."
             );
             self.subsurface_weight = 0.0;

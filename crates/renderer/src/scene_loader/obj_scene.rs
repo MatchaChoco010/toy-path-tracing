@@ -109,7 +109,8 @@ impl From<LoadMeshError> for LoadObjSceneError {
 }
 
 pub fn load_obj_scene(obj_path: &Path) -> Result<ObjScene, LoadObjSceneError> {
-    let source = fs::read_to_string(obj_path)?;
+    let obj_path = crate::paths::workspace_path(obj_path);
+    let source = fs::read_to_string(&obj_path)?;
     let dir = obj_path.parent().map(Path::to_path_buf).unwrap_or_default();
     let scene = parse_obj_scene_source(&source, &dir)?;
 

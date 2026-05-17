@@ -214,7 +214,8 @@ impl From<std::io::Error> for LoadMeshError {
 }
 
 pub fn load_gltf(path: &Path) -> Result<Mesh, LoadMeshError> {
-    let (document, buffers, _) = gltf::import(path)?;
+    let path = crate::paths::workspace_path(path);
+    let (document, buffers, _) = gltf::import(&path)?;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let mut appended_mesh = false;
@@ -242,11 +243,13 @@ pub fn load_gltf(path: &Path) -> Result<Mesh, LoadMeshError> {
 }
 
 pub fn load_obj(path: &Path) -> Result<Mesh, LoadMeshError> {
+    let path = crate::paths::workspace_path(path);
     let source = fs::read_to_string(path)?;
     parse_obj(&source)
 }
 
 pub fn load_stl(path: &Path) -> Result<Mesh, LoadMeshError> {
+    let path = crate::paths::workspace_path(path);
     let mut reader = fs::File::open(path)?;
     read_stl_into_mesh(&mut reader)
 }

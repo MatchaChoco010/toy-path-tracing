@@ -330,7 +330,7 @@ impl Texture<Vec3> {
         path: impl AsRef<Path>,
         color_space: TextureColorSpace,
     ) -> image::ImageResult<Self> {
-        let image = image::open(path)?.into_rgba32f();
+        let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let pixels = image
@@ -350,7 +350,7 @@ impl Texture<Vec3> {
         path: impl AsRef<Path>,
         color_space: TextureColorSpace,
     ) -> image::ImageResult<(Self, Option<ScalarTexture>)> {
-        let image = image::open(path)?.into_rgba32f();
+        let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let mut rgb_pixels = Vec::with_capacity(width * height);
@@ -400,7 +400,7 @@ impl Texture<f32> {
     /// image (after sRGB decoding has been skipped — scalar maps are always
     /// linear).
     pub fn from_file(path: impl AsRef<Path>) -> image::ImageResult<Self> {
-        let image = image::open(path)?.into_rgba32f();
+        let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
         let pixels = image.pixels().map(|pixel| pixel[0]).collect();

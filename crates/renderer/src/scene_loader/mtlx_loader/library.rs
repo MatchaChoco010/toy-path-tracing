@@ -310,6 +310,7 @@ fn parse_version(s: &str) -> Option<(u32, u32)> {
 }
 
 pub fn load_standard_library(root: &Path) -> Result<MtlxLibrary, ParseError> {
+    let root = crate::paths::workspace_path(root);
     let mut lib = MtlxLibrary::new();
     let order = [
         "stdlib/stdlib_defs.mtlx",
@@ -352,7 +353,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn lib_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib/materialx/libraries")
+        crate::paths::workspace_path("lib/materialx/libraries")
     }
 
     #[test]

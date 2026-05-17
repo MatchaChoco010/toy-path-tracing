@@ -99,6 +99,7 @@ impl From<LoadMeshError> for LoadGltfSceneError {
 }
 
 pub fn load_gltf_scene(path: &Path) -> Result<GltfScene, LoadGltfSceneError> {
+    let path = crate::paths::workspace_path(path);
     let (document, buffers, images) = gltf::import(path)?;
 
     let mut material_meshes = Vec::new();

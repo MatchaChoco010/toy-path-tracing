@@ -3438,9 +3438,10 @@ impl<'a> Builder<'a> {
                     Some("linear") | Some("lin_rec709") | Some("scene_linear") | Some("none")
                     | None => TextureColorSpace::Linear,
                     Some(other) => {
-                        eprintln!(
+                        tracing::warn!(
                             "warning: colorspace `{}` is not supported yet; treating image input `{}` as linear",
-                            other, name
+                            other,
+                            name
                         );
                         TextureColorSpace::Linear
                     }
@@ -3455,14 +3456,14 @@ impl<'a> Builder<'a> {
             match binding {
                 FlatInput::Value(MtlxValue::String(range)) | FlatInput::String(range) => {
                     if !range.is_empty() {
-                        eprintln!(
+                        tracing::warn!(
                             "warning: {}.framerange is not implemented; animated image frame range is ignored",
                             category
                         );
                     }
                 }
                 FlatInput::Node { .. } | FlatInput::GeomProp(_) => {
-                    eprintln!(
+                    tracing::warn!(
                         "warning: dynamic {}.framerange is not implemented; animated image frame range is ignored",
                         category
                     );
@@ -3489,14 +3490,15 @@ impl<'a> Builder<'a> {
                         )));
                     }
                     if !action.is_empty() && action != "constant" {
-                        eprintln!(
+                        tracing::warn!(
                             "warning: {}.frameendaction=`{}` is not implemented; animated image frame range is ignored",
-                            category, action
+                            category,
+                            action
                         );
                     }
                 }
                 FlatInput::Node { .. } | FlatInput::GeomProp(_) => {
-                    eprintln!(
+                    tracing::warn!(
                         "warning: dynamic {}.frameendaction is not implemented; animated image frame range is ignored",
                         category
                     );
@@ -3515,20 +3517,20 @@ impl<'a> Builder<'a> {
                 FlatInput::Value(MtlxValue::Integer(0)) => {}
                 FlatInput::Value(MtlxValue::Float(v)) if *v == 0.0 => {}
                 FlatInput::Value(MtlxValue::Integer(_)) | FlatInput::Value(MtlxValue::Float(_)) => {
-                    eprintln!(
+                    tracing::warn!(
                         "warning: {}.frameoffset is not implemented; animated image frame offset is ignored",
                         category
                     );
                 }
                 FlatInput::Node { .. } | FlatInput::GeomProp(_) => {
-                    eprintln!(
+                    tracing::warn!(
                         "warning: dynamic {}.frameoffset is not implemented; animated image frame offset is ignored",
                         category
                     );
                 }
                 FlatInput::String(s) => match s.parse::<i32>() {
                     Ok(0) => {}
-                    Ok(_) => eprintln!(
+                    Ok(_) => tracing::warn!(
                         "warning: {}.frameoffset is not implemented; animated image frame offset is ignored",
                         category
                     ),
@@ -3897,7 +3899,9 @@ impl<'a> Builder<'a> {
                 node.kind, kind
             ))),
             FlatNodeKind::Displacement => {
-                eprintln!("warning: displacement node is not supported; ignoring displacement");
+                tracing::warn!(
+                    "warning: displacement node is not supported; ignoring displacement"
+                );
                 Ok(0)
             }
             FlatNodeKind::Light => Err(CompileError::Unsupported(
@@ -4306,7 +4310,7 @@ impl<'a> Builder<'a> {
                 }))
             }
             "subsurface_bsdf" => {
-                eprintln!(
+                tracing::warn!(
                     "warning: subsurface_bsdf is not fully supported; falling back to burley_diffuse_bsdf with roughness=0.5 (radius/anisotropy ignored)"
                 );
                 let weight = p_float(
@@ -4428,7 +4432,7 @@ impl<'a> Builder<'a> {
                 }))
             }
             "measured_edf" => {
-                eprintln!(
+                tracing::warn!(
                     "warning: measured_edf (IES profiles) is not supported; falling back to uniform_edf with the same color"
                 );
                 let color = p_color(
@@ -4478,7 +4482,7 @@ impl<'a> Builder<'a> {
                     "absorption",
                     Some(ValueType::Vector3),
                 )?;
-                eprintln!(
+                tracing::warn!(
                     "warning: VDF node `{}` is not supported; treating as zero (no volume absorption/scattering)",
                     category
                 );
@@ -4497,7 +4501,7 @@ impl<'a> Builder<'a> {
                 )?;
                 let _anisotropy =
                     self.input_value_param(node, "anisotropy", Some(ValueType::Float))?;
-                eprintln!(
+                tracing::warn!(
                     "warning: VDF node `{}` is not supported; treating as zero (no volume absorption/scattering)",
                     category
                 );
@@ -6761,9 +6765,10 @@ impl<'a> Builder<'a> {
                         }
                         "srgb_texture" | "srgb" | "sRGB" | "srgb_displayp3" => Some("srgb"),
                         other => {
-                            eprintln!(
+                            tracing::warn!(
                                 "warning: transformcolor.{} colorspace `{}` is not supported yet; leaving color unchanged",
-                                name, other
+                                name,
+                                other
                             );
                             Some("unsupported")
                         }
@@ -7142,7 +7147,7 @@ impl<'a> Builder<'a> {
                 let filter = match Self::input_static_string(node, category, "filtertype")? {
                     None | Some("") | Some("linear") => TriplanarFilter::Linear,
                     Some("cubic") => {
-                        eprintln!(
+                        tracing::warn!(
                             "warning: triplanarblend.filtertype=`cubic` is not implemented; using linear filtering"
                         );
                         TriplanarFilter::Linear
@@ -7908,7 +7913,7 @@ fn parse_filter_type(s: Option<&str>) -> Result<FilterType, CompileError> {
         None | Some("") | Some("linear") => Ok(FilterType::Linear),
         Some("closest") => Ok(FilterType::Closest),
         Some("cubic") => {
-            eprintln!(
+            tracing::warn!(
                 "warning: image.filtertype=`cubic` is not implemented; using linear filtering"
             );
             Ok(FilterType::Linear)

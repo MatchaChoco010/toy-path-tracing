@@ -298,7 +298,7 @@ pub fn flatten_material(
         })?;
 
     if material.category == "volumematerial" {
-        eprintln!(
+        tracing::warn!(
             "warning: material `{}` is `volumematerial`; volume rendering is not implemented, treating it as passthrough",
             material_name
         );
@@ -357,7 +357,7 @@ pub fn flatten_material(
         .find(|i| i.name == "displacementshader")
         && !is_empty_shader_binding(&input.binding)
     {
-        eprintln!(
+        tracing::warn!(
             "warning: surfacematerial.displacementshader is not implemented; geometry displacement will be ignored"
         );
     }
@@ -609,7 +609,7 @@ fn substitute_filename_tokens(value: &str, tokens: &HashMap<String, String>) -> 
         {
             let token = &value[i + 1..i + end];
             if token == "frame" {
-                eprintln!(
+                tracing::warn!(
                     "[mtlx] warning: animated image token `{{frame}}` is not supported yet; using frame 0"
                 );
                 out.push('0');
@@ -620,7 +620,7 @@ fn substitute_filename_tokens(value: &str, tokens: &HashMap<String, String>) -> 
                 && let Some(width_str) = stripped.strip_prefix('0')
                 && let Ok(width) = width_str.parse::<usize>()
             {
-                eprintln!(
+                tracing::warn!(
                     "[mtlx] warning: animated image token `{{{}frame}}` is not supported yet; using frame 0",
                     stripped
                 );
@@ -633,7 +633,7 @@ fn substitute_filename_tokens(value: &str, tokens: &HashMap<String, String>) -> 
         {
             let token = &value[i + 1..i + end];
             if token != "UDIM" && token != "UVTILE" {
-                eprintln!(
+                tracing::warn!(
                     "[mtlx] warning: geometry filename token `<{}>` is not supported yet; leaving token unresolved",
                     token
                 );
@@ -1731,9 +1731,10 @@ fn convert_color3(c: glam::Vec3, colorspace: &str, input_name: &str) -> glam::Ve
         "srgb_texture" | "g22_rec709" | "g22_ap1" | "srgb_displayp3" => srgb_to_linear(c),
         "linear" | "lin_rec709" | "scene_linear" | "none" => c,
         other => {
-            eprintln!(
+            tracing::warn!(
                 "[mtlx] warning: colorspace `{}` on value input `{}` is not supported yet; treating value as linear",
-                other, input_name
+                other,
+                input_name
             );
             c
         }
@@ -1946,7 +1947,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn lib_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib/materialx/libraries")
+        crate::paths::workspace_path("lib/materialx/libraries")
     }
 
     const SAMPLE_LAMBERT: &str = r#"<?xml version="1.0"?>

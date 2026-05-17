@@ -326,7 +326,7 @@ impl StandardSurfaceMaterial {
                 || self.specular_anisotropy != 0.0
                 || self.transmission_extra_roughness > 0.0)
         {
-            eprintln!(
+            tracing::warn!(
                 "[StandardSurface] thin_walled=true ignores specular_roughness/anisotropy/transmission_extra_roughness; treating specular as smooth."
             );
             self.specular_roughness = 0.0;
@@ -334,19 +334,19 @@ impl StandardSurfaceMaterial {
             self.transmission_extra_roughness = 0.0;
         }
         if !self.thin_walled && self.subsurface > 0.0 {
-            eprintln!(
+            tracing::warn!(
                 "[StandardSurface] subsurface > 0 with thin_walled=false requires volumetric SSS, which is not supported; subsurface forced to 0."
             );
             self.subsurface = 0.0;
         }
         if self.transmission_depth > 0.0 {
-            eprintln!(
+            tracing::warn!(
                 "[StandardSurface] transmission_depth > 0 (Beer's law absorption) is not supported; ignoring (treating as 0)."
             );
             self.transmission_depth = 0.0;
         }
         if self.transmission_scatter.length_squared() > 0.0 {
-            eprintln!("[StandardSurface] transmission_scatter is not supported; ignoring.");
+            tracing::warn!("[StandardSurface] transmission_scatter is not supported; ignoring.");
             self.transmission_scatter = Vec3::ZERO;
         }
     }

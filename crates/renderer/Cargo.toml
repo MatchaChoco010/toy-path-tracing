@@ -1,0 +1,21 @@
+[package]
+name = "toy-path-tracing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitflags = "2.11.1"
+clap = { version = "4.6.1", features = ["derive"] }
+glam = "0.32.1"
+gltf = "1.4.1"
+image = "0.25.10"
+rand = "0.10.1"
+rayon = "1.12.0"
+roxmltree = "0.20"
+stl_io = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+wide = "1.3.0"
+
+[lints.clippy]
+too_many_arguments = "allow"

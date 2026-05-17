@@ -144,7 +144,7 @@ fn pick_color_space(colorspace: Option<&str>) -> TextureColorSpace {
     match colorspace {
         Some("srgb_texture") => TextureColorSpace::Srgb,
         Some(other @ ("g22_rec709" | "g22_ap1" | "srgb_displayp3")) => {
-            eprintln!(
+            tracing::warn!(
                 "[mtlx] warning: colorspace `{}` is approximated as sRGB until OCIO support is added",
                 other
             );
@@ -154,7 +154,7 @@ fn pick_color_space(colorspace: Option<&str>) -> TextureColorSpace {
             TextureColorSpace::Linear
         }
         Some(other) => {
-            eprintln!(
+            tracing::warn!(
                 "[mtlx] warning: colorspace `{}` is not supported yet; treating image as linear",
                 other
             );
@@ -206,9 +206,10 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                         }
                         Ok(_) => {}
                         Err(e) => {
-                            eprintln!(
+                            tracing::warn!(
                                 "[mtlx] warning: failed scanning alpha UDIM tiles for `{}`: {}",
-                                filename, e
+                                filename,
+                                e
                             );
                         }
                     }
@@ -220,15 +221,16 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                     udim_out.insert(filename.clone(), Arc::new(tiles));
                 }
                 Ok(_) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: filename `{}` declares <UDIM>/<UVTILE> but no matching tiles were found",
                         filename
                     );
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: failed scanning UDIM tiles for `{}`: {}",
-                        filename, e
+                        filename,
+                        e
                     );
                 }
             }
@@ -246,7 +248,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                         }
                     }
                     Err(e) => {
-                        eprintln!(
+                        tracing::warn!(
                             "[mtlx] warning: could not load color4 image `{}` (resolved to {}): {}",
                             filename,
                             resolved.display(),
@@ -268,7 +270,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                     }
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: could not load color image `{}` (resolved to {}): {}",
                         filename,
                         resolved.display(),
@@ -282,7 +284,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                     out.insert(filename.clone(), Arc::new(tex));
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: could not load color image `{}` (resolved to {}): {}",
                         filename,
                         resolved.display(),
@@ -343,7 +345,7 @@ fn load_udim_tiles(
                     );
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: failed loading UDIM tile {} ({}): {}",
                         udim_id,
                         path.display(),
@@ -364,7 +366,7 @@ fn load_udim_tiles(
                     );
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: failed loading UDIM tile {} ({}): {}",
                         udim_id,
                         path.display(),
@@ -462,15 +464,16 @@ fn collect_scalar_textures(graph: &FlatGraph, mtlx_path: &Path) -> ScalarTexture
                     udim_out.insert(filename.clone(), Arc::new(tiles));
                 }
                 Ok(_) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: filename `{}` declares <UDIM>/<UVTILE> but no matching scalar tiles were found",
                         filename
                     );
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::warn!(
                         "[mtlx] warning: failed scanning scalar UDIM tiles for `{}`: {}",
-                        filename, e
+                        filename,
+                        e
                     );
                 }
             }
@@ -485,7 +488,7 @@ fn collect_scalar_textures(graph: &FlatGraph, mtlx_path: &Path) -> ScalarTexture
                 out.insert(filename.clone(), Arc::new(tex));
             }
             Err(e) => {
-                eprintln!(
+                tracing::warn!(
                     "[mtlx] warning: could not load scalar image `{}` (resolved to {}): {}",
                     filename,
                     resolved.display(),
@@ -534,7 +537,7 @@ fn load_scalar_udim_tiles(parent: &Path, pattern: &str) -> std::io::Result<UdimT
                 );
             }
             (Err(e), _) | (_, Err(e)) => {
-                eprintln!(
+                tracing::warn!(
                     "[mtlx] warning: failed loading scalar UDIM tile {} ({}): {}",
                     udim_id,
                     path.display(),

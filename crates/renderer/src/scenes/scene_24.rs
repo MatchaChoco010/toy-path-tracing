@@ -1,7 +1,7 @@
 //! Amazon Lumberyard Bistro の Exterior + Interior を読み込み、シーン中の emissive ポリゴンだけで照らす。
 
 use glam::{Mat4, Vec3};
-use std::{error::Error, path::Path, sync::Arc};
+use std::{error::Error, sync::Arc};
 
 use crate::{
     camera::PinholeCamera,
@@ -42,12 +42,12 @@ pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
     let mut found_any_glb = false;
 
     for path in BISTRO_GLTF_FILES {
-        let glb_path = Path::new(path);
+        let glb_path = crate::paths::workspace_path(path);
         if !glb_path.exists() {
             continue;
         }
         found_any_glb = true;
-        let gltf_scene = load_gltf_scene(glb_path)?;
+        let gltf_scene = load_gltf_scene(&glb_path)?;
         let mut cache = ImageCache::new(gltf_scene.images.len());
 
         for slot in &gltf_scene.material_meshes {
@@ -84,7 +84,7 @@ pub fn create_scene_24() -> Result<(Scene, PinholeCamera), Box<dyn Error>> {
             .into());
     }
 
-    eprintln!(
+    tracing::warn!(
         "scene 24 (Bistro original): {} triangles, emissive={} ({} tri), \
          simple_pbr={}, dielectric_ggx={}, lambert_fallback={}",
         total_tris,

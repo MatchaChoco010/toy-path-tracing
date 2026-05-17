@@ -141,7 +141,7 @@ fn load_diffuse_texture(
             Some(entry)
         }
         Err(error) => {
-            eprintln!(
+            tracing::warn!(
                 "warning: failed to load San Miguel texture {}: {error}",
                 absolute_path.display()
             );

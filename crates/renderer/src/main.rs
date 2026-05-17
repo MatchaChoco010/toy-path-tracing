@@ -11,6 +11,7 @@ use std::{
 use toy_path_tracing::{
     color::linear_to_srgb, integrator::IntegratorKind, math::reinhard, scenes::load_scene,
 };
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -34,19 +35,23 @@ struct Args {
 
     #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
+
+    #[arg(long = "log-filter")]
+    log_filter: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    init_tracing(args.log_filter.as_deref())?;
     let resolution = UVec2::new(args.width, args.height);
     let (mut scene, camera) = load_scene(args.scene)?;
     let build_bvh_start = Instant::now();
     scene.build_qbvh();
-    println!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
+    tracing::info!("build_bvh: {}", format_duration(build_bvh_start.elapsed()));
 
     let build_light_tree_start = Instant::now();
     scene.build_light_tree();
-    println!(
+    tracing::info!(
         "build_light_tree: {}",
         format_duration(build_light_tree_start.elapsed())
     );
@@ -80,12 +85,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pixel[2] = float_to_u8(encoded.z);
         },
     );
-    println!("render: {}", format_duration(intersect_start.elapsed()));
+    tracing::info!("render: {}", format_duration(intersect_start.elapsed()));
 
     let image = RgbImage::from_raw(resolution.x, resolution.y, pixels)
         .expect("pixel buffer size must match the image resolution");
     create_output_directory(&args.output)?;
     image.save(&args.output)?;
+
+    Ok(())
+}
+
+fn init_tracing(log_filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let filter = if let Some(log_filter) = log_filter {
+        EnvFilter::try_new(log_filter)?
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+    };
+
+    fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stdout)
+        .init();
 
     Ok(())
 }
@@ -134,5 +154,12 @@ mod tests {
             .expect("expected valid mis integrator");
 
         assert_eq!(args.integrator, IntegratorKind::Mis);
+    }
+
+    #[test]
+    fn log_filter_is_optional() {
+        let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
+
+        assert_eq!(args.log_filter, None);
     }
 }

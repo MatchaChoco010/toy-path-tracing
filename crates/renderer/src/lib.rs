@@ -7,6 +7,7 @@ pub mod light_tree;
 pub mod material;
 pub mod math;
 pub mod mesh;
+pub mod paths;
 pub mod qbvh;
 pub mod ray;
 pub mod scene;

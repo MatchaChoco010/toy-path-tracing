@@ -61,7 +61,7 @@ fn dummy_sv() -> ShadingVertex {
 }
 
 fn lib_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib/materialx/libraries")
+    crate::paths::workspace_path("lib/materialx/libraries")
 }
 
 fn run(
