@@ -1,15 +1,21 @@
 use clap::Parser;
 use glam::{UVec2, Vec2, Vec3};
-use image::RgbImage;
 use rand::RngExt;
 use rayon::prelude::*;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use toy_path_tracing::{
-    color::linear_to_srgb, integrator::IntegratorKind, math::reinhard, scenes::load_scene,
+    color::management::{
+        DEFAULT_OCIO_CONFIG, DEFAULT_OUTPUT_DISPLAY, DEFAULT_OUTPUT_VIEW,
+        DEFAULT_TEXTURE_COLOR_SPACE, OcioRenderContext, set_current,
+    },
+    integrator::IntegratorKind,
+    output_image::{OutputTransform, save_output},
+    scenes::load_scene,
 };
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -36,6 +42,21 @@ struct Args {
     #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
 
+    #[arg(long = "ocio-config", default_value = DEFAULT_OCIO_CONFIG)]
+    ocio_config: String,
+
+    #[arg(long = "ocio-rendering-space")]
+    ocio_rendering_space: Option<String>,
+
+    #[arg(long = "texture-color-space", default_value = DEFAULT_TEXTURE_COLOR_SPACE)]
+    texture_color_space: String,
+
+    #[arg(long = "output-display")]
+    output_display: Option<String>,
+
+    #[arg(long = "output-view")]
+    output_view: Option<String>,
+
     #[arg(long = "log-filter")]
     log_filter: Option<String>,
 }
@@ -43,6 +64,19 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     init_tracing(args.log_filter.as_deref())?;
+    let ocio = Arc::new(OcioRenderContext::new(
+        &args.ocio_config,
+        args.ocio_rendering_space.clone(),
+        &args.texture_color_space,
+    )?);
+    tracing::info!(
+        ocio_config = ocio.config_source(),
+        rendering_space = ocio.rendering_space(),
+        texture_color_space = ocio.texture_color_space(),
+        "initialized OCIO"
+    );
+    set_current(Arc::clone(&ocio))?;
+    let output_transform = output_transform(&args, &ocio)?;
     let resolution = UVec2::new(args.width, args.height);
     let (mut scene, camera) = load_scene(args.scene)?;
     let build_bvh_start = Instant::now();
@@ -57,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let exposure = camera.exposure;
-    let mut pixels = vec![0_u8; (resolution.x * resolution.y * 3) as usize];
+    let mut pixels = vec![0.0_f32; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();
     pixels.par_chunks_mut(3).enumerate().for_each_init(
         || (rand::rng(), scene.make_mtlx_scratch()),
@@ -78,21 +112,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let exposed = color * exposure;
-            let mapped = reinhard(exposed);
-            let encoded = linear_to_srgb(mapped);
-            pixel[0] = float_to_u8(encoded.x);
-            pixel[1] = float_to_u8(encoded.y);
-            pixel[2] = float_to_u8(encoded.z);
+            pixel[0] = exposed.x;
+            pixel[1] = exposed.y;
+            pixel[2] = exposed.z;
         },
     );
     tracing::info!("render: {}", format_duration(intersect_start.elapsed()));
 
-    let image = RgbImage::from_raw(resolution.x, resolution.y, pixels)
-        .expect("pixel buffer size must match the image resolution");
     create_output_directory(&args.output)?;
-    image.save(&args.output)?;
+    save_output(&args.output, resolution, &pixels, &ocio, &output_transform)?;
 
     Ok(())
+}
+
+fn output_transform(
+    args: &Args,
+    ocio: &OcioRenderContext,
+) -> Result<OutputTransform, Box<dyn std::error::Error>> {
+    if output_extension(&args.output).as_deref() == Some("exr")
+        && args.output_display.is_none()
+        && args.output_view.is_none()
+    {
+        return Ok(OutputTransform::Rendering);
+    }
+
+    let output_display = args
+        .output_display
+        .clone()
+        .unwrap_or_else(|| DEFAULT_OUTPUT_DISPLAY.to_string());
+    let view = args
+        .output_view
+        .clone()
+        .unwrap_or_else(|| DEFAULT_OUTPUT_VIEW.to_string());
+    ocio.validate_display_view(&output_display, &view)?;
+    tracing::info!(%output_display, output_view = %view, "selected OCIO output view");
+    Ok(OutputTransform::DisplayView {
+        display: output_display,
+        view,
+    })
 }
 
 fn init_tracing(log_filter: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
@@ -110,10 +167,6 @@ fn init_tracing(log_filter: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-fn float_to_u8(value: f32) -> u8 {
-    (255.0 * value.clamp(0.0, 1.0)) as u8
-}
-
 fn create_output_directory(output_path: &Path) -> std::io::Result<()> {
     if let Some(parent) = output_path
         .parent()
@@ -123,6 +176,12 @@ fn create_output_directory(output_path: &Path) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+fn output_extension(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -161,5 +220,13 @@ mod tests {
         let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
 
         assert_eq!(args.log_filter, None);
+    }
+
+    #[test]
+    fn output_display_view_are_optional() {
+        let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
+
+        assert_eq!(args.output_display, None);
+        assert_eq!(args.output_view, None);
     }
 }

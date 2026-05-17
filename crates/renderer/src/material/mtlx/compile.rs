@@ -4,12 +4,13 @@ use std::sync::Arc;
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
 use crate::bsdf::mtlx::{ScatterMode, SheenMode};
+use crate::color::management;
 use crate::material::pattern::noise::{hsv_to_rgb, rgb_to_hsv};
 use crate::material::{ScalarTexture, Texture, TextureColorSpace};
-use crate::scene_loader::mtlx_loader::MtlxValue;
 use crate::scene_loader::mtlx_loader::flatten::{
     FlatGraph, FlatInput, FlatNode, FlatNodeId, FlatNodeKind, GeometricKind as FgKind,
 };
+use crate::scene_loader::mtlx_loader::{MtlxType, MtlxValue};
 
 use super::compiled::{
     AddressMode, ArithOp, ArtisticIorOutput, BlendOp, ChiangHairRoughnessOutput, ClosureKind,
@@ -2670,6 +2671,7 @@ fn constant_instruction_value_tail(
                 ColorXform::LinearToSrgb => {
                     color_xform_constant(v, *ty, crate::color::linear_to_srgb)
                 }
+                ColorXform::Ocio { from, to } => ocio_xform_constant(v, *ty, from, to),
             };
             (*dst, out)
         }
@@ -2927,6 +2929,45 @@ fn color_xform_constant(v: Value, ty: ValueType, f: impl Fn(Vec3) -> Vec3) -> Va
             let c = v.as_color4();
             let rgb = f(Vec3::new(c.x, c.y, c.z));
             Value::Color4(Vec4::new(rgb.x, rgb.y, rgb.z, c.w))
+        }
+        _ => v,
+    }
+}
+
+fn materialx_color_space_to_ocio(name: &str, rendering_space: &str) -> String {
+    match name {
+        "" | "linear" | "scene_linear" => rendering_space.to_string(),
+        "none" => rendering_space.to_string(),
+        "g22" => "g22_rec709".to_string(),
+        other => management::map_materialx_color_space(other).to_string(),
+    }
+}
+
+fn legacy_color_space_name(name: &str) -> Option<&'static str> {
+    match name {
+        "" => None,
+        "lin_rec709" | "linear" | "scene_linear" | "lin_rec709_d65" => Some("linear"),
+        "srgb_texture" | "srgb" | "sRGB" | "srgb_displayp3" => Some("srgb"),
+        "g22" | "g22_rec709" | "g22_ap1" => Some("srgb"),
+        _ => Some("unsupported"),
+    }
+}
+
+fn ocio_xform_constant(v: Value, ty: ValueType, from: &str, to: &str) -> Value {
+    let Some(context) = management::current() else {
+        return v;
+    };
+    match ty {
+        ValueType::Color3 => context
+            .transform_rgb_between(v.as_color3(), from, to)
+            .map(Value::Color3)
+            .unwrap_or(v),
+        ValueType::Color4 => {
+            let c = v.as_color4();
+            context
+                .transform_rgba_between(c, from, to)
+                .map(Value::Color4)
+                .unwrap_or(v)
         }
         _ => v,
     }
@@ -3428,27 +3469,68 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn input_color_space(node: &FlatNode, name: &str) -> TextureColorSpace {
+    fn image_color_space(node: &FlatNode, name: &str) -> TextureColorSpace {
+        if !matches!(node.output_type, MtlxType::Color3 | MtlxType::Color4) {
+            return TextureColorSpace::Linear;
+        }
         for input in &node.inputs {
             if input.name == name {
                 return match input.colorspace.as_deref() {
-                    Some("srgb_texture") | Some("g22_rec709") | Some("g22_ap1") => {
-                        TextureColorSpace::Srgb
-                    }
-                    Some("linear") | Some("lin_rec709") | Some("scene_linear") | Some("none")
-                    | None => TextureColorSpace::Linear,
-                    Some(other) => {
-                        tracing::warn!(
-                            "warning: colorspace `{}` is not supported yet; treating image input `{}` as linear",
-                            other,
-                            name
-                        );
+                    None => TextureColorSpace::DefaultColor,
+                    Some("none") | Some("linear") | Some("scene_linear") => {
                         TextureColorSpace::Linear
                     }
+                    Some(other) => TextureColorSpace::ocio(
+                        management::map_materialx_color_space(other).to_string(),
+                    ),
                 };
             }
         }
-        TextureColorSpace::Linear
+        TextureColorSpace::DefaultColor
+    }
+
+    fn color_xform_to_rendering(src: &str) -> Result<ColorXform, CompileError> {
+        let Some(context) = management::current() else {
+            return Ok(match src {
+                "srgb_texture" | "g22" => ColorXform::SrgbToLinear,
+                _ => ColorXform::Identity,
+            });
+        };
+        let src = materialx_color_space_to_ocio(src, context.rendering_space());
+        if src == context.rendering_space() {
+            return Ok(ColorXform::Identity);
+        }
+        context
+            .validate_color_space(&src, context.rendering_space())
+            .map_err(|error| CompileError::Unsupported(format!("{src}: {error}")))?;
+        Ok(ColorXform::Ocio {
+            from: Arc::from(src),
+            to: Arc::from(context.rendering_space()),
+        })
+    }
+
+    fn color_xform_between(from: &str, to: &str) -> Result<ColorXform, CompileError> {
+        let Some(context) = management::current() else {
+            let from = legacy_color_space_name(from);
+            let to = legacy_color_space_name(to);
+            return Ok(match (from, to) {
+                (Some("srgb"), Some("linear")) | (Some("srgb"), None) => ColorXform::SrgbToLinear,
+                (Some("linear"), Some("srgb")) | (None, Some("srgb")) => ColorXform::LinearToSrgb,
+                _ => ColorXform::Identity,
+            });
+        };
+        let from = materialx_color_space_to_ocio(from, context.rendering_space());
+        let to = materialx_color_space_to_ocio(to, context.rendering_space());
+        if from == to {
+            return Ok(ColorXform::Identity);
+        }
+        context
+            .validate_color_space(&from, &to)
+            .map_err(|error| CompileError::Unsupported(format!("{from} -> {to}: {error}")))?;
+        Ok(ColorXform::Ocio {
+            from: Arc::from(from),
+            to: Arc::from(to),
+        })
     }
 
     fn warn_animated_image_inputs(node: &FlatNode, category: &str) -> Result<(), CompileError> {
@@ -5315,7 +5397,7 @@ impl<'a> Builder<'a> {
                 let file = Self::input_static_string(node, category, "file")?
                     .unwrap_or("")
                     .to_string();
-                let cs = Self::input_color_space(node, "file");
+                let cs = Self::image_color_space(node, "file");
                 let texcoord = self
                     .input_value_param(node, "texcoord", Some(ValueType::Vector2))?
                     .unwrap_or_else(|| {
@@ -5369,7 +5451,7 @@ impl<'a> Builder<'a> {
                 let file = Self::input_static_string(node, category, "file")?
                     .unwrap_or("")
                     .to_string();
-                let cs = Self::input_color_space(node, "file");
+                let cs = Self::image_color_space(node, "file");
                 let viewdir = self
                     .input_value_param(node, "viewdir", Some(ValueType::Vector3))?
                     .unwrap_or(ParamRef::Vector3(Vec3::Z));
@@ -6191,11 +6273,7 @@ impl<'a> Builder<'a> {
                 let v = self
                     .input_value_param(node, "in", Some(out_color_ty))?
                     .unwrap_or(zero_param(Some(out_color_ty)));
-                let op = if category == "srgb_texture" || category == "g22" {
-                    ColorXform::SrgbToLinear
-                } else {
-                    ColorXform::Identity
-                };
+                let op = Self::color_xform_to_rendering(category)?;
                 let v_op = self.param_to_operand(&v);
                 let dst = self.alloc_vreg();
                 self.instructions.push(Instruction::TransformColor {
@@ -6351,7 +6429,7 @@ impl<'a> Builder<'a> {
                 let file = Self::input_static_string(node, category, "file")?
                     .unwrap_or("")
                     .to_string();
-                let cs = Self::input_color_space(node, "file");
+                let cs = Self::image_color_space(node, "file");
                 let default_color =
                     match self.input_value_param(node, "default", Some(out_color_ty))? {
                         Some(ParamRef::Color3(c)) | Some(ParamRef::Vector3(c)) => {
@@ -6757,34 +6835,7 @@ impl<'a> Builder<'a> {
                     .unwrap_or(zero_param(Some(out_color_ty)));
                 let from = Self::input_static_string(node, category, "fromspace")?.unwrap_or("");
                 let to = Self::input_static_string(node, category, "tospace")?.unwrap_or("");
-                let canonicalize = |name: &str, s: &str| -> Option<&'static str> {
-                    match s {
-                        "" => None,
-                        "lin_rec709" | "linear" | "scene_linear" | "lin_rec709_d65" => {
-                            Some("linear")
-                        }
-                        "srgb_texture" | "srgb" | "sRGB" | "srgb_displayp3" => Some("srgb"),
-                        other => {
-                            tracing::warn!(
-                                "warning: transformcolor.{} colorspace `{}` is not supported yet; leaving color unchanged",
-                                name,
-                                other
-                            );
-                            Some("unsupported")
-                        }
-                    }
-                };
-                let from_c = canonicalize("fromspace", from);
-                let to_c = canonicalize("tospace", to);
-                let op = match (from_c, to_c) {
-                    (Some("srgb"), Some("linear")) | (Some("srgb"), None) => {
-                        ColorXform::SrgbToLinear
-                    }
-                    (Some("linear"), Some("srgb")) | (None, Some("srgb")) => {
-                        ColorXform::LinearToSrgb
-                    }
-                    _ => ColorXform::Identity,
-                };
+                let op = Self::color_xform_between(from, to)?;
                 let v_op = self.param_to_operand(&v);
                 let dst = self.alloc_vreg();
                 self.instructions.push(Instruction::TransformColor {

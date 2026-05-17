@@ -61,6 +61,7 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=OpenColorIO");
+    println!("cargo:rustc-link-lib=dylib=lcms2");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
 
     if cfg!(target_os = "linux") {

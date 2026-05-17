@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::flatten::{FlatGraph, FlatInput, FlatNodeKind};
-use super::types::MtlxValue;
+use super::types::{MtlxType, MtlxValue};
 use super::{MtlxLibrary, flatten_material, parse_document};
+use crate::color::management;
 use crate::material::mtlx::compiled::{UdimTile, UdimTiles};
 use crate::material::{MtlxMaterial, ScalarTexture, Texture, TextureColorSpace};
 
@@ -140,26 +141,16 @@ fn resolve_path(parent: &Path, filename: &str) -> PathBuf {
     direct
 }
 
-fn pick_color_space(colorspace: Option<&str>) -> TextureColorSpace {
-    match colorspace {
-        Some("srgb_texture") => TextureColorSpace::Srgb,
-        Some(other @ ("g22_rec709" | "g22_ap1" | "srgb_displayp3")) => {
-            tracing::warn!(
-                "[mtlx] warning: colorspace `{}` is approximated as sRGB until OCIO support is added",
-                other
-            );
-            TextureColorSpace::Srgb
-        }
-        Some("linear") | Some("lin_rec709") | Some("scene_linear") | Some("none") | None => {
-            TextureColorSpace::Linear
-        }
-        Some(other) => {
-            tracing::warn!(
-                "[mtlx] warning: colorspace `{}` is not supported yet; treating image as linear",
-                other
-            );
-            TextureColorSpace::Linear
-        }
+fn pick_color_space(output_type: &MtlxType, colorspace: Option<&str>) -> TextureColorSpace {
+    match output_type {
+        MtlxType::Color3 | MtlxType::Color4 => match colorspace {
+            None => TextureColorSpace::DefaultColor,
+            Some("none") | Some("linear") | Some("scene_linear") => TextureColorSpace::Linear,
+            Some(other) => {
+                TextureColorSpace::ocio(management::map_materialx_color_space(other).to_string())
+            }
+        },
+        _ => TextureColorSpace::Linear,
     }
 }
 
@@ -191,13 +182,13 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
         let Some((filename, cs)) = extract_image_filename(node) else {
             continue;
         };
-        let space = pick_color_space(cs);
+        let space = pick_color_space(&node.output_type, cs);
         let wants_alpha = is_color4_image(node);
 
         if filename.contains("<UDIM>") || filename.contains("<UVTILE>") {
             if udim_out.contains_key(filename) {
                 if wants_alpha {
-                    match load_udim_tiles(parent, filename, space, true) {
+                    match load_udim_tiles(parent, filename, space.clone(), true) {
                         Ok(tiles) if !tiles.tiles.is_empty() => {
                             merge_udim_tile_sets(
                                 &mut udim_out,
@@ -216,7 +207,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                 }
                 continue;
             }
-            match load_udim_tiles(parent, filename, space, wants_alpha) {
+            match load_udim_tiles(parent, filename, space.clone(), wants_alpha) {
                 Ok(tiles) if !tiles.tiles.is_empty() => {
                     udim_out.insert(filename.clone(), Arc::new(tiles));
                 }
@@ -240,7 +231,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
         if out.contains_key(filename) {
             if wants_alpha && !alpha_out.contains_key(filename) {
                 let resolved = resolve_path(parent, filename);
-                match Texture::from_file_with_alpha(&resolved, space) {
+                match Texture::from_file_with_alpha(&resolved, space.clone()) {
                     Ok((tex, alpha)) => {
                         out.insert(filename.clone(), Arc::new(tex));
                         if let Some(a) = alpha {
@@ -262,7 +253,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
 
         let resolved = resolve_path(parent, filename);
         if wants_alpha {
-            match Texture::from_file_with_alpha(&resolved, space) {
+            match Texture::from_file_with_alpha(&resolved, space.clone()) {
                 Ok((tex, alpha)) => {
                     out.insert(filename.clone(), Arc::new(tex));
                     if let Some(a) = alpha {
@@ -279,7 +270,7 @@ fn collect_color_textures(graph: &FlatGraph, mtlx_path: &Path) -> ColorTextureCo
                 }
             }
         } else {
-            match Texture::from_file_with_color_space(&resolved, space) {
+            match Texture::from_file_with_color_space(&resolved, space.clone()) {
                 Ok(tex) => {
                     out.insert(filename.clone(), Arc::new(tex));
                 }
@@ -333,7 +324,7 @@ fn load_udim_tiles(
         };
         let path = entry.path();
         if wants_alpha {
-            match Texture::from_file_with_alpha(&path, space) {
+            match Texture::from_file_with_alpha(&path, space.clone()) {
                 Ok((tex, alpha)) => {
                     tiles.insert(
                         udim_id,
@@ -354,7 +345,7 @@ fn load_udim_tiles(
                 }
             }
         } else {
-            match Texture::from_file_with_color_space(&path, space) {
+            match Texture::from_file_with_color_space(&path, space.clone()) {
                 Ok(tex) => {
                     tiles.insert(
                         udim_id,
@@ -675,9 +666,29 @@ mod udim_tests {
     }
 
     #[test]
-    fn unsupported_image_colorspace_uses_temporary_linear_fallback() {
+    fn image_colorspace_is_kept_as_ocio_space() {
         assert_eq!(
-            pick_color_space(Some("acescg")),
+            pick_color_space(&MtlxType::Color3, Some("lin_rec709")),
+            crate::material::TextureColorSpace::ocio("lin_rec709".to_string())
+        );
+        assert_eq!(
+            pick_color_space(&MtlxType::Color3, None),
+            crate::material::TextureColorSpace::DefaultColor
+        );
+    }
+
+    #[test]
+    fn vector_images_are_loaded_as_data_without_color_conversion() {
+        assert_eq!(
+            pick_color_space(&MtlxType::Vector3, None),
+            crate::material::TextureColorSpace::Linear
+        );
+        assert_eq!(
+            pick_color_space(&MtlxType::Vector3, Some("srgb_texture")),
+            crate::material::TextureColorSpace::Linear
+        );
+        assert_eq!(
+            pick_color_space(&MtlxType::Vector4, Some("lin_rec709")),
             crate::material::TextureColorSpace::Linear
         );
     }

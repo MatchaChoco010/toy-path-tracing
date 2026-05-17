@@ -33,6 +33,28 @@ unsafe extern "C" {
         display: *const c_char,
         src_colorspace: *const c_char,
     ) -> *const c_char;
+    pub fn ocio_config_get_display_view_color_space(
+        config: *mut OcioConfig,
+        display: *const c_char,
+        view: *const c_char,
+    ) -> *const c_char;
+    pub fn ocio_config_get_color_space_interchange_attribute(
+        config: *mut OcioConfig,
+        color_space: *const c_char,
+        attribute: *const c_char,
+    ) -> *const c_char;
+    pub fn ocio_config_resolve_file_location(
+        config: *mut OcioConfig,
+        path: *const c_char,
+    ) -> *const c_char;
+    pub fn ocio_config_bake_color_space_icc(
+        config: *mut OcioConfig,
+        src: *const c_char,
+        dst: *const c_char,
+        description: *const c_char,
+        cube_size: c_int,
+        size: *mut usize,
+    ) -> *const u8;
 
     pub fn ocio_config_get_processor(
         config: *mut OcioConfig,

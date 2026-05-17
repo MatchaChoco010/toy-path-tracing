@@ -61,6 +61,9 @@ pub struct OcioConfig {
     raw: NonNull<ocio_sys::OcioConfig>,
 }
 
+unsafe impl Send for OcioConfig {}
+unsafe impl Sync for OcioConfig {}
+
 impl OcioConfig {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let path = path_to_cstring(path.as_ref())?;
@@ -160,6 +163,74 @@ impl OcioConfig {
         }
     }
 
+    pub fn display_view_color_space(&self, display: &str, view: &str) -> Result<String> {
+        let display = CString::new(display)?;
+        let view = CString::new(view)?;
+        unsafe {
+            required_string(
+                ocio_sys::ocio_config_get_display_view_color_space(
+                    self.raw.as_ptr(),
+                    display.as_ptr(),
+                    view.as_ptr(),
+                ),
+                "OCIO display/view has no display color space",
+            )
+        }
+    }
+
+    pub fn color_space_interchange_attribute(
+        &self,
+        color_space: &str,
+        attribute: &str,
+    ) -> Result<Option<String>> {
+        let color_space = CString::new(color_space)?;
+        let attribute = CString::new(attribute)?;
+        unsafe {
+            optional_string(ocio_sys::ocio_config_get_color_space_interchange_attribute(
+                self.raw.as_ptr(),
+                color_space.as_ptr(),
+                attribute.as_ptr(),
+            ))
+        }
+    }
+
+    pub fn resolve_file_location(&self, path: &str) -> Result<String> {
+        let path = CString::new(path)?;
+        unsafe {
+            required_string(
+                ocio_sys::ocio_config_resolve_file_location(self.raw.as_ptr(), path.as_ptr()),
+                "failed to resolve OCIO file location",
+            )
+        }
+    }
+
+    pub fn bake_color_space_icc(
+        &self,
+        src: &str,
+        dst: &str,
+        description: &str,
+        cube_size: i32,
+    ) -> Result<Vec<u8>> {
+        let src = CString::new(src)?;
+        let dst = CString::new(dst)?;
+        let description = CString::new(description)?;
+        let mut size = 0_usize;
+        let data = unsafe {
+            ocio_sys::ocio_config_bake_color_space_icc(
+                self.raw.as_ptr(),
+                src.as_ptr(),
+                dst.as_ptr(),
+                description.as_ptr(),
+                cube_size,
+                &mut size,
+            )
+        };
+        if data.is_null() {
+            return Err(Error::last_or("failed to bake OCIO ICC profile"));
+        }
+        Ok(unsafe { std::slice::from_raw_parts(data, size) }.to_vec())
+    }
+
     pub fn processor(&self, src: &str, dst: &str) -> Result<OcioProcessor> {
         let src = CString::new(src)?;
         let dst = CString::new(dst)?;
@@ -205,6 +276,9 @@ pub struct OcioProcessor {
     raw: NonNull<ocio_sys::OcioProcessor>,
 }
 
+unsafe impl Send for OcioProcessor {}
+unsafe impl Sync for OcioProcessor {}
+
 impl OcioProcessor {
     pub fn default_cpu_processor(&self) -> Result<OcioCpuProcessor> {
         let raw = unsafe { ocio_sys::ocio_processor_get_default_cpu(self.raw.as_ptr()) };
@@ -241,6 +315,9 @@ impl Drop for OcioProcessor {
 pub struct OcioCpuProcessor {
     raw: NonNull<ocio_sys::OcioCpuProcessor>,
 }
+
+unsafe impl Send for OcioCpuProcessor {}
+unsafe impl Sync for OcioCpuProcessor {}
 
 impl OcioCpuProcessor {
     pub fn apply_rgb(&self, rgb: &mut [f32; 3]) -> Result<()> {

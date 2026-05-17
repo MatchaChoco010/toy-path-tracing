@@ -6,7 +6,10 @@ use std::{
 
 use glam::{Vec2, Vec3};
 
-use crate::color::srgb_to_linear;
+use crate::color::{
+    management::{self, DEFAULT_TEXTURE_COLOR_SPACE},
+    srgb_to_linear,
+};
 
 /// Pixel types that a [`Texture`] can hold.
 ///
@@ -66,10 +69,18 @@ struct TextureLevel<P> {
     pixels: Vec<P>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextureColorSpace {
     Linear,
     Srgb,
+    DefaultColor,
+    Ocio(Arc<str>),
+}
+
+impl TextureColorSpace {
+    pub fn ocio(name: impl Into<Arc<str>>) -> Self {
+        Self::Ocio(name.into())
+    }
 }
 
 /// Convenience alias for single-channel scalar textures (opacity, metallic,
@@ -333,10 +344,11 @@ impl Texture<Vec3> {
         let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
-        let pixels = image
-            .pixels()
+        let mut packed = packed_rgba_pixels(&image);
+        decode_rgba_pixels(&mut packed, width, height, &color_space)?;
+        let pixels = packed
+            .chunks_exact(4)
             .map(|pixel| Vec3::new(pixel[0], pixel[1], pixel[2]))
-            .map(|rgb| decode_color_space(rgb, color_space))
             .collect();
 
         Ok(Self::from_pixels(width, height, pixels))
@@ -353,12 +365,13 @@ impl Texture<Vec3> {
         let image = image::open(crate::paths::workspace_path(path))?.into_rgba32f();
         let width = image.width() as usize;
         let height = image.height() as usize;
+        let mut packed = packed_rgba_pixels(&image);
+        decode_rgba_pixels(&mut packed, width, height, &color_space)?;
         let mut rgb_pixels = Vec::with_capacity(width * height);
         let mut alpha_pixels: Vec<f32> = Vec::with_capacity(width * height);
         let mut has_nontrivial_alpha = false;
-        for pixel in image.pixels() {
-            let rgb = decode_color_space(Vec3::new(pixel[0], pixel[1], pixel[2]), color_space);
-            rgb_pixels.push(rgb);
+        for pixel in packed.chunks_exact(4) {
+            rgb_pixels.push(Vec3::new(pixel[0], pixel[1], pixel[2]));
             let alpha = pixel[3];
             if alpha < 1.0 - 1.0e-3 {
                 has_nontrivial_alpha = true;
@@ -465,10 +478,117 @@ pub(super) fn load_optional_scalar_texture(
         .transpose()
 }
 
+#[cfg(test)]
 fn decode_color_space(rgb: Vec3, color_space: TextureColorSpace) -> Vec3 {
     match color_space {
         TextureColorSpace::Linear => rgb,
         TextureColorSpace::Srgb => srgb_to_linear(rgb),
+        TextureColorSpace::DefaultColor | TextureColorSpace::Ocio(_) => {
+            if let Some(context) = management::current() {
+                let src = color_space.source_color_space(context.texture_color_space());
+                context.transform_rgb(rgb, src).unwrap_or(rgb)
+            } else {
+                srgb_to_linear(rgb)
+            }
+        }
+    }
+}
+
+fn packed_rgba_pixels(image: &image::Rgba32FImage) -> Vec<f32> {
+    let mut packed = Vec::with_capacity(image.width() as usize * image.height() as usize * 4);
+    for pixel in image.pixels() {
+        packed.extend_from_slice(&pixel.0);
+    }
+    packed
+}
+
+fn decode_rgba_pixels(
+    pixels: &mut [f32],
+    width: usize,
+    height: usize,
+    color_space: &TextureColorSpace,
+) -> image::ImageResult<()> {
+    match color_space {
+        TextureColorSpace::Linear => Ok(()),
+        TextureColorSpace::Srgb => {
+            if let Some(context) = management::current() {
+                context
+                    .transform_rgba_pixels_to_rendering(
+                        pixels,
+                        width,
+                        height,
+                        DEFAULT_TEXTURE_COLOR_SPACE,
+                    )
+                    .map_err(management::image_error)
+            } else {
+                for pixel in pixels.chunks_exact_mut(4) {
+                    let rgb = srgb_to_linear(Vec3::new(pixel[0], pixel[1], pixel[2]));
+                    pixel[0] = rgb.x;
+                    pixel[1] = rgb.y;
+                    pixel[2] = rgb.z;
+                }
+                Ok(())
+            }
+        }
+        TextureColorSpace::DefaultColor => {
+            if let Some(context) = management::current() {
+                context
+                    .transform_rgba_pixels_to_rendering(
+                        pixels,
+                        width,
+                        height,
+                        context.texture_color_space(),
+                    )
+                    .map_err(management::image_error)
+            } else {
+                for pixel in pixels.chunks_exact_mut(4) {
+                    let rgb = srgb_to_linear(Vec3::new(pixel[0], pixel[1], pixel[2]));
+                    pixel[0] = rgb.x;
+                    pixel[1] = rgb.y;
+                    pixel[2] = rgb.z;
+                }
+                Ok(())
+            }
+        }
+        TextureColorSpace::Ocio(name) => {
+            if let Some(context) = management::current() {
+                context
+                    .transform_rgba_pixels_to_rendering(pixels, width, height, name)
+                    .map_err(management::image_error)
+            } else {
+                decode_known_color_space_without_ocio(pixels, name)
+            }
+        }
+    }
+}
+
+fn decode_known_color_space_without_ocio(pixels: &mut [f32], name: &str) -> image::ImageResult<()> {
+    match name {
+        DEFAULT_TEXTURE_COLOR_SPACE | "srgb_texture" | "srgb" | "sRGB" => {
+            for pixel in pixels.chunks_exact_mut(4) {
+                let rgb = srgb_to_linear(Vec3::new(pixel[0], pixel[1], pixel[2]));
+                pixel[0] = rgb.x;
+                pixel[1] = rgb.y;
+                pixel[2] = rgb.z;
+            }
+            Ok(())
+        }
+        "linear" | "scene_linear" | "lin_rec709" | "ACEScg" => Ok(()),
+        other => Err(management::image_error(format!(
+            "OCIO context is not initialized; cannot transform texture color space `{other}`"
+        ))),
+    }
+}
+
+#[cfg(test)]
+impl TextureColorSpace {
+    fn source_color_space<'a>(&'a self, default_color_space: &'a str) -> &'a str {
+        match self {
+            TextureColorSpace::Linear => "linear",
+            TextureColorSpace::Srgb => DEFAULT_TEXTURE_COLOR_SPACE,
+            TextureColorSpace::DefaultColor => default_color_space,
+            TextureColorSpace::Ocio(name) => name,
+        }
     }
 }
 

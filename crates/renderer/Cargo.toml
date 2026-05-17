@@ -8,7 +8,15 @@ bitflags = "2.11.1"
 clap = { version = "4.6.1", features = ["derive"] }
 glam = "0.32.1"
 gltf = "1.4.1"
-image = "0.25.10"
+image = { version = "0.25.10", default-features = false, features = [
+    "exr",
+    "hdr",
+    "jpeg",
+    "png",
+    "webp",
+] }
+jc-libavif-sys = "1.3.0-rc2"
+ocio = { path = "../ocio" }
 rand = "0.10.1"
 rayon = "1.12.0"
 roxmltree = "0.20"

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::color::srgb_to_linear;
+use crate::{color::management, color::srgb_to_linear};
 
 use super::library::MtlxLibrary;
 use super::types::{
@@ -766,7 +766,7 @@ impl<'a> Builder<'a> {
                         expected_type,
                         input.colorspace.as_deref(),
                         &input.name,
-                    )))
+                    )?))
                 } else if matches!(
                     expected_type,
                     MtlxType::Filename | MtlxType::String | MtlxType::Geomname
@@ -1054,7 +1054,7 @@ impl<'a> Builder<'a> {
                             &decl.ty,
                             decl.colorspace.as_deref(),
                             &decl.name,
-                        )),
+                        )?),
                         &out_ty,
                     )?));
                 }
@@ -1330,7 +1330,7 @@ impl<'a> Builder<'a> {
                                 &nd_input.ty,
                                 nd_input.colorspace.as_deref(),
                                 &nd_input.name,
-                            ))
+                            )?)
                         }
                     }
                     InputBinding::DefaultGeomProp(prop) => {
@@ -1476,7 +1476,7 @@ impl<'a> Builder<'a> {
                                 &input.ty,
                                 input.colorspace.as_deref(),
                                 &input.name,
-                            ))
+                            )?)
                         }
                     }
                     InputBinding::DefaultGeomProp(prop) => {
@@ -1710,33 +1710,50 @@ fn apply_input_color_space(
     ty: &MtlxType,
     colorspace: Option<&str>,
     input_name: &str,
-) -> MtlxValue {
+) -> Result<MtlxValue, FlattenError> {
     let Some(colorspace) = colorspace else {
-        return value;
+        return Ok(value);
     };
     match (value, ty) {
-        (MtlxValue::Color3(c), MtlxType::Color3) => {
-            MtlxValue::Color3(convert_color3(c, colorspace, input_name))
-        }
+        (MtlxValue::Color3(c), MtlxType::Color3) => Ok(MtlxValue::Color3(convert_color3(
+            c, colorspace, input_name,
+        )?)),
         (MtlxValue::Color4(c), MtlxType::Color4) => {
-            let rgb = convert_color3(glam::Vec3::new(c.x, c.y, c.z), colorspace, input_name);
-            MtlxValue::Color4(glam::Vec4::new(rgb.x, rgb.y, rgb.z, c.w))
+            let rgb = convert_color3(glam::Vec3::new(c.x, c.y, c.z), colorspace, input_name)?;
+            Ok(MtlxValue::Color4(glam::Vec4::new(rgb.x, rgb.y, rgb.z, c.w)))
         }
-        (v, _) => v,
+        (v, _) => Ok(v),
     }
 }
 
-fn convert_color3(c: glam::Vec3, colorspace: &str, input_name: &str) -> glam::Vec3 {
+fn convert_color3(
+    c: glam::Vec3,
+    colorspace: &str,
+    input_name: &str,
+) -> Result<glam::Vec3, FlattenError> {
     match colorspace {
-        "srgb_texture" | "g22_rec709" | "g22_ap1" | "srgb_displayp3" => srgb_to_linear(c),
-        "linear" | "lin_rec709" | "scene_linear" | "none" => c,
+        "none" | "linear" | "scene_linear" => Ok(c),
+        "lin_rec709" | "lin_rec709_d65" if management::current().is_none() => Ok(c),
+        "srgb_texture" | "g22_rec709" | "g22_ap1" | "srgb_displayp3"
+            if management::current().is_none() =>
+        {
+            Ok(srgb_to_linear(c))
+        }
         other => {
-            tracing::warn!(
-                "[mtlx] warning: colorspace `{}` on value input `{}` is not supported yet; treating value as linear",
-                other,
-                input_name
-            );
-            c
+            let Some(context) = management::current() else {
+                return Err(FlattenError::Unsupported {
+                    what: format!(
+                        "OCIO context is not initialized; cannot transform colorspace `{other}` on value input `{input_name}`"
+                    ),
+                });
+            };
+            context
+                .transform_rgb(c, management::map_materialx_color_space(other))
+                .map_err(|error| FlattenError::Unsupported {
+                    what: format!(
+                        "failed to transform colorspace `{other}` on value input `{input_name}`: {error}"
+                    ),
+                })
         }
     }
 }

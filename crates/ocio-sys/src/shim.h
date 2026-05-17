@@ -28,6 +28,10 @@ const char *ocio_config_get_color_space_name(OcioConfig *config, int32_t index);
 const char *ocio_config_get_color_space_from_filepath(OcioConfig *config, const char *path);
 const char *ocio_config_get_default_display(OcioConfig *config);
 const char *ocio_config_get_default_view(OcioConfig *config, const char *display, const char *src_colorspace);
+const char *ocio_config_get_display_view_color_space(OcioConfig *config, const char *display, const char *view);
+const char *ocio_config_get_color_space_interchange_attribute(OcioConfig *config, const char *color_space, const char *attribute);
+const char *ocio_config_resolve_file_location(OcioConfig *config, const char *path);
+const uint8_t *ocio_config_bake_color_space_icc(OcioConfig *config, const char *src, const char *dst, const char *description, int32_t cube_size, size_t *size);
 
 OcioProcessor *ocio_config_get_processor(OcioConfig *config, const char *src, const char *dst);
 OcioProcessor *ocio_config_get_display_view_processor(OcioConfig *config, const char *src, const char *display, const char *view);

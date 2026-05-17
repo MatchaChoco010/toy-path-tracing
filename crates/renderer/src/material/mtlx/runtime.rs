@@ -734,6 +734,9 @@ fn execute_instruction(
                 super::compiled::ColorXform::LinearToSrgb => {
                     apply_color_xform(v, *ty, crate::color::linear_to_srgb)
                 }
+                super::compiled::ColorXform::Ocio { from, to } => {
+                    apply_ocio_color_xform(v, *ty, from, to)
+                }
             };
             write_reg(regs, *dst, out);
         }
@@ -1661,6 +1664,26 @@ fn apply_color_xform<F: Fn(Vec3) -> Vec3>(v: Value, ty: ValueType, f: F) -> Valu
             let c = v.as_color4();
             let rgb = f(Vec3::new(c.x, c.y, c.z));
             Value::Color4(Vec4::new(rgb.x, rgb.y, rgb.z, c.w))
+        }
+        _ => v,
+    }
+}
+
+fn apply_ocio_color_xform(v: Value, ty: ValueType, from: &str, to: &str) -> Value {
+    let Some(context) = crate::color::management::current() else {
+        return v;
+    };
+    match ty {
+        ValueType::Color3 => context
+            .transform_rgb_between(v.as_color3(), from, to)
+            .map(Value::Color3)
+            .unwrap_or(v),
+        ValueType::Color4 => {
+            let c = v.as_color4();
+            context
+                .transform_rgba_between(c, from, to)
+                .map(Value::Color4)
+                .unwrap_or(v)
         }
         _ => v,
     }
