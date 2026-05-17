@@ -7,6 +7,3 @@
 !/assets/san_miguel_2.0/.gitkeep
 /assets/bistro/*
 !/assets/bistro/.gitkeep
-
-/tools/russimp-sys/
-/tools/convert_bistro/target/

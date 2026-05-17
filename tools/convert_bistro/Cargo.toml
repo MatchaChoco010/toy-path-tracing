@@ -2,9 +2,9 @@
 # `static-link` feature cannot build assimp from the registry copy. The
 # upstream build script also fails on Linux x86_64 because cmake installs the
 # assimp library into `lib64/` but only `lib/` is added to the rustc search
-# path. The fork under ../russimp-sys/ contains a small patch on top of the
-# upstream v2.0.2 source so that `[patch.crates-io].russimp-sys` resolves to a
-# working copy.
+# path. The ../russimp-sys submodule is checked out to upstream v2.0.2, and
+# assets/download.sh applies tools/russimp-sys-lib64.patch before this helper
+# is built.
 [patch.crates-io]
 russimp-sys = { path = "../russimp-sys" }
 

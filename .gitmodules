@@ -1,3 +1,6 @@
 [submodule "third_party/OpenColorIO"]
 	path = third_party/OpenColorIO
 	url = https://github.com/AcademySoftwareFoundation/OpenColorIO.git
+[submodule "tools/russimp-sys"]
+	path = tools/russimp-sys
+	url = https://github.com/jkvargas/russimp-sys.git
