@@ -1,9 +1,10 @@
 use clap::Parser;
 use glam::{UVec2, Vec3};
-use rayon::prelude::*;
+use rayon::{ThreadPoolBuilder, prelude::*};
 use std::{
     fs,
     path::{Path, PathBuf},
+    thread,
     time::{Duration, Instant},
 };
 use toy_path_tracing::{
@@ -41,6 +42,9 @@ struct Args {
     #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
 
+    #[arg(long = "render-threads", default_value_t = default_render_threads(), value_parser = parse_positive_usize)]
+    render_threads: usize,
+
     #[arg(long = "ocio-config", default_value = DEFAULT_OCIO_CONFIG)]
     ocio_config: String,
 
@@ -63,6 +67,8 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     init_tracing(args.log_filter.as_deref())?;
+    configure_rayon(args.render_threads)?;
+    tracing::info!(render_threads = args.render_threads, "configured rayon");
     let ocio = OcioColorPipeline::new(
         &args.ocio_config,
         args.ocio_rendering_space.clone(),
@@ -123,6 +129,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     save_output(&args.output, resolution, &pixels, &ocio, &output_transform)?;
 
     Ok(())
+}
+
+fn default_render_threads() -> usize {
+    thread::available_parallelism()
+        .map(|threads| threads.get().saturating_sub(2).max(1))
+        .unwrap_or(1)
+}
+
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid positive integer: {error}"))?;
+    if parsed == 0 {
+        return Err("value must be at least 1".to_string());
+    }
+    Ok(parsed)
+}
+
+fn configure_rayon(render_threads: usize) -> Result<(), rayon::ThreadPoolBuildError> {
+    ThreadPoolBuilder::new()
+        .num_threads(render_threads)
+        .build_global()
 }
 
 fn output_transform(
@@ -228,5 +256,28 @@ mod tests {
 
         assert_eq!(args.output_display, None);
         assert_eq!(args.output_view, None);
+    }
+
+    #[test]
+    fn render_threads_defaults_to_available_parallelism_minus_two() {
+        let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
+
+        assert_eq!(args.render_threads, super::default_render_threads());
+    }
+
+    #[test]
+    fn render_threads_accepts_cli_value() {
+        let args = Args::try_parse_from(["toy-path-tracing", "--render-threads", "3"])
+            .expect("expected valid render thread count");
+
+        assert_eq!(args.render_threads, 3);
+    }
+
+    #[test]
+    fn render_threads_rejects_zero() {
+        let error = Args::try_parse_from(["toy-path-tracing", "--render-threads", "0"])
+            .expect_err("expected zero render threads to be rejected");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }
