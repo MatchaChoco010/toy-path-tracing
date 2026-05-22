@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
 use super::{MaterialSample, ScalarTexture, ShadingVertex, Texture};
+use crate::sampler::{AuxRng, MaterialSampleRandoms};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmissiveMaterial {
@@ -43,17 +43,13 @@ impl EmissiveMaterial {
     pub fn sample(
         &self,
         _shading_vertex: &ShadingVertex,
-        _rng: &mut ThreadRng,
+        _randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         None
     }
 
-    pub fn eval(
-        &self,
-        _shading_vertex: &ShadingVertex,
-        _wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         Vec3::ZERO
     }
 

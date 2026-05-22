@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
-use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
+use glam::Vec3;
 
-use crate::bsdf::NormalizedLambertBsdf;
+use crate::{
+    bsdf::NormalizedLambertBsdf,
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -112,13 +114,14 @@ impl NormalizedLambertMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let us = randoms.u_dir;
         let bsdf = NormalizedLambertBsdf::new(self.rho_at(shading_vertex));
         let sample = bsdf.sample(wo_local, us)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
@@ -140,12 +143,7 @@ impl NormalizedLambertMaterial {
         Some(sample)
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -292,10 +290,9 @@ mod tests {
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
 
-        let mut rng = rand::rng();
         assert!(
             material
-                .eval(&vtx, Vec3::Z, &mut rng)
+                .eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default())
                 .abs_diff_eq(Vec3::new(0.2, 0.4, 0.6) / PI, 1.0e-3)
         );
     }

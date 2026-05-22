@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
 use crate::{
     bsdf::{
@@ -10,6 +9,7 @@ use crate::{
         artist_friendly_complex_ior,
     },
     math::{OrthonormalBasis, fresnel_dielectric, sg},
+    sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
@@ -488,7 +488,8 @@ impl OpenPbrMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -501,7 +502,7 @@ impl OpenPbrMaterial {
             return None;
         }
         let bsdf = self.make_bsdf(shading_vertex);
-        let sample = bsdf.sample(wo_local, rng)?;
+        let sample = bsdf.sample(wo_local, randoms)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
         let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
             let fuzz_roughness = self.fuzz_roughness_at(shading_vertex);
@@ -537,12 +538,7 @@ impl OpenPbrMaterial {
         })
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -994,8 +990,11 @@ mod tests {
     fn evaluates_finite_for_default_setup() {
         let m = material_with_luts();
         let v = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
-        let f = m.eval(&v, Vec3::new(0.2, 0.3, 0.9327379).normalize(), &mut rng);
+        let f = m.eval(
+            &v,
+            Vec3::new(0.2, 0.3, 0.9327379).normalize(),
+            &mut crate::sampler::AuxRng::default(),
+        );
         assert!(f.is_finite());
     }
 

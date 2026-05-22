@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::math::{OrthonormalBasis, fresnel_dielectric, refract, sg::luminance};
+use crate::{
+    math::{OrthonormalBasis, fresnel_dielectric, refract, sg::luminance},
+    sampler::MaterialSampleRandoms,
+};
 
 use super::conductor_complex::fresnel_complex;
 use super::dispersion::{cauchy_ior, sample_dispersion_wavelength_weighted};
@@ -180,7 +182,7 @@ impl StandardSurfaceBsdf {
         pdf
     }
 
-    pub fn sample(&self, wo: Vec3, rng: &mut ThreadRng) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3, randoms: &MaterialSampleRandoms) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) {
             return None;
         }
@@ -188,18 +190,18 @@ impl StandardSurfaceBsdf {
         if probs.total <= 0.0 {
             return None;
         }
-        let chosen = pick_lobe(&probs, rng.random::<f32>() * probs.total);
+        let chosen = pick_lobe(&probs, randoms.u_lobe * probs.total);
         let p_lobe = probs.lobe(chosen) / probs.total;
         if p_lobe <= 0.0 {
             return None;
         }
 
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let us = randoms.u_dir;
         match chosen {
             ChosenLobe::Coat => self.sample_coat(wo, us, p_lobe),
             ChosenLobe::Metal => self.sample_metal(wo, us, p_lobe),
             ChosenLobe::SpecBrdf => self.sample_spec_brdf(wo, us, p_lobe),
-            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, rng),
+            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, randoms.u_extra0),
             ChosenLobe::Sheen => self.sample_sheen(wo, us),
             ChosenLobe::DiffBrdf => self.sample_diff_brdf(wo, us),
             ChosenLobe::DiffBtdf => self.sample_diff_btdf(wo, us),
@@ -713,7 +715,7 @@ impl StandardSurfaceBsdf {
         wo: Vec3,
         us: Vec2,
         p_lobe: f32,
-        rng: &mut ThreadRng,
+        u_lambda: f32,
     ) -> Option<BsdfSample> {
         let weights = self.layer_weights(wo);
         let base_weight = weights.spec_btdf;
@@ -741,7 +743,6 @@ impl StandardSurfaceBsdf {
                 );
                 (eta_lambda, Vec3::ONE, None)
             } else if self.p.front_face {
-                let u_lambda = rng.random::<f32>();
                 let (lambda, basis) =
                     sample_dispersion_wavelength_weighted(u_lambda, self.p.path_throughput);
                 let eta_lambda = cauchy_ior(
@@ -1033,9 +1034,10 @@ mod tests {
         params.specular_alpha_x = 0.2;
         params.specular_alpha_y = 0.2;
         let bsdf = test_bsdf(params);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
+        let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
         let sample = bsdf
-            .sample(Vec3::new(0.2, -0.1, 0.9746794).normalize(), &mut rng)
+            .sample(Vec3::new(0.2, -0.1, 0.9746794).normalize(), &randoms)
             .unwrap();
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
     }
@@ -1048,11 +1050,12 @@ mod tests {
         params.specular = 0.0;
         params.base = 0.0;
         let bsdf = test_bsdf(params);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
         let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
         let mut got = false;
         for _ in 0..32 {
-            if let Some(sample) = bsdf.sample(wo, &mut rng)
+            let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
+            if let Some(sample) = bsdf.sample(wo, &randoms)
                 && sample.flags.contains(BsdfFlags::TRANSMISSION)
             {
                 assert!(sample.wi.abs_diff_eq(-wo, 1.0e-5));

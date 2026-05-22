@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, path::Path};
+use std::{collections::BTreeSet, error::Error, fmt, path::Path};
 
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
@@ -41,7 +41,7 @@ pub struct GltfMaterialMesh {
 pub struct GltfScene {
     pub material_meshes: Vec<GltfMaterialMesh>,
     pub materials: Vec<GltfMaterial>,
-    pub images: Vec<GltfImage>,
+    pub images: Vec<Option<GltfImage>>,
 }
 
 #[derive(Debug)]
@@ -97,7 +97,10 @@ impl From<LoadMeshError> for LoadGltfSceneError {
 
 pub fn load_gltf_scene(path: &Path) -> Result<GltfScene, LoadGltfSceneError> {
     let path = crate::utils::workspace_path(path);
-    let (document, buffers, images) = gltf::import(path)?;
+    let base = path.parent().unwrap_or_else(|| Path::new("./"));
+    let gltf = gltf::Gltf::open(&path)?;
+    let document = gltf.document;
+    let buffers = gltf::import_buffers(&document, Some(base), gltf.blob)?;
 
     let mut material_meshes = Vec::new();
     if let Some(scene) = document
@@ -113,17 +116,39 @@ pub fn load_gltf_scene(path: &Path) -> Result<GltfScene, LoadGltfSceneError> {
         }
     }
 
-    let materials = document.materials().map(build_material).collect();
-    let images = images
-        .into_iter()
-        .map(normalize_image)
-        .collect::<Result<Vec<_>, _>>()?;
+    let materials = document.materials().map(build_material).collect::<Vec<_>>();
+    let required_images = required_image_indices(&materials);
+    let image_count = document.images().count();
+    let mut images = vec![None; image_count];
+    for image in document.images() {
+        let index = image.index();
+        if required_images.contains(&index) {
+            let data = gltf::image::Data::from_source(image.source(), Some(base), &buffers)?;
+            images[index] = Some(normalize_image(data)?);
+        }
+    }
 
     Ok(GltfScene {
         material_meshes,
         materials,
         images,
     })
+}
+
+fn required_image_indices(materials: &[GltfMaterial]) -> BTreeSet<usize> {
+    let mut indices = BTreeSet::new();
+    for material in materials {
+        if let Some(index) = material.base_color_texture {
+            indices.insert(index);
+        }
+        if let Some(index) = material.metallic_roughness_texture {
+            indices.insert(index);
+        }
+        if let Some(index) = material.emissive_texture {
+            indices.insert(index);
+        }
+    }
+    indices
 }
 
 fn walk_node(

@@ -1,7 +1,6 @@
 use std::cell::Cell;
 
 use glam::{Vec2, Vec3, Vec4};
-use rand::{RngExt, rngs::ThreadRng};
 
 use crate::bsdf::mtlx::{
     BurleyDiffuseBsdf, ChiangHairBsdf, ConductorBsdf, DielectricBsdf, GeneralizedSchlickBsdf,
@@ -16,6 +15,7 @@ use crate::material::pattern::noise::{
     worley2d_top3, worley3d, worley3d_solid, worley3d_solid_vec3, worley3d_top2, worley3d_top3,
 };
 use crate::math::OrthonormalBasis;
+use crate::sampler::MaterialSampleRandoms;
 
 use super::compiled::{
     AddressMode, ArithOp, ArtisticIorOutput, ChiangHairRoughnessOutput, ClosureNode, CombineKind,
@@ -3080,16 +3080,16 @@ pub fn sample_closure(
     compiled: &CompiledMaterial,
     locals: &[Value],
     sv: &ShadingVertex,
-    rng: &mut ThreadRng,
+    randoms: &MaterialSampleRandoms,
 ) -> Option<MtlxLobeSample> {
-    sample_closure_cached(compiled, locals, sv, rng, &[])
+    sample_closure_cached(compiled, locals, sv, randoms, &[])
 }
 
 pub fn sample_closure_cached(
     compiled: &CompiledMaterial,
     locals: &[Value],
     sv: &ShadingVertex,
-    rng: &mut ThreadRng,
+    randoms: &MaterialSampleRandoms,
     dalbedo_cache: &[Cell<Option<Vec3>>],
 ) -> Option<MtlxLobeSample> {
     let wo_local = sv.frame.world_to_local(sv.wo).normalize_or_zero();
@@ -3097,7 +3097,7 @@ pub fn sample_closure_cached(
         compiled,
         locals,
         sv,
-        rng,
+        *randoms,
         compiled.root,
         wo_local,
         Some(dalbedo_cache),
@@ -3379,6 +3379,19 @@ fn sheen_lut(compiled: &CompiledMaterial) -> &crate::bsdf::SheenDirectionalAlbed
         .expect("MaterialX runtime requires Scene-installed Sheen directional albedo LUT")
 }
 
+fn remap_choice_u(u: f32, p_upper: f32, chose_upper: bool) -> f32 {
+    let p_upper = p_upper.clamp(0.0, 1.0);
+    let u = u.clamp(0.0, 1.0 - f32::EPSILON);
+    if chose_upper {
+        if p_upper <= 0.0 { 0.0 } else { u / p_upper }
+    } else if p_upper >= 1.0 {
+        0.0
+    } else {
+        (u - p_upper) / (1.0 - p_upper)
+    }
+    .clamp(0.0, 1.0 - f32::EPSILON)
+}
+
 #[inline(always)]
 fn mtlx_dielectric_lut(
     compiled: &CompiledMaterial,
@@ -3599,7 +3612,7 @@ fn sample_closure_idx(
     compiled: &CompiledMaterial,
     locals: &[Value],
     sv: &ShadingVertex,
-    rng: &mut ThreadRng,
+    randoms: MaterialSampleRandoms,
     idx: u32,
     wo: Vec3,
     dalbedo_cache: DalbedoCache<'_>,
@@ -3621,7 +3634,7 @@ fn sample_closure_idx(
                 read_float(roughness, locals),
                 *energy_compensation,
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let us = randoms.u_dir;
             bsdf.sample(wo_use, us).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3639,7 +3652,7 @@ fn sample_closure_idx(
                 read_color3(color, locals),
                 read_float(roughness, locals),
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let us = randoms.u_dir;
             bsdf.sample(wo_use, us).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3652,7 +3665,7 @@ fn sample_closure_idx(
         } => {
             let (new_frame, wo_use) = override_frame_for_wo(sv, locals, normal, &None, wo);
             let bsdf = TranslucentBsdf::new(read_float(weight, locals), read_color3(color, locals));
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let us = randoms.u_dir;
             bsdf.sample(wo_use, us).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3680,8 +3693,8 @@ fn sample_closure_idx(
                 read_float(thinfilm_ior, locals),
                 compiled.thin_walled || sv.front_face,
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-            let u_branch = rng.random::<f32>();
+            let us = randoms.u_dir;
+            let u_branch = randoms.u_layer;
             bsdf.sample(wo_use, us, u_branch).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3706,7 +3719,7 @@ fn sample_closure_idx(
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let us = randoms.u_dir;
             bsdf.sample(wo_use, us).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3738,8 +3751,8 @@ fn sample_closure_idx(
                 read_float(thinfilm_ior, locals),
                 compiled.thin_walled || sv.front_face,
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-            let u_branch = rng.random::<f32>();
+            let us = randoms.u_dir;
+            let u_branch = randoms.u_layer;
             bsdf.sample(wo_use, us, u_branch).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3759,7 +3772,7 @@ fn sample_closure_idx(
                 read_float(roughness, locals),
                 *mode,
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let us = randoms.u_dir;
             bsdf.sample(wo_use, us).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3798,7 +3811,7 @@ fn sample_closure_idx(
                 curve_direction_use,
                 h,
             );
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let us = randoms.u_dir;
             bsdf.sample(wo_use, us).map(|s| MtlxLobeSample {
                 wi_local: rebase_wi_out_of_frame(sv, &new_frame, s.wi_local),
                 ..s
@@ -3820,43 +3833,53 @@ fn sample_closure_idx(
             } else {
                 m
             };
-            if rng.random::<f32>() < p_fg {
-                sample_closure_idx(compiled, locals, sv, rng, *fg, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
+            if randoms.u_lobe < p_fg {
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, p_fg, true));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *fg, wo, dalbedo_cache).map(
+                    |s| MtlxLobeSample {
                         pdf: s.pdf * p_fg,
                         ..s
-                    }
-                })
+                    },
+                )
             } else {
-                sample_closure_idx(compiled, locals, sv, rng, *bg, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, p_fg, false));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *bg, wo, dalbedo_cache).map(
+                    |s| MtlxLobeSample {
                         pdf: s.pdf * (1.0 - p_fg),
                         ..s
-                    }
-                })
+                    },
+                )
             }
         }
         ClosureNode::Layer { top, base } => {
             let top_node = compiled.closure(*top);
             if let ClosureNode::ThinFilm { .. } = top_node {
-                return sample_closure_idx(compiled, locals, sv, rng, *base, wo, dalbedo_cache);
+                return sample_closure_idx(compiled, locals, sv, randoms, *base, wo, dalbedo_cache);
             }
             let r_top =
                 directional_albedo_idx_scalar(compiled, locals, sv, *top, wo, dalbedo_cache)
                     .clamp(0.0, 1.0);
-            if rng.random::<f32>() < r_top {
-                sample_closure_idx(compiled, locals, sv, rng, *top, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
+            if randoms.u_lobe < r_top {
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, r_top, true));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *top, wo, dalbedo_cache)
+                    .map(|s| MtlxLobeSample {
                         pdf: s.pdf * r_top,
                         ..s
-                    }
-                })
+                    })
             } else {
-                sample_closure_idx(compiled, locals, sv, rng, *base, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
-                        pdf: s.pdf * (1.0 - r_top),
-                        ..s
-                    }
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, r_top, false));
+                sample_closure_idx(
+                    compiled,
+                    locals,
+                    sv,
+                    child_randoms,
+                    *base,
+                    wo,
+                    dalbedo_cache,
+                )
+                .map(|s| MtlxLobeSample {
+                    pdf: s.pdf * (1.0 - r_top),
+                    ..s
                 })
             }
         }
@@ -3865,20 +3888,22 @@ fn sample_closure_idx(
             b,
             kind: super::compiled::ClosureKind::Bsdf,
         } => {
-            if rng.random::<f32>() < 0.5 {
-                sample_closure_idx(compiled, locals, sv, rng, *a, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
+            if randoms.u_lobe < 0.5 {
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, 0.5, true));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *a, wo, dalbedo_cache).map(
+                    |s| MtlxLobeSample {
                         pdf: s.pdf * 0.5,
                         ..s
-                    }
-                })
+                    },
+                )
             } else {
-                sample_closure_idx(compiled, locals, sv, rng, *b, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, 0.5, false));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *b, wo, dalbedo_cache).map(
+                    |s| MtlxLobeSample {
                         pdf: s.pdf * 0.5,
                         ..s
-                    }
-                })
+                    },
+                )
             }
         }
         ClosureNode::Add { a, b, .. } => {
@@ -3887,25 +3912,28 @@ fn sample_closure_idx(
             let wb = directional_albedo_idx_scalar(compiled, locals, sv, *b, wo, dalbedo_cache)
                 .max(1e-3);
             let total = wa + wb;
-            if rng.random::<f32>() < wa / total {
-                sample_closure_idx(compiled, locals, sv, rng, *a, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
-                        pdf: s.pdf * wa / total,
+            let p_a = wa / total;
+            if randoms.u_lobe < p_a {
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, p_a, true));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *a, wo, dalbedo_cache).map(
+                    |s| MtlxLobeSample {
+                        pdf: s.pdf * p_a,
                         ..s
-                    }
-                })
+                    },
+                )
             } else {
-                sample_closure_idx(compiled, locals, sv, rng, *b, wo, dalbedo_cache).map(|s| {
-                    MtlxLobeSample {
-                        pdf: s.pdf * wb / total,
+                let child_randoms = randoms.with_lobe(remap_choice_u(randoms.u_lobe, p_a, false));
+                sample_closure_idx(compiled, locals, sv, child_randoms, *b, wo, dalbedo_cache).map(
+                    |s| MtlxLobeSample {
+                        pdf: s.pdf * (1.0 - p_a),
                         ..s
-                    }
-                })
+                    },
+                )
             }
         }
         ClosureNode::Multiply { inner, scale, .. } => {
             let s = read_color3(scale, locals);
-            sample_closure_idx(compiled, locals, sv, rng, *inner, wo, dalbedo_cache).map(|sm| {
+            sample_closure_idx(compiled, locals, sv, randoms, *inner, wo, dalbedo_cache).map(|sm| {
                 MtlxLobeSample {
                     weight: sm.weight * s,
                     ..sm
@@ -3922,7 +3950,7 @@ fn sample_closure_idx(
             let v1 = read_float(value1, locals);
             let v2 = read_float(value2, locals);
             let pick = if v1 > v2 { *then_branch } else { *else_branch };
-            sample_closure_idx(compiled, locals, sv, rng, pick, wo, dalbedo_cache)
+            sample_closure_idx(compiled, locals, sv, randoms, pick, wo, dalbedo_cache)
         }
         ClosureNode::IfGreaterEq {
             value1,
@@ -3934,7 +3962,7 @@ fn sample_closure_idx(
             let v1 = read_float(value1, locals);
             let v2 = read_float(value2, locals);
             let pick = if v1 >= v2 { *then_branch } else { *else_branch };
-            sample_closure_idx(compiled, locals, sv, rng, pick, wo, dalbedo_cache)
+            sample_closure_idx(compiled, locals, sv, randoms, pick, wo, dalbedo_cache)
         }
         ClosureNode::IfEqual {
             value1,
@@ -3946,16 +3974,24 @@ fn sample_closure_idx(
             let v1 = read_float(value1, locals);
             let v2 = read_float(value2, locals);
             let pick = if v1 == v2 { *then_branch } else { *else_branch };
-            sample_closure_idx(compiled, locals, sv, rng, pick, wo, dalbedo_cache)
+            sample_closure_idx(compiled, locals, sv, randoms, pick, wo, dalbedo_cache)
         }
         ClosureNode::Switch {
             which, branches, ..
         } => {
             let i = read_param(which, locals).as_integer().clamp(0, 9) as usize;
-            sample_closure_idx(compiled, locals, sv, rng, branches[i], wo, dalbedo_cache)
+            sample_closure_idx(
+                compiled,
+                locals,
+                sv,
+                randoms,
+                branches[i],
+                wo,
+                dalbedo_cache,
+            )
         }
         ClosureNode::Surface { bsdf, .. } => {
-            sample_closure_idx(compiled, locals, sv, rng, *bsdf, wo, dalbedo_cache)
+            sample_closure_idx(compiled, locals, sv, randoms, *bsdf, wo, dalbedo_cache)
         }
         ClosureNode::UniformEdf { .. }
         | ClosureNode::ConicalEdf { .. }

@@ -1,12 +1,12 @@
 use clap::ValueEnum;
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
 use crate::{
     bsdf::BsdfFlags,
     light::LightLiSample,
     material::{MaterialSample, MtlxScratch, ShadingVertex},
     math::ray::{Ray, RayCone, RayDifferential},
+    sampler::{AuxRng, PathSampler},
     scene::{Scene, TriangleRef},
 };
 
@@ -26,15 +26,15 @@ impl IntegratorKind {
         self,
         scene: &Scene,
         initial_ray: Ray,
-        rng: &mut ThreadRng,
+        sampler: &PathSampler,
         max_depth: u32,
         mtlx_scratch: &mut MtlxScratch,
     ) -> Vec3 {
         let cp = mtlx_scratch.checkpoint();
         let radiance = match self {
-            Self::Mis => mis::trace_radiance(scene, initial_ray, rng, max_depth, mtlx_scratch),
-            Self::Pt => pt::trace_radiance(scene, initial_ray, rng, max_depth, mtlx_scratch),
-            Self::Nee => nee::trace_radiance(scene, initial_ray, rng, max_depth, mtlx_scratch),
+            Self::Mis => mis::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch),
+            Self::Pt => pt::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch),
+            Self::Nee => nee::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch),
         };
         mtlx_scratch.restore(cp);
         radiance
@@ -217,7 +217,7 @@ pub(super) fn unoccluded(
     scene: &Scene,
     vtx: &ShadingVertex,
     li: &LightLiSample,
-    rng: &mut ThreadRng,
+    aux_rng: &mut AuxRng,
     mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> bool {
     unoccluded_ray(
@@ -226,7 +226,7 @@ pub(super) fn unoccluded(
         li.wi,
         li.distance,
         li.target_triangle,
-        rng,
+        aux_rng,
         mtlx_scratch,
     )
 }
@@ -237,12 +237,12 @@ pub(super) fn unoccluded_ray(
     wi: Vec3,
     distance: f32,
     target_triangle: Option<TriangleRef>,
-    rng: &mut ThreadRng,
+    aux_rng: &mut AuxRng,
     mtlx_scratch: &mut crate::material::MtlxScratch,
 ) -> bool {
     let shadow_ray = spawn_ray(vtx.p, vtx.ng, wi);
     let hit = scene
-        .closest_hit(&shadow_ray, rng, mtlx_scratch)
+        .closest_hit(&shadow_ray, aux_rng, mtlx_scratch)
         .expect("scene.build_qbvh() must be called before traversal");
 
     match hit {

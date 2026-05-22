@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
-use crate::bsdf::MirrorBsdf;
+use crate::{
+    bsdf::MirrorBsdf,
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -110,7 +112,8 @@ impl MirrorMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        _rng: &mut ThreadRng,
+        _randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
@@ -137,12 +140,7 @@ impl MirrorMaterial {
         Some(sample)
     }
 
-    pub fn eval(
-        &self,
-        _shading_vertex: &ShadingVertex,
-        _wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         Vec3::ZERO
     }
 
@@ -239,9 +237,13 @@ mod tests {
             opacity_texture: None,
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
         let sample = material
-            .sample(&vtx, &mut rng)
+            .sample(
+                &vtx,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a valid mirror sample");
 
         assert!(sample.weight.abs_diff_eq(Vec3::new(0.2, 0.4, 0.6), 1.0e-3));
@@ -254,8 +256,16 @@ mod tests {
         let ns = Vec3::new(0.8660254, 0.0, 0.5).normalize();
         vtx.ns = ns;
         vtx.frame = OrthonormalBasis::from_normal_and_tangent(ns, vtx.dpdu);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
-        assert!(material.sample(&vtx, &mut rng).is_none());
+        assert!(
+            material
+                .sample(
+                    &vtx,
+                    &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                    &mut crate::sampler::AuxRng::default()
+                )
+                .is_none()
+        );
     }
 }

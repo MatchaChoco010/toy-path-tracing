@@ -17,7 +17,6 @@ image = { version = "0.25.10", default-features = false, features = [
 ] }
 jc-libavif-sys = "1.3.0-rc2"
 ocio = { path = "../ocio" }
-rand = "0.10.1"
 rayon = "1.12.0"
 roxmltree = "0.20"
 stl_io = "0.11"

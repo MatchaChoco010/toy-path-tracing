@@ -35,6 +35,7 @@ cargo run --release -- --scene 0 --spp 64 -o result/scene-0.exr
 | `--spp <SPP>` | `32` | 1 ピクセルあたりのサンプル数です。`1` 以上を指定できます。 |
 | `--depth <DEPTH>` | `16` | パストレースの最大バウンス数です。`1` 以上を指定できます。 |
 | `-i, --integrator <INTEGRATOR>` | `mis` | 使用する integrator です。`mis`, `pt`, `nee` を指定できます。 |
+| `--render-threads <RENDER_THREADS>` | CPU 論理コア数 - 2（下限 1） | Rayon がレンダリングや BVH / light tree 構築に使うスレッド数です。 |
 | `--ocio-config <OCIO_CONFIG>` | `ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5` | 使用する OCIO config です。`.ocio` / `.ocioz` のパス、または OCIO built-in config URI を指定できます。 |
 | `--ocio-rendering-space <OCIO_RENDERING_SPACE>` | config の `rendering` role、なければ `scene_linear` role | レンダラー内部の scene-linear 作業色空間です。 |
 | `--texture-color-space <TEXTURE_COLOR_SPACE>` | `sRGB - Texture` | 明示 color space がない color texture の入力色空間です。 |

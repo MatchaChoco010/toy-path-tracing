@@ -1,9 +1,8 @@
 use std::f32::consts::{PI, TAU};
 
 use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::math::schlick_fresnel;
+use crate::{math::schlick_fresnel, sampler::AuxRng};
 
 use super::smith_ggx::{EFFECTIVELY_SMOOTH_ALPHA, MIN_ALPHA, ggx_d, is_upper_hemisphere};
 use super::{BsdfFlags, BsdfSample};
@@ -31,7 +30,7 @@ impl ConductorGgxCui2023Bsdf {
         self.alpha_x.max(self.alpha_y) < EFFECTIVELY_SMOOTH_ALPHA
     }
 
-    pub fn eval(&self, wo: Vec3, wi: Vec3, internal_rng: &mut ThreadRng) -> Vec3 {
+    pub fn eval(&self, wo: Vec3, wi: Vec3, aux_rng: &mut AuxRng) -> Vec3 {
         if !is_upper_hemisphere(wo) || !is_upper_hemisphere(wi) || self.effectively_smooth() {
             return Vec3::ZERO;
         }
@@ -52,7 +51,7 @@ impl ConductorGgxCui2023Bsdf {
         let mut current_view = wi;
 
         for i in 1..MAX_BOUNCES {
-            let us = Vec2::new(internal_rng.random::<f32>(), internal_rng.random::<f32>());
+            let us = Vec2::new(aux_rng.next_f32(), aux_rng.next_f32());
             let wm = sample_vndf_unrestricted(current_view, self.alpha_x, self.alpha_y, us);
             if wm.length_squared() == 0.0 {
                 break;
@@ -76,7 +75,7 @@ impl ConductorGgxCui2023Bsdf {
 
             if i >= RR_DEPTH {
                 let q = sk.clamp(0.3, 0.95);
-                let r = internal_rng.random::<f32>();
+                let r = aux_rng.next_f32();
                 if r >= q {
                     break;
                 }
@@ -124,7 +123,7 @@ impl ConductorGgxCui2023Bsdf {
         d * g1 / (4.0 * wo.z.max(1.0e-6))
     }
 
-    pub fn sample(&self, wo: Vec3, internal_rng: &mut ThreadRng) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3, aux_rng: &mut AuxRng) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) {
             return None;
         }
@@ -144,7 +143,7 @@ impl ConductorGgxCui2023Bsdf {
         let final_dir;
 
         loop {
-            let us = Vec2::new(internal_rng.random::<f32>(), internal_rng.random::<f32>());
+            let us = Vec2::new(aux_rng.next_f32(), aux_rng.next_f32());
             let wm = sample_vndf_unrestricted(current_view, self.alpha_x, self.alpha_y, us);
             if wm.length_squared() == 0.0 {
                 return None;
@@ -186,7 +185,7 @@ impl ConductorGgxCui2023Bsdf {
             } else {
                 let lambda_signed = dir_list[bounce].lambda_signed;
                 let g1 = 1.0 / (1.0 + lambda_signed);
-                let r = internal_rng.random::<f32>();
+                let r = aux_rng.next_f32();
                 if r < g1 {
                     pdf_sample *= g1;
                     final_dir = reflected;
@@ -467,7 +466,10 @@ mod tests {
     use glam::Vec3;
 
     use super::{ConductorGgxCui2023Bsdf, h_approx};
-    use crate::bsdf::{BsdfFlags, ConductorGgxBsdf};
+    use crate::{
+        bsdf::{BsdfFlags, ConductorGgxBsdf},
+        sampler::AuxRng,
+    };
 
     const HEMISPHERE_Z_SAMPLES: usize = 96;
     const HEMISPHERE_PHI_SAMPLES: usize = 96;
@@ -499,10 +501,10 @@ mod tests {
     fn smooth_alpha_returns_perfect_mirror_sample() {
         let bsdf = ConductorGgxCui2023Bsdf::new(Vec3::new(0.7, 0.5, 0.3), 1.0e-4, 1.0e-4);
         let wo = Vec3::new(0.3, -0.4, 0.866_025_4).normalize();
-        let mut rng = rand::rng();
+        let mut aux_rng = AuxRng::from_seed(0);
 
         let sample = bsdf
-            .sample(wo, &mut rng)
+            .sample(wo, &mut aux_rng)
             .expect("expected smooth reflection");
         let expected = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
 
@@ -513,10 +515,10 @@ mod tests {
     #[test]
     fn eval_returns_zero_for_lower_hemisphere_inputs() {
         let bsdf = ConductorGgxCui2023Bsdf::new(Vec3::ONE, 0.3, 0.3);
-        let mut rng = rand::rng();
+        let mut aux_rng = AuxRng::from_seed(0);
 
-        assert_eq!(bsdf.eval(Vec3::Z, Vec3::NEG_Z, &mut rng), Vec3::ZERO);
-        assert_eq!(bsdf.eval(Vec3::NEG_Z, Vec3::Z, &mut rng), Vec3::ZERO);
+        assert_eq!(bsdf.eval(Vec3::Z, Vec3::NEG_Z, &mut aux_rng), Vec3::ZERO);
+        assert_eq!(bsdf.eval(Vec3::NEG_Z, Vec3::Z, &mut aux_rng), Vec3::ZERO);
     }
 
     #[test]
@@ -547,11 +549,11 @@ mod tests {
         let wo = Vec3::new(0.2, -0.1, 0.974_679_4).normalize();
         let wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
 
-        let mut rng = rand::rng();
         let mut accum = Vec3::ZERO;
         let samples = 64;
-        for _ in 0..samples {
-            accum += multi.eval(wo, wi, &mut rng);
+        for i in 0..samples {
+            let mut aux_rng = AuxRng::from_seed(i);
+            accum += multi.eval(wo, wi, &mut aux_rng);
         }
         let multi_mean = accum / samples as f32;
         let single_value = single.eval(wo, wi);
@@ -574,11 +576,10 @@ mod tests {
     fn sample_returns_upper_hemisphere_glossy_reflection_for_typical_inputs() {
         let bsdf = ConductorGgxCui2023Bsdf::new(Vec3::new(0.9, 0.7, 0.4), 0.4, 0.4);
         let wo = Vec3::new(0.3, -0.4, 0.866_025_4).normalize();
-        let mut rng = rand::rng();
-
         let mut hits = 0usize;
-        for _ in 0..32 {
-            if let Some(sample) = bsdf.sample(wo, &mut rng) {
+        for i in 0..32 {
+            let mut aux_rng = AuxRng::from_seed(i);
+            if let Some(sample) = bsdf.sample(wo, &mut aux_rng) {
                 assert!(sample.wi.is_finite());
                 assert!(sample.weight.is_finite());
                 assert!(sample.pdf.is_finite());
@@ -596,14 +597,14 @@ mod tests {
         let bsdf = ConductorGgxCui2023Bsdf::new(Vec3::ONE, 0.45, 0.3);
         let wo = Vec3::new(0.2, 0.1, 0.974_679_4).normalize();
         let wi = Vec3::new(-0.3, 0.05, 0.952_628_5).normalize();
-        let mut rng = rand::rng();
-
         let samples = 256;
         let mut sum_io = Vec3::ZERO;
         let mut sum_oi = Vec3::ZERO;
-        for _ in 0..samples {
-            sum_io += bsdf.eval(wo, wi, &mut rng);
-            sum_oi += bsdf.eval(wi, wo, &mut rng);
+        for i in 0..samples {
+            let mut aux_rng_io = AuxRng::from_seed(i);
+            let mut aux_rng_oi = AuxRng::from_seed(i + samples);
+            sum_io += bsdf.eval(wo, wi, &mut aux_rng_io);
+            sum_oi += bsdf.eval(wi, wo, &mut aux_rng_oi);
         }
         let mean_io = sum_io / samples as f32;
         let mean_oi = sum_oi / samples as f32;

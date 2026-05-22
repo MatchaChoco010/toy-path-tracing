@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
 use glam::Vec3;
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{BsdfFlags, GlassBsdf};
+use crate::{
+    bsdf::{BsdfFlags, GlassBsdf},
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -118,9 +120,10 @@ impl GlassMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
-        let uc = rng.random::<f32>();
+        let uc = randoms.u_lobe;
         let sample = self.sample_impl(shading_vertex, uc)?;
 
         let wi_side = sample.wi.dot(shading_vertex.ng);
@@ -161,12 +164,7 @@ impl GlassMaterial {
         })
     }
 
-    pub fn eval(
-        &self,
-        _shading_vertex: &ShadingVertex,
-        _wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         Vec3::ZERO
     }
 

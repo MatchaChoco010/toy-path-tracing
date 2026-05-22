@@ -1,9 +1,11 @@
 use std::f32::consts::PI;
 
-use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
+use glam::Vec3;
 
-use crate::math::{sample_cosine_weighted_hemisphere, sg};
+use crate::{
+    math::{sample_cosine_weighted_hemisphere, sg},
+    sampler::MaterialSampleRandoms,
+};
 
 use super::gtr1::{d_gtr1, pdf_h_gtr1, sample_h_gtr1};
 use super::smith_ggx::{
@@ -104,7 +106,7 @@ impl DisneyBrdfBsdf {
         self.pdf_total(wo, wi, h)
     }
 
-    pub fn sample(&self, wo: Vec3, rng: &mut ThreadRng) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3, randoms: &MaterialSampleRandoms) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) {
             return None;
         }
@@ -114,8 +116,8 @@ impl DisneyBrdfBsdf {
             return None;
         }
 
-        let u_lobe = rng.random::<f32>();
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let u_lobe = randoms.u_lobe;
+        let us = randoms.u_dir;
 
         let wi = if u_lobe < p_d {
             sample_cosine_weighted_hemisphere(us)
@@ -270,7 +272,6 @@ mod tests {
     use glam::Vec3;
 
     use super::DisneyBrdfBsdf;
-
     const HEMISPHERE_Z_SAMPLES: usize = 128;
     const HEMISPHERE_PHI_SAMPLES: usize = 128;
 
@@ -500,11 +501,12 @@ mod tests {
             1.0,
         );
         let wo = Vec3::new(0.2, -0.1, 0.974_679_4).normalize();
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let mut got_any = false;
         for _ in 0..64 {
-            if let Some(sample) = bsdf.sample(wo, &mut rng) {
+            let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
+            if let Some(sample) = bsdf.sample(wo, &randoms) {
                 let f = bsdf.eval(wo, sample.wi);
                 let expected = f * (sample.wi.z.max(0.0) / sample.pdf);
                 let max_component = sample

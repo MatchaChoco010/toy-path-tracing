@@ -1,5 +1,4 @@
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 use std::fmt;
 
 pub mod camera;
@@ -28,6 +27,7 @@ use crate::{
         ray::{Ray, intersect_triangle},
     },
     qbvh::{Qbvh, build_qbvh, traverse_qbvh},
+    sampler::AuxRng,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -340,7 +340,7 @@ impl Scene {
     pub fn closest_hit(
         &self,
         ray: &Ray,
-        rng: &mut ThreadRng,
+        aux_rng: &mut AuxRng,
         mtlx_scratch: &mut crate::material::MtlxScratch,
     ) -> Result<Option<SceneHit>, ClosestHitError> {
         if self.instances.is_empty() {
@@ -369,7 +369,7 @@ impl Scene {
                     };
                     let mut shading_vertex =
                         self.alpha_test_shading_vertex(triangle, hit.barycentric, ray);
-                    let u: f32 = rng.random();
+                    let u = aux_rng.next_f32();
                     let cp = mtlx_scratch.checkpoint();
                     let accept = material.any_hit(&mut shading_vertex, mtlx_scratch, u);
                     mtlx_scratch.restore(cp);
@@ -1043,7 +1043,7 @@ mod tests {
         let hit = scene
             .closest_hit(
                 &ray,
-                &mut rand::rng(),
+                &mut crate::sampler::AuxRng::default(),
                 &mut crate::material::MtlxScratch::default(),
             )
             .expect("BVH should be built")
@@ -1076,7 +1076,7 @@ mod tests {
         let hit = scene
             .closest_hit(
                 &ray,
-                &mut rand::rng(),
+                &mut crate::sampler::AuxRng::default(),
                 &mut crate::material::MtlxScratch::default(),
             )
             .expect("BVH should be built")
@@ -1096,7 +1096,7 @@ mod tests {
         let error = scene
             .closest_hit(
                 &ray,
-                &mut rand::rng(),
+                &mut crate::sampler::AuxRng::default(),
                 &mut crate::material::MtlxScratch::default(),
             )
             .expect_err("expected missing BVH error");
@@ -1146,7 +1146,7 @@ mod tests {
         let hit = scene
             .closest_hit(
                 &ray,
-                &mut rand::rng(),
+                &mut crate::sampler::AuxRng::default(),
                 &mut crate::material::MtlxScratch::default(),
             )
             .expect("BVH should be built");
@@ -1199,7 +1199,7 @@ mod tests {
         let hit = scene
             .closest_hit(
                 &ray,
-                &mut rand::rng(),
+                &mut crate::sampler::AuxRng::default(),
                 &mut crate::material::MtlxScratch::default(),
             )
             .expect("BVH should be built")
@@ -1233,7 +1233,7 @@ mod tests {
         let hit = scene
             .closest_hit(
                 &ray,
-                &mut rand::rng(),
+                &mut crate::sampler::AuxRng::default(),
                 &mut crate::material::MtlxScratch::default(),
             )
             .expect("BVH should be built")

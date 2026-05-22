@@ -1,10 +1,10 @@
 use clap::Parser;
-use glam::{UVec2, Vec2, Vec3};
-use rand::RngExt;
-use rayon::prelude::*;
+use glam::{UVec2, Vec3};
+use rayon::{ThreadPoolBuilder, prelude::*};
 use std::{
     fs,
     path::{Path, PathBuf},
+    thread,
     time::{Duration, Instant},
 };
 use toy_path_tracing::{
@@ -14,6 +14,7 @@ use toy_path_tracing::{
     },
     integrator::IntegratorKind,
     output_image::{OutputTransform, save_output},
+    sampler::PathSampler,
     scenes::load_scene,
 };
 use tracing_subscriber::{EnvFilter, fmt};
@@ -41,6 +42,9 @@ struct Args {
     #[arg(short = 'i', long = "integrator", value_enum, default_value_t = IntegratorKind::Mis)]
     integrator: IntegratorKind,
 
+    #[arg(long = "render-threads", default_value_t = default_render_threads(), value_parser = parse_positive_usize)]
+    render_threads: usize,
+
     #[arg(long = "ocio-config", default_value = DEFAULT_OCIO_CONFIG)]
     ocio_config: String,
 
@@ -63,6 +67,8 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     init_tracing(args.log_filter.as_deref())?;
+    configure_rayon(args.render_threads)?;
+    tracing::info!(render_threads = args.render_threads, "configured rayon");
     let ocio = OcioColorPipeline::new(
         &args.ocio_config,
         args.ocio_rendering_space.clone(),
@@ -93,19 +99,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut pixels = vec![0.0_f32; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();
     pixels.par_chunks_mut(3).enumerate().for_each_init(
-        || (rand::rng(), scene.make_mtlx_scratch()),
-        |(rng, mtlx_scratch), (index, pixel)| {
+        || scene.make_mtlx_scratch(),
+        |mtlx_scratch, (index, pixel)| {
             let x = (index as u32) % resolution.x;
             let y = (index as u32) / resolution.x;
+            let pixel_coord = UVec2::new(x, y);
             let mut color = Vec3::ZERO;
 
             for sample_index in 0..args.spp {
-                let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-                let ray =
-                    camera.generate_ray_differential(resolution, UVec2::new(x, y), us, args.spp);
+                let sampler = PathSampler::new(pixel_coord, sample_index, args.spp, resolution);
+                let us = sampler.camera_sample();
+                let ray = camera.generate_ray_differential(resolution, pixel_coord, us, args.spp);
                 let sample =
                     args.integrator
-                        .trace_radiance(&scene, ray, rng, args.depth, mtlx_scratch);
+                        .trace_radiance(&scene, ray, &sampler, args.depth, mtlx_scratch);
                 let sample_count = (sample_index + 1) as f32;
                 color += (sample - color) / sample_count;
             }
@@ -122,6 +129,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     save_output(&args.output, resolution, &pixels, &ocio, &output_transform)?;
 
     Ok(())
+}
+
+fn default_render_threads() -> usize {
+    thread::available_parallelism()
+        .map(|threads| threads.get().saturating_sub(2).max(1))
+        .unwrap_or(1)
+}
+
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid positive integer: {error}"))?;
+    if parsed == 0 {
+        return Err("value must be at least 1".to_string());
+    }
+    Ok(parsed)
+}
+
+fn configure_rayon(render_threads: usize) -> Result<(), rayon::ThreadPoolBuildError> {
+    ThreadPoolBuilder::new()
+        .num_threads(render_threads)
+        .build_global()
 }
 
 fn output_transform(
@@ -227,5 +256,28 @@ mod tests {
 
         assert_eq!(args.output_display, None);
         assert_eq!(args.output_view, None);
+    }
+
+    #[test]
+    fn render_threads_defaults_to_available_parallelism_minus_two() {
+        let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
+
+        assert_eq!(args.render_threads, super::default_render_threads());
+    }
+
+    #[test]
+    fn render_threads_accepts_cli_value() {
+        let args = Args::try_parse_from(["toy-path-tracing", "--render-threads", "3"])
+            .expect("expected valid render thread count");
+
+        assert_eq!(args.render_threads, 3);
+    }
+
+    #[test]
+    fn render_threads_rejects_zero() {
+        let error = Args::try_parse_from(["toy-path-tracing", "--render-threads", "0"])
+            .expect_err("expected zero render threads to be rejected");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }
