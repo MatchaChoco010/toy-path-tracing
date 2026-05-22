@@ -7,6 +7,7 @@ pub mod material;
 pub mod math;
 pub mod output_image;
 pub mod qbvh;
+pub mod sampler;
 pub mod scene;
 pub mod scenes;
 pub mod utils;
