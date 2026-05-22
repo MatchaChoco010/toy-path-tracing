@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
-use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
+use glam::Vec3;
 
-use crate::bsdf::OrenNayarBsdf;
+use crate::{
+    bsdf::OrenNayarBsdf,
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -127,13 +129,14 @@ impl OrenNayarMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
             .normalize_or_zero();
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let us = randoms.u_dir;
         let bsdf = OrenNayarBsdf::new(
             self.rho_at(shading_vertex),
             self.roughness_at(shading_vertex),
@@ -158,12 +161,7 @@ impl OrenNayarMaterial {
         Some(sample)
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -319,8 +317,7 @@ mod tests {
     fn lambert_reduction_at_zero_roughness_through_material() {
         let material = OrenNayarMaterial::new(Vec3::ONE, 0.0);
         let vtx = test_shading_vertex(Vec2::ZERO);
-        let mut rng = rand::rng();
-        let f = material.eval(&vtx, Vec3::Z, &mut rng);
+        let f = material.eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default());
         assert!(f.abs_diff_eq(Vec3::ONE / PI, 1.0e-5));
     }
 
@@ -342,9 +339,8 @@ mod tests {
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
         let bsdf = crate::bsdf::OrenNayarBsdf::new(Vec3::new(0.2, 0.4, 0.6), 0.5);
-        let mut rng = rand::rng();
         let expected = bsdf.eval(Vec3::Z, Vec3::Z);
-        let f = material.eval(&vtx, Vec3::Z, &mut rng);
+        let f = material.eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default());
         assert!(f.abs_diff_eq(expected, 1.0e-5));
     }
 
@@ -353,9 +349,17 @@ mod tests {
         let material = OrenNayarMaterial::new(Vec3::ONE, 0.5);
         let mut vtx = test_shading_vertex(Vec2::ZERO);
         vtx.ng = -Vec3::Z;
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
         for _ in 0..32 {
-            assert!(material.sample(&vtx, &mut rng).is_none());
+            assert!(
+                material
+                    .sample(
+                        &vtx,
+                        &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                        &mut crate::sampler::AuxRng::default()
+                    )
+                    .is_none()
+            );
         }
     }
 }

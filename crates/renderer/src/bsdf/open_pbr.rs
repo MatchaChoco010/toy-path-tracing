@@ -1,11 +1,13 @@
 use std::{f32::consts::PI, sync::Arc};
 
 use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::math::{
-    OrthonormalBasis, cosine_weighted_hemisphere_pdf, fresnel_dielectric, refract,
-    sample_cosine_weighted_hemisphere, sg::luminance,
+use crate::{
+    math::{
+        OrthonormalBasis, cosine_weighted_hemisphere_pdf, fresnel_dielectric, refract,
+        sample_cosine_weighted_hemisphere, sg::luminance,
+    },
+    sampler::MaterialSampleRandoms,
 };
 
 use super::dispersion::{cauchy_ior, sample_dispersion_wavelength_weighted};
@@ -281,7 +283,7 @@ impl OpenPbrBsdf {
         pdf
     }
 
-    pub fn sample(&self, wo: Vec3, rng: &mut ThreadRng) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3, randoms: &MaterialSampleRandoms) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) {
             return None;
         }
@@ -289,18 +291,18 @@ impl OpenPbrBsdf {
         if probs.total <= 0.0 {
             return None;
         }
-        let chosen = pick_lobe(&probs, rng.random::<f32>() * probs.total);
+        let chosen = pick_lobe(&probs, randoms.u_lobe * probs.total);
         let p_lobe = probs.lobe(chosen) / probs.total;
         if p_lobe <= 0.0 {
             return None;
         }
 
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let us = randoms.u_dir;
         match chosen {
             ChosenLobe::Coat => self.sample_coat(wo, us, p_lobe),
             ChosenLobe::Metal => self.sample_metal(wo, us, p_lobe),
             ChosenLobe::SpecBrdf => self.sample_spec_brdf(wo, us, p_lobe),
-            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, rng),
+            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, randoms.u_extra0),
             ChosenLobe::Fuzz => self.sample_fuzz(wo, us),
             ChosenLobe::DiffBrdf => self.sample_diff_brdf(wo, us),
             ChosenLobe::DiffBtdf => self.sample_diff_btdf(wo, us),
@@ -1543,13 +1545,7 @@ impl OpenPbrBsdf {
         self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
     }
 
-    fn sample_spec_btdf(
-        &self,
-        wo: Vec3,
-        us: Vec2,
-        p_lobe: f32,
-        rng: &mut ThreadRng,
-    ) -> Option<BsdfSample> {
+    fn sample_spec_btdf(&self, wo: Vec3, us: Vec2, p_lobe: f32, u_aux: f32) -> Option<BsdfSample> {
         if self.p.thin_walled {
             let (_, t) = self.thin_wall_coefficients(wo.z.abs());
             if self.spec_btdf_is_smooth() {
@@ -1591,7 +1587,7 @@ impl OpenPbrBsdf {
         }
 
         if self.dispersion_rgb_sharing_active() && self.p.wavelength_lock.is_none() {
-            return self.sample_spec_btdf_rgb_shared(wo, us, p_lobe, rng);
+            return self.sample_spec_btdf_rgb_shared(wo, us, p_lobe, u_aux);
         }
 
         let dispersion_active = self.p.transmission_dispersion_abbe > 0.0;
@@ -1604,9 +1600,8 @@ impl OpenPbrBsdf {
                 );
                 (eta_lambda, Vec3::ONE, None)
             } else if self.p.front_face {
-                let u_lambda = rng.random::<f32>();
                 let (lambda, basis) =
-                    sample_dispersion_wavelength_weighted(u_lambda, self.p.path_throughput);
+                    sample_dispersion_wavelength_weighted(u_aux, self.p.path_throughput);
                 let eta_lambda = cauchy_ior(
                     lambda,
                     self.p.transmission_eta,
@@ -1710,9 +1705,9 @@ impl OpenPbrBsdf {
         wo: Vec3,
         us: Vec2,
         p_lobe: f32,
-        rng: &mut ThreadRng,
+        u_channel: f32,
     ) -> Option<BsdfSample> {
-        let channel = self.pick_dispersion_channel(rng.random::<f32>());
+        let channel = self.pick_dispersion_channel(u_channel);
         if channel.probability <= 0.0 {
             return None;
         }
@@ -2400,9 +2395,10 @@ mod tests {
         params.specular_alpha_x = 0.2;
         params.specular_alpha_y = 0.2;
         let bsdf = test_bsdf(params);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
+        let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
         let sample = bsdf
-            .sample(Vec3::new(0.2, -0.1, 0.9746794).normalize(), &mut rng)
+            .sample(Vec3::new(0.2, -0.1, 0.9746794).normalize(), &randoms)
             .unwrap();
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
     }
@@ -2454,11 +2450,12 @@ mod tests {
         params.specular = 0.0;
         params.base = 0.0;
         let bsdf = test_bsdf(params);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
         let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
         let mut got = false;
         for _ in 0..32 {
-            if let Some(sample) = bsdf.sample(wo, &mut rng)
+            let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
+            if let Some(sample) = bsdf.sample(wo, &randoms)
                 && sample.flags.contains(BsdfFlags::TRANSMISSION)
             {
                 assert!(sample.wi.abs_diff_eq(-wo, 1.0e-5));
@@ -2480,9 +2477,8 @@ mod tests {
         params.transmission_dispersion_abbe = 20.0;
         params.path_throughput = Vec3::new(0.8, 0.5, 0.3);
         let bsdf = test_bsdf(params);
-        let mut rng = rand::rng();
         let sample = bsdf
-            .sample_spec_btdf_rgb_shared(Vec3::Z, glam::Vec2::new(0.37, 0.82), 1.0, &mut rng)
+            .sample_spec_btdf_rgb_shared(Vec3::Z, glam::Vec2::new(0.37, 0.82), 1.0, 0.41)
             .expect("rough dispersive BTDF should sample");
 
         assert!(sample.flags.contains(BsdfFlags::TRANSMISSION));
@@ -2505,9 +2501,7 @@ mod tests {
         let bsdf = test_bsdf(params);
         let wo = Vec3::new(0.35, 0.0, 0.936_75).normalize();
         let expected = refract(wo, 1.0 / 1.5).unwrap();
-        let sample = bsdf
-            .sample_spec_btdf(wo, Vec2::ZERO, 1.0, &mut rand::rng())
-            .unwrap();
+        let sample = bsdf.sample_spec_btdf(wo, Vec2::ZERO, 1.0, 0.5).unwrap();
         assert!(sample.wi.abs_diff_eq(expected, 1.0e-5));
     }
 }

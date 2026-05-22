@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{BsdfFlags, DielectricGgxBsdf, DielectricGgxEnergyCompensationLut};
+use crate::{
+    bsdf::{BsdfFlags, DielectricGgxBsdf, DielectricGgxEnergyCompensationLut},
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -157,10 +159,11 @@ impl DielectricGgxMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
-        let uc = rng.random::<f32>();
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let uc = randoms.u_lobe;
+        let us = randoms.u_dir;
         let sample = self.sample_impl(shading_vertex, uc, us)?;
 
         let wi_side = sample.wi.dot(shading_vertex.ng);
@@ -213,12 +216,7 @@ impl DielectricGgxMaterial {
         })
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
@@ -544,12 +542,16 @@ mod tests {
         let material =
             DielectricGgxMaterial::new(Vec3::new(0.85, 0.95, 0.95), 1.5, 0.3, 0.0, false);
         let vtx = test_shading_vertex(Vec3::new(0.2, -0.1, 0.9746794).normalize());
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let mut saw_reflection = false;
         let mut saw_transmission = false;
         for _ in 0..256 {
-            if let Some(sample) = material.sample(&vtx, &mut rng) {
+            if let Some(sample) = material.sample(
+                &vtx,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            ) {
                 if sample.flags.contains(BsdfFlags::REFLECTION) {
                     saw_reflection = true;
                 }
@@ -574,10 +576,14 @@ mod tests {
         let material = DielectricGgxMaterial::new(Vec3::ONE, 1.5, 0.3, 0.0, false);
         let mut vtx = test_shading_vertex(Vec3::Z);
         vtx.front_face = false;
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let sample = material
-            .sample(&vtx, &mut rng)
+            .sample(
+                &vtx,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a back-face sample");
         assert!(
             sample

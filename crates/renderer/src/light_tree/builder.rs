@@ -169,7 +169,7 @@ fn triangle_leaf(scene: &Scene, area_light: &AreaLightTriangle) -> Option<LeafBu
 
     // Triangle leaf vMF: nu_bar = 0.5 * n_geom (paper Sec. 3.1.1, "rough fit
     // to Lambert's cosine"). This gives lambda ~ 1.83.
-    let nu_bar = 0.5 * n_geom;
+    let nu_bar = n_geom * 0.5;
 
     Some(LeafBuild {
         kind: LightTreeLeafKind::Triangle(triangle),

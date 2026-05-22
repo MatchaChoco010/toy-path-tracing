@@ -1,6 +1,5 @@
 use clap::Parser;
-use glam::{UVec2, Vec2, Vec3};
-use rand::RngExt;
+use glam::{UVec2, Vec3};
 use rayon::prelude::*;
 use std::{
     fs,
@@ -14,6 +13,7 @@ use toy_path_tracing::{
     },
     integrator::IntegratorKind,
     output_image::{OutputTransform, save_output},
+    sampler::PathSampler,
     scenes::load_scene,
 };
 use tracing_subscriber::{EnvFilter, fmt};
@@ -93,19 +93,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut pixels = vec![0.0_f32; (resolution.x * resolution.y * 3) as usize];
     let intersect_start = Instant::now();
     pixels.par_chunks_mut(3).enumerate().for_each_init(
-        || (rand::rng(), scene.make_mtlx_scratch()),
-        |(rng, mtlx_scratch), (index, pixel)| {
+        || scene.make_mtlx_scratch(),
+        |mtlx_scratch, (index, pixel)| {
             let x = (index as u32) % resolution.x;
             let y = (index as u32) / resolution.x;
+            let pixel_coord = UVec2::new(x, y);
             let mut color = Vec3::ZERO;
 
             for sample_index in 0..args.spp {
-                let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-                let ray =
-                    camera.generate_ray_differential(resolution, UVec2::new(x, y), us, args.spp);
+                let sampler = PathSampler::new(pixel_coord, sample_index, args.spp, resolution);
+                let us = sampler.camera_sample();
+                let ray = camera.generate_ray_differential(resolution, pixel_coord, us, args.spp);
                 let sample =
                     args.integrator
-                        .trace_radiance(&scene, ray, rng, args.depth, mtlx_scratch);
+                        .trace_radiance(&scene, ray, &sampler, args.depth, mtlx_scratch);
                 let sample_count = (sample_index + 1) as f32;
                 color += (sample - color) / sample_count;
             }

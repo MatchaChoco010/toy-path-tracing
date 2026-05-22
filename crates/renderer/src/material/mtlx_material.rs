@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
 use crate::bsdf::{
     MtlxDielectricGgxDirectionalAlbedoLut, MtlxGeneralizedSchlickGgxDirectionalAlbedoLut,
@@ -9,6 +8,7 @@ use crate::bsdf::{
 };
 use crate::light_tree::LightTreePrecompute;
 use crate::math::sg::SgLobe;
+use crate::sampler::{AuxRng, MaterialSampleRandoms};
 
 use super::mtlx::{self, CompiledMaterial, MtlxScratch};
 use super::{GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, ShadingVertex};
@@ -120,13 +120,15 @@ impl MtlxMaterial {
         &self,
         sv: &ShadingVertex,
         scratch: &MtlxScratch,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         let active = self.active(sv);
         let thin_walled = active.thin_walled;
         let regs = scratch.regs_slice(sv.mtlx_regs.expect("precompute_shading not called"));
         let dalbedo_cache = Self::dalbedo_cache(sv, scratch);
-        let candidate = mtlx::runtime::sample_closure_cached(active, regs, sv, rng, dalbedo_cache)?;
+        let candidate =
+            mtlx::runtime::sample_closure_cached(active, regs, sv, randoms, dalbedo_cache)?;
         let mut wi_local = candidate.wi_local;
         let mut eta = candidate.eta;
         let is_transmission = candidate
@@ -189,7 +191,7 @@ impl MtlxMaterial {
         sv: &ShadingVertex,
         scratch: &MtlxScratch,
         wi: Vec3,
-        _rng: &mut ThreadRng,
+        _aux_rng: &mut AuxRng,
     ) -> Vec3 {
         if sv.wo.dot(sv.ng) <= 0.0 {
             return Vec3::ZERO;
@@ -596,13 +598,22 @@ mod tests {
         let mut sv = synthetic_sv(true);
         let mut direct_scratch = MtlxScratch::default();
         let mut layered_scratch = MtlxScratch::default();
-        let mut rng = rand::rng();
         direct.precompute_shading(&mut sv, &mut direct_scratch);
-        let direct_f = direct.eval(&sv, &direct_scratch, Vec3::Z, &mut rng);
+        let direct_f = direct.eval(
+            &sv,
+            &direct_scratch,
+            Vec3::Z,
+            &mut crate::sampler::AuxRng::default(),
+        );
         sv.mtlx_regs = None;
         sv.mtlx_precomputed_for = None;
         layered.precompute_shading(&mut sv, &mut layered_scratch);
-        let layered_f = layered.eval(&sv, &layered_scratch, Vec3::Z, &mut rng);
+        let layered_f = layered.eval(
+            &sv,
+            &layered_scratch,
+            Vec3::Z,
+            &mut crate::sampler::AuxRng::default(),
+        );
 
         assert!(layered_f.abs_diff_eq(direct_f, 1.0e-6));
     }
@@ -668,14 +679,27 @@ mod tests {
         ));
         let mut sv = synthetic_sv(true);
         let mut scratch = MtlxScratch::default();
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         mat.precompute_shading(&mut sv, &mut scratch);
-        assert_eq!(mat.eval(&sv, &scratch, -Vec3::Z, &mut rng), Vec3::ZERO);
+        assert_eq!(
+            mat.eval(
+                &sv,
+                &scratch,
+                -Vec3::Z,
+                &mut crate::sampler::AuxRng::default()
+            ),
+            Vec3::ZERO
+        );
         assert_eq!(mat.pdf(&sv, &scratch, -Vec3::Z), 0.0);
 
         let sample = mat
-            .sample(&sv, &scratch, &mut rng)
+            .sample(
+                &sv,
+                &scratch,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("thin-walled transmission should sample");
         assert!(sample.flags.contains(crate::bsdf::BsdfFlags::DELTA));
         assert!(sample.flags.contains(crate::bsdf::BsdfFlags::TRANSMISSION));
@@ -698,19 +722,25 @@ mod tests {
         let mat = load_shader_ops_thin_walled();
         let material = Material::Mtlx(mat);
 
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
         let mut scratch = MtlxScratch::default();
         let n = 20_000u32;
 
         let glossy_fraction = |sv: &mut ShadingVertex,
-                               rng: &mut rand::rngs::ThreadRng,
+                               rng: &mut crate::sampler::AuxRng,
                                scratch: &mut MtlxScratch|
          -> f32 {
             material.precompute_shading(sv, scratch);
             let mut glossy = 0u32;
             let mut total = 0u32;
             for _ in 0..n {
-                if let Some(s) = material.sample(sv, scratch, rng) {
+                let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(rng);
+                if let Some(s) = material.sample(
+                    sv,
+                    scratch,
+                    &randoms,
+                    &mut crate::sampler::AuxRng::default(),
+                ) {
                     total += 1;
                     if s.flags.contains(BsdfFlags::GLOSSY)
                         && !s.flags.contains(BsdfFlags::TRANSMISSION)

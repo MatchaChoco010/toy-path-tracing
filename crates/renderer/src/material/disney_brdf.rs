@@ -1,7 +1,6 @@
 use std::{path::Path, sync::Arc};
 
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
 use crate::{
     bsdf::{BsdfFlags, DisneyBrdfBsdf},
@@ -10,6 +9,7 @@ use crate::{
         make_glossy_lobe, merge_glossy_roughness,
     },
     math::sg,
+    sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
@@ -227,7 +227,8 @@ impl DisneyBrdfMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -241,7 +242,7 @@ impl DisneyBrdfMaterial {
         }
 
         let bsdf = self.make_bsdf(shading_vertex);
-        let sample = bsdf.sample(wo_local, rng)?;
+        let sample = bsdf.sample(wo_local, randoms)?;
 
         let wi = shading_vertex.frame.local_to_world(sample.wi);
         if wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -265,12 +266,7 @@ impl DisneyBrdfMaterial {
         })
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -509,9 +505,7 @@ mod tests {
     fn default_material_evaluates_to_finite_positive_response_for_normal_incidence() {
         let material = DisneyBrdfMaterial::new(Vec3::new(0.82, 0.67, 0.16));
         let vtx = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
-
-        let f = material.eval(&vtx, Vec3::Z, &mut rng);
+        let f = material.eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default());
         assert!(f.is_finite());
         assert!(f.x > 0.0 && f.y > 0.0 && f.z > 0.0);
     }
@@ -522,10 +516,8 @@ mod tests {
             .with_metallic(1.0)
             .with_roughness(0.3);
         let vtx = test_shading_vertex(Vec3::new(0.3, -0.4, 0.866_025_4).normalize());
-        let mut rng = rand::rng();
-
         let wi = Vec3::new(-vtx.wo.x, -vtx.wo.y, vtx.wo.z).normalize();
-        let f = material.eval(&vtx, wi, &mut rng);
+        let f = material.eval(&vtx, wi, &mut crate::sampler::AuxRng::default());
         assert!(f.is_finite());
         assert!(f.length() > 0.0);
     }

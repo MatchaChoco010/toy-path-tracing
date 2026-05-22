@@ -1,5 +1,4 @@
 use glam::{Vec2, Vec3};
-use rand::RngExt;
 
 use crate::{
     bsdf::BsdfFlags,
@@ -11,6 +10,7 @@ use crate::{
     material::{Material, MtlxScratch, ShadingVertex},
     math::ray::Ray,
     math::{balance_heuristic, russian_roulette_probability},
+    sampler::{AuxRng, PathSampler},
     scene::Scene,
 };
 
@@ -19,15 +19,16 @@ use super::{spawn_scattered_ray, unoccluded};
 pub fn trace_radiance(
     scene: &Scene,
     initial_ray: Ray,
-    rng: &mut rand::rngs::ThreadRng,
+    sampler: &PathSampler,
     max_depth: u32,
     mtlx_scratch: &mut MtlxScratch,
 ) -> Vec3 {
     let mut radiance = Vec3::ZERO;
     let mut throughput = Vec3::ONE;
 
+    let mut initial_aux_rng = AuxRng::from_seed(sampler.initial_aux_rng_seed());
     let initial_hit = scene
-        .closest_hit(&initial_ray, rng, mtlx_scratch)
+        .closest_hit(&initial_ray, &mut initial_aux_rng, mtlx_scratch)
         .expect("scene.build_qbvh() must be called before traversal");
 
     let Some(initial_hit) = initial_hit else {
@@ -48,28 +49,28 @@ pub fn trace_radiance(
     let rr_start_depth = 4;
 
     for depth in 0..max_depth {
+        let randoms = sampler.path_vertex_randoms(depth);
+        let mut aux_rng = AuxRng::from_seed(randoms.aux_rng_seed);
         vtx.path_throughput = throughput;
         vtx.wavelength_lock = wavelength_lock;
         if should_sample_direct_light(material) {
-            let u_root = rng.random::<f32>();
-            let u_tree = rng.random::<f32>();
-            let u_aux = rng.random::<f32>();
-            let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+            let light_randoms = randoms.light;
             radiance += throughput
                 * direct_light_mis_contribution(
                     scene,
                     material,
                     &vtx,
-                    u_root,
-                    u_tree,
-                    u_aux,
-                    us,
-                    rng,
+                    light_randoms.u_category,
+                    light_randoms.u_tree,
+                    light_randoms.u_light_aux,
+                    light_randoms.u_surface,
+                    &mut aux_rng,
                     mtlx_scratch,
                 );
         }
 
-        let Some(sample) = material.sample(&vtx, mtlx_scratch, rng) else {
+        let Some(sample) = material.sample(&vtx, mtlx_scratch, &randoms.material, &mut aux_rng)
+        else {
             break;
         };
         let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
@@ -81,7 +82,7 @@ pub fn trace_radiance(
 
         if depth + 1 >= rr_start_depth {
             let survive_probability = russian_roulette_probability(throughput);
-            if rng.random::<f32>() > survive_probability {
+            if randoms.u_rr > survive_probability {
                 break;
             }
             throughput /= survive_probability;
@@ -89,7 +90,7 @@ pub fn trace_radiance(
 
         let next_ray = spawn_scattered_ray(&ray, hit_t, &vtx, &sample);
         let next_hit = scene
-            .closest_hit(&next_ray, rng, mtlx_scratch)
+            .closest_hit(&next_ray, &mut aux_rng, mtlx_scratch)
             .expect("scene.build_qbvh() must be called before traversal");
 
         match next_hit {
@@ -144,7 +145,7 @@ pub(super) fn direct_light_mis_contribution(
     u_tree: f32,
     u_aux: f32,
     us: Vec2,
-    rng: &mut rand::rngs::ThreadRng,
+    aux_rng: &mut AuxRng,
     mtlx_scratch: &mut MtlxScratch,
 ) -> Vec3 {
     let ctx = LightSampleContext::from_vertex(vtx);
@@ -170,9 +171,9 @@ pub(super) fn direct_light_mis_contribution(
 
     let is_delta_light = li.light_type.is_delta();
     let (f, bsdf_pdf) = if is_delta_light {
-        (material.eval(vtx, mtlx_scratch, li.wi, rng), 0.0)
+        (material.eval(vtx, mtlx_scratch, li.wi, aux_rng), 0.0)
     } else {
-        material.eval_pdf(vtx, mtlx_scratch, li.wi, rng)
+        material.eval_pdf(vtx, mtlx_scratch, li.wi, aux_rng)
     };
     if f.length_squared() == 0.0 {
         return Vec3::ZERO;
@@ -183,7 +184,7 @@ pub(super) fn direct_light_mis_contribution(
         return Vec3::ZERO;
     }
 
-    if !unoccluded(scene, vtx, &li, rng, mtlx_scratch) {
+    if !unoccluded(scene, vtx, &li, aux_rng, mtlx_scratch) {
         return Vec3::ZERO;
     }
 
@@ -460,7 +461,6 @@ mod tests {
         let material = transmission_mtlx_material();
         let mut vtx = standalone_shading_vertex_for_transmission();
         let mut scratch = MtlxScratch::default();
-        let mut rng = rand::rng();
         material.precompute_shading(&mut vtx, &mut scratch);
 
         let l = direct_light_mis_contribution(
@@ -471,7 +471,7 @@ mod tests {
             0.5,
             0.5,
             Vec2::new(0.25, 0.5),
-            &mut rng,
+            &mut crate::sampler::AuxRng::default(),
             &mut scratch,
         );
 
@@ -484,9 +484,10 @@ mod tests {
     #[test]
     fn trace_radiance_counts_light_after_delta_bounce() {
         let (scene, ray, expected) = mirror_to_light_scene();
-        let mut rng = rand::rng();
+        let sampler =
+            crate::sampler::PathSampler::new(glam::UVec2::ZERO, 0, 1, glam::UVec2::new(1, 1));
 
-        let radiance = trace_radiance(&scene, ray, &mut rng, 2, &mut MtlxScratch::default());
+        let radiance = trace_radiance(&scene, ray, &sampler, 2, &mut MtlxScratch::default());
 
         assert!(radiance.abs_diff_eq(expected, 1.0e-3));
     }
@@ -521,7 +522,7 @@ mod tests {
             0.0,
             0.5,
             Vec2::new(0.25, 0.5),
-            &mut rand::rng(),
+            &mut crate::sampler::AuxRng::default(),
             &mut MtlxScratch::default(),
         );
         let expected = (4.0 / PI) * (2.0 / (2.0 + 1.0 / PI));
@@ -659,9 +660,10 @@ mod tests {
         scene.build_qbvh();
         scene.build_light_tree();
 
-        let mut rng = rand::rng();
         let ray = Ray::new(Vec3::ZERO, Vec3::Y);
-        let radiance = trace_radiance(&scene, ray, &mut rng, 4, &mut MtlxScratch::default());
+        let sampler =
+            crate::sampler::PathSampler::new(glam::UVec2::ZERO, 0, 1, glam::UVec2::new(1, 1));
+        let radiance = trace_radiance(&scene, ray, &sampler, 4, &mut MtlxScratch::default());
 
         assert!(radiance.abs_diff_eq(env_radiance, 1.0e-5));
     }
@@ -697,7 +699,7 @@ mod tests {
             0.0,
             0.0,
             Vec2::ZERO,
-            &mut rand::rng(),
+            &mut crate::sampler::AuxRng::default(),
             &mut MtlxScratch::default(),
         );
         // Li=1 * lambert eval 0.8/PI * cos=1 / pmf=1 = 0.8/PI.
@@ -740,7 +742,7 @@ mod tests {
             0.0,
             0.0,
             Vec2::ZERO,
-            &mut rand::rng(),
+            &mut crate::sampler::AuxRng::default(),
             &mut MtlxScratch::default(),
         );
         assert_eq!(radiance, Vec3::ZERO);
@@ -776,7 +778,7 @@ mod tests {
             0.0,
             0.0,
             Vec2::ZERO,
-            &mut rand::rng(),
+            &mut crate::sampler::AuxRng::default(),
             &mut MtlxScratch::default(),
         );
         // Li = color * irradiance = 2; lambert 0.8/PI * cos=1 / pmf=1.
@@ -818,7 +820,7 @@ mod tests {
             0.0,
             0.0,
             Vec2::ZERO,
-            &mut rand::rng(),
+            &mut crate::sampler::AuxRng::default(),
             &mut MtlxScratch::default(),
         );
         let expected = 0.8 / PI;
@@ -859,7 +861,7 @@ mod tests {
             0.0,
             0.0,
             Vec2::ZERO,
-            &mut rand::rng(),
+            &mut crate::sampler::AuxRng::default(),
             &mut MtlxScratch::default(),
         );
         assert_eq!(radiance, Vec3::ZERO);
@@ -884,12 +886,17 @@ mod tests {
         scene.build_qbvh();
         scene.build_light_tree();
 
-        let mut rng = rand::rng();
         let mut scratch = MtlxScratch::default();
         let mut accumulated = Vec3::ZERO;
-        for _ in 0..32 {
+        for sample_index in 0..32 {
             let ray = Ray::new(Vec3::new(0.25, 0.25, -2.0), Vec3::Z);
-            accumulated += trace_radiance(&scene, ray, &mut rng, 4, &mut scratch);
+            let sampler = crate::sampler::PathSampler::new(
+                glam::UVec2::ZERO,
+                sample_index,
+                32,
+                glam::UVec2::new(1, 1),
+            );
+            accumulated += trace_radiance(&scene, ray, &sampler, 4, &mut scratch);
         }
         let mean = accumulated / 32.0;
 

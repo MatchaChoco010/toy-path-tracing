@@ -1,11 +1,13 @@
 use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{
-    BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
-    DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+use crate::{
+    bsdf::{
+        BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
+        DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+    },
+    sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
@@ -161,12 +163,16 @@ impl SimplePbrMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
-        let u_component = rng.random::<f32>();
-        let u_layer = rng.random::<f32>();
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
-        let sample = self.sample_impl(shading_vertex, u_component, u_layer, us, rng)?;
+        let sample = self.sample_impl(
+            shading_vertex,
+            randoms.u_lobe,
+            randoms.u_layer,
+            randoms.u_dir,
+            aux_rng,
+        )?;
 
         if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
             return None;
@@ -181,7 +187,7 @@ impl SimplePbrMaterial {
         u_component: f32,
         u_layer: f32,
         us: Vec2,
-        internal_rng: &mut ThreadRng,
+        aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -255,7 +261,7 @@ impl SimplePbrMaterial {
             return None;
         }
 
-        let f = self.eval(shading_vertex, wi, internal_rng);
+        let f = self.eval(shading_vertex, wi, aux_rng);
         if f.length_squared() == 0.0 {
             return None;
         }
@@ -276,12 +282,7 @@ impl SimplePbrMaterial {
         })
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -622,12 +623,16 @@ mod tests {
     fn rough_diffuse_layer_sample_matches_eval_cos_over_pdf() {
         let material = test_material(0.0);
         let vtx = test_shading_vertex(Vec3::new(0.2, -0.1, 0.9746794).normalize());
-        let mut rng = rand::rng();
-
         let sample = material
-            .sample_impl(&vtx, 0.9, 0.9, Vec2::new(0.37, 0.82), &mut rng)
+            .sample_impl(
+                &vtx,
+                0.9,
+                0.9,
+                Vec2::new(0.37, 0.82),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a diffuse layer sample");
-        let f = material.eval(&vtx, sample.wi, &mut rng);
+        let f = material.eval(&vtx, sample.wi, &mut crate::sampler::AuxRng::default());
         let wi_local = vtx.frame.world_to_local(sample.wi).normalize_or_zero();
         let expected = f * (wi_local.z.max(0.0) / sample.pdf);
 
@@ -639,10 +644,14 @@ mod tests {
     fn metallic_one_samples_only_metal_component() {
         let material = test_material(1.0);
         let vtx = test_shading_vertex(Vec3::new(0.2, -0.1, 0.9746794).normalize());
-        let mut rng = rand::rng();
-
         let sample = material
-            .sample_impl(&vtx, 0.9, 0.9, Vec2::new(0.25, 0.75), &mut rng)
+            .sample_impl(
+                &vtx,
+                0.9,
+                0.9,
+                Vec2::new(0.25, 0.75),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a metal sample");
 
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));

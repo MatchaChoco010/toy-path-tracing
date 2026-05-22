@@ -18,13 +18,13 @@ mod standard_surface;
 pub mod texture;
 
 use glam::{Vec2, Vec3};
-use rand::rngs::ThreadRng;
 
 use crate::{
     bsdf::BsdfFlags,
     color::{self, OcioColorProcessor},
     light_tree::LightTreePrecompute,
     math::{OrthonormalBasis, sg::SgLobe},
+    sampler::{AuxRng, MaterialSampleRandoms},
     scene::TriangleRef,
 };
 
@@ -203,23 +203,26 @@ impl Material {
         &self,
         shading_vertex: &ShadingVertex,
         scratch: &MtlxScratch,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         match self {
-            Self::NormalizedLambert(material) => material.sample(shading_vertex, rng),
-            Self::OrenNayar(material) => material.sample(shading_vertex, rng),
-            Self::Eon(material) => material.sample(shading_vertex, rng),
-            Self::Mirror(material) => material.sample(shading_vertex, rng),
-            Self::ConductorGgx(material) => material.sample(shading_vertex, rng),
-            Self::ConductorGgxCui2023(material) => material.sample(shading_vertex, rng),
-            Self::DielectricGgx(material) => material.sample(shading_vertex, rng),
-            Self::Glass(material) => material.sample(shading_vertex, rng),
-            Self::SimplePBR(material) => material.sample(shading_vertex, rng),
-            Self::DisneyBrdf(material) => material.sample(shading_vertex, rng),
-            Self::StandardSurface(material) => material.sample(shading_vertex, rng),
-            Self::OpenPbr(material) => material.sample(shading_vertex, rng),
-            Self::Emissive(material) => material.sample(shading_vertex, rng),
-            Self::Mtlx(material) => material.sample(shading_vertex, scratch, rng),
+            Self::NormalizedLambert(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::OrenNayar(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::Eon(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::Mirror(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::ConductorGgx(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::ConductorGgxCui2023(material) => {
+                material.sample(shading_vertex, randoms, aux_rng)
+            }
+            Self::DielectricGgx(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::Glass(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::SimplePBR(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::DisneyBrdf(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::StandardSurface(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::OpenPbr(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::Emissive(material) => material.sample(shading_vertex, randoms, aux_rng),
+            Self::Mtlx(material) => material.sample(shading_vertex, scratch, randoms, aux_rng),
         }
     }
 
@@ -247,23 +250,23 @@ impl Material {
         shading_vertex: &ShadingVertex,
         scratch: &MtlxScratch,
         wi: Vec3,
-        internal_rng: &mut ThreadRng,
+        aux_rng: &mut AuxRng,
     ) -> Vec3 {
         match self {
-            Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::OrenNayar(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::Eon(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::Mirror(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::ConductorGgx(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::ConductorGgxCui2023(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::DielectricGgx(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::Glass(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::SimplePBR(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::StandardSurface(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::OpenPbr(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::Emissive(material) => material.eval(shading_vertex, wi, internal_rng),
-            Self::Mtlx(material) => material.eval(shading_vertex, scratch, wi, internal_rng),
+            Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::OrenNayar(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::Eon(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::Mirror(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::ConductorGgx(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::ConductorGgxCui2023(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::DielectricGgx(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::Glass(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::SimplePBR(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::StandardSurface(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::OpenPbr(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::Emissive(material) => material.eval(shading_vertex, wi, aux_rng),
+            Self::Mtlx(material) => material.eval(shading_vertex, scratch, wi, aux_rng),
         }
     }
 
@@ -291,12 +294,12 @@ impl Material {
         shading_vertex: &ShadingVertex,
         scratch: &MtlxScratch,
         wi: Vec3,
-        internal_rng: &mut ThreadRng,
+        aux_rng: &mut AuxRng,
     ) -> (Vec3, f32) {
         match self {
             Self::Mtlx(material) => material.eval_pdf(shading_vertex, scratch, wi),
             _ => {
-                let f = self.eval(shading_vertex, scratch, wi, internal_rng);
+                let f = self.eval(shading_vertex, scratch, wi, aux_rng);
                 if f.length_squared() == 0.0 {
                     (f, 0.0)
                 } else {
@@ -544,10 +547,13 @@ mod tests {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0));
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
-
         assert_eq!(
-            material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng),
+            material.eval(
+                &shading_vertex,
+                &scratch,
+                Vec3::Z,
+                &mut crate::sampler::AuxRng::default()
+            ),
             Vec3::ZERO
         );
     }
@@ -557,8 +563,12 @@ mod tests {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
-        let f = material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng);
+        let f = material.eval(
+            &shading_vertex,
+            &scratch,
+            Vec3::Z,
+            &mut crate::sampler::AuxRng::default(),
+        );
 
         assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-3));
     }
@@ -580,10 +590,15 @@ mod tests {
         let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let sample = material
-            .sample(&shading_vertex, &scratch, &mut rng)
+            .sample(
+                &shading_vertex,
+                &scratch,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a valid sample");
 
         assert_eq!(sample.flags, BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION);
@@ -595,10 +610,15 @@ mod tests {
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(wo);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let sample = material
-            .sample(&shading_vertex, &scratch, &mut rng)
+            .sample(
+                &shading_vertex,
+                &scratch,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a valid sample");
 
         let expected_wi = Vec3::new(-wo.x, -wo.y, wo.z).normalize();
@@ -617,10 +637,15 @@ mod tests {
         ));
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::new(0.3, -0.4, 0.8660254).normalize());
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let sample = material
-            .sample(&shading_vertex, &scratch, &mut rng)
+            .sample(
+                &shading_vertex,
+                &scratch,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a valid sample");
 
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
@@ -634,10 +659,13 @@ mod tests {
         let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
-
         assert_eq!(
-            material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng),
+            material.eval(
+                &shading_vertex,
+                &scratch,
+                Vec3::Z,
+                &mut crate::sampler::AuxRng::default()
+            ),
             Vec3::ZERO
         );
         assert_eq!(material.pdf(&shading_vertex, &scratch, Vec3::Z), 0.0);
@@ -649,11 +677,16 @@ mod tests {
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(wo);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
         let sample = (0..64)
             .find_map(|_| {
-                let s = material.sample(&shading_vertex, &scratch, &mut rng)?;
+                let s = material.sample(
+                    &shading_vertex,
+                    &scratch,
+                    &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                    &mut crate::sampler::AuxRng::default(),
+                )?;
                 s.flags.contains(BsdfFlags::TRANSMISSION).then_some(s)
             })
             .expect("expected a transmission sample within retry budget");
@@ -668,10 +701,13 @@ mod tests {
         let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
         let scratch = MtlxScratch::default();
         let shading_vertex = test_shading_vertex(Vec3::Z);
-        let mut rng = rand::rng();
-
         assert_eq!(
-            material.eval(&shading_vertex, &scratch, Vec3::Z, &mut rng),
+            material.eval(
+                &shading_vertex,
+                &scratch,
+                Vec3::Z,
+                &mut crate::sampler::AuxRng::default()
+            ),
             Vec3::ZERO
         );
         assert_eq!(material.pdf(&shading_vertex, &scratch, Vec3::Z), 0.0);

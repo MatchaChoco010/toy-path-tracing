@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
 use glam::Vec3;
-use rand::rngs::ThreadRng;
 
-use crate::bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf};
+use crate::{
+    bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf},
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -131,7 +133,8 @@ impl ConductorGgxCui2023Material {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        _randoms: &MaterialSampleRandoms,
+        aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -145,7 +148,7 @@ impl ConductorGgxCui2023Material {
         let (alpha_x, alpha_y) = self.alpha_xy_from_roughness(roughness);
         let bsdf =
             ConductorGgxCui2023Bsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
-        let sample = bsdf.sample(wo_local, rng)?;
+        let sample = bsdf.sample(wo_local, aux_rng)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
         if wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -169,12 +172,7 @@ impl ConductorGgxCui2023Material {
         })
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -187,7 +185,7 @@ impl ConductorGgxCui2023Material {
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
         let bsdf =
             ConductorGgxCui2023Bsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
-        bsdf.eval(wo_local, wi_local, internal_rng)
+        bsdf.eval(wo_local, wi_local, aux_rng)
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {

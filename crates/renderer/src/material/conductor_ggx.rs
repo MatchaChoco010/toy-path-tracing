@@ -1,9 +1,11 @@
 use std::{path::Path, sync::Arc};
 
 use glam::{Vec2, Vec3};
-use rand::{RngExt, rngs::ThreadRng};
 
-use crate::bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut};
+use crate::{
+    bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut},
+    sampler::{AuxRng, MaterialSampleRandoms},
+};
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
@@ -149,9 +151,10 @@ impl ConductorGgxMaterial {
     pub fn sample(
         &self,
         shading_vertex: &ShadingVertex,
-        rng: &mut ThreadRng,
+        randoms: &MaterialSampleRandoms,
+        _aux_rng: &mut AuxRng,
     ) -> Option<MaterialSample> {
-        let us = Vec2::new(rng.random::<f32>(), rng.random::<f32>());
+        let us = randoms.u_dir;
         let sample = self.sample_impl(shading_vertex, us)?;
 
         if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -192,12 +195,7 @@ impl ConductorGgxMaterial {
         })
     }
 
-    pub fn eval(
-        &self,
-        shading_vertex: &ShadingVertex,
-        wi: Vec3,
-        _internal_rng: &mut ThreadRng,
-    ) -> Vec3 {
+    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -428,8 +426,12 @@ mod tests {
         let vtx = test_shading_vertex(Vec3::Z);
         let wi = Vec3::new(0.0, 0.0, 1.0);
 
-        let mut rng = rand::rng();
-        assert!(material.eval(&vtx, wi, &mut rng).max_element().is_finite());
+        assert!(
+            material
+                .eval(&vtx, wi, &mut crate::sampler::AuxRng::default())
+                .max_element()
+                .is_finite()
+        );
     }
 
     #[test]
@@ -449,9 +451,13 @@ mod tests {
     fn sample_returns_reflection_sample() {
         let material = ConductorGgxMaterial::new(Vec3::new(0.9, 0.6, 0.2), 0.45, 0.25);
         let vtx = test_shading_vertex(Vec3::new(0.2, -0.1, 0.9746794).normalize());
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
         let sample = material
-            .sample(&vtx, &mut rng)
+            .sample(
+                &vtx,
+                &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                &mut crate::sampler::AuxRng::default(),
+            )
             .expect("expected a reflection sample");
 
         assert!(sample.wi.z > 0.0);
@@ -466,9 +472,17 @@ mod tests {
         let ns = Vec3::new(0.8660254, 0.0, 0.5).normalize();
         vtx.ns = ns;
         vtx.frame = OrthonormalBasis::from_normal_and_tangent(ns, vtx.dpdu);
-        let mut rng = rand::rng();
+        let mut rng = crate::sampler::AuxRng::from_seed(0);
 
-        assert!(material.sample(&vtx, &mut rng).is_none());
+        assert!(
+            material
+                .sample(
+                    &vtx,
+                    &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
+                    &mut crate::sampler::AuxRng::default()
+                )
+                .is_none()
+        );
     }
 
     #[test]
