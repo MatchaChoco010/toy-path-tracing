@@ -119,32 +119,40 @@ impl ImageCache {
 
     fn srgb_color(
         &mut self,
-        images: &[GltfImage],
+        images: &[Option<GltfImage>],
         index: usize,
         ocio: &crate::color::OcioColorPipeline,
     ) -> Arc<Texture> {
         if let Some(texture) = &self.color[index] {
             return Arc::clone(texture);
         }
-        let texture = Arc::new(decode_srgb_color(&images[index], ocio));
+        let image = images[index]
+            .as_ref()
+            .expect("glTF image required by material was not loaded");
+        let texture = Arc::new(decode_srgb_color(image, ocio));
         self.color[index] = Some(Arc::clone(&texture));
         texture
     }
 
-    fn alpha(&mut self, images: &[GltfImage], index: usize) -> Option<Arc<ScalarTexture>> {
+    fn alpha(&mut self, images: &[Option<GltfImage>], index: usize) -> Option<Arc<ScalarTexture>> {
         if let Some(entry) = &self.alpha[index] {
             return entry.clone();
         }
-        let texture = decode_alpha(&images[index]).map(Arc::new);
+        let image = images[index]
+            .as_ref()
+            .expect("glTF image required by material was not loaded");
+        let texture = decode_alpha(image).map(Arc::new);
         self.alpha[index] = Some(texture.clone());
         texture
     }
 
-    fn metallic(&mut self, images: &[GltfImage], index: usize) -> Arc<ScalarTexture> {
+    fn metallic(&mut self, images: &[Option<GltfImage>], index: usize) -> Arc<ScalarTexture> {
         if let Some(texture) = &self.metallic[index] {
             return Arc::clone(texture);
         }
-        let image = &images[index];
+        let image = images[index]
+            .as_ref()
+            .expect("glTF image required by material was not loaded");
         let texture = Arc::new(ScalarTexture::from_rgba_channel(
             image.width,
             image.height,
@@ -155,11 +163,13 @@ impl ImageCache {
         texture
     }
 
-    fn roughness(&mut self, images: &[GltfImage], index: usize) -> Arc<ScalarTexture> {
+    fn roughness(&mut self, images: &[Option<GltfImage>], index: usize) -> Arc<ScalarTexture> {
         if let Some(texture) = &self.roughness[index] {
             return Arc::clone(texture);
         }
-        let image = &images[index];
+        let image = images[index]
+            .as_ref()
+            .expect("glTF image required by material was not loaded");
         let texture = Arc::new(ScalarTexture::from_rgba_channel(
             image.width,
             image.height,
@@ -172,22 +182,23 @@ impl ImageCache {
 }
 
 fn decode_srgb_color(image: &GltfImage, ocio: &crate::color::OcioColorPipeline) -> Texture {
-    let mut pixels = Vec::with_capacity(image.width * image.height);
+    let mut packed = Vec::with_capacity(image.width * image.height * 3);
     for chunk in image.rgba.chunks_exact(4) {
-        let rgb = Vec3::new(
-            chunk[0] as f32 / 255.0,
-            chunk[1] as f32 / 255.0,
-            chunk[2] as f32 / 255.0,
-        );
-        pixels.push(
-            ocio.transform_rgb(
-                rgb,
-                crate::color::ColorSpaceRef::Texture,
-                crate::color::ColorSpaceRef::Rendering,
-            )
-            .expect("glTF texture color transform"),
-        );
+        packed.push(chunk[0] as f32 / 255.0);
+        packed.push(chunk[1] as f32 / 255.0);
+        packed.push(chunk[2] as f32 / 255.0);
     }
+    ocio.transform_rgb_pixels_to_rendering(
+        &mut packed,
+        image.width,
+        image.height,
+        ocio.texture_color_space(),
+    )
+    .expect("glTF texture color transform");
+    let pixels = packed
+        .chunks_exact(3)
+        .map(|rgb| Vec3::new(rgb[0], rgb[1], rgb[2]))
+        .collect();
     Texture::from_pixels(image.width, image.height, pixels)
 }
 
@@ -237,7 +248,7 @@ fn build_material(
 
 fn build_emissive(
     material: &GltfMaterial,
-    images: &[GltfImage],
+    images: &[Option<GltfImage>],
     cache: &mut ImageCache,
     ocio: &crate::color::OcioColorPipeline,
 ) -> Option<Material> {
@@ -280,7 +291,7 @@ fn build_dielectric(material: &GltfMaterial) -> Material {
 
 fn build_simple_pbr(
     material: &GltfMaterial,
-    images: &[GltfImage],
+    images: &[Option<GltfImage>],
     cache: &mut ImageCache,
     ocio: &crate::color::OcioColorPipeline,
 ) -> Material {
@@ -338,12 +349,13 @@ mod tests {
     }
 
     fn build_with_images(material: GltfMaterial, images: Vec<GltfImage>) -> Material {
+        let image_count = images.len();
         let gltf_scene = GltfScene {
             material_meshes: Vec::new(),
             materials: vec![material],
-            images: images.clone(),
+            images: images.into_iter().map(Some).collect(),
         };
-        let mut cache = ImageCache::new(images.len());
+        let mut cache = ImageCache::new(image_count);
         let slot = GltfMaterialMesh {
             material_index: Some(0),
             mesh: crate::scene::Mesh::new(
