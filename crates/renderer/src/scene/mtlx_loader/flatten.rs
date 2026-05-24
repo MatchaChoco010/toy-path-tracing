@@ -157,6 +157,8 @@ pub const PRIMITIVE_CATEGORIES: &[&str] = &[
     "worleynoise3d",
     "unifiednoise2d",
     "unifiednoise3d",
+    "flake2d",
+    "flake3d",
     "randomfloat",
     "randomcolor",
     "ramplr",

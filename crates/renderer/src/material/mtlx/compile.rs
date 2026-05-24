@@ -14,10 +14,10 @@ use crate::scene::mtlx_loader::{MtlxType, MtlxValue};
 
 use super::compiled::{
     AddressMode, ArithOp, ArtisticIorOutput, BlendOp, ChiangHairRoughnessOutput, ClosureKind,
-    ClosureNode, ColorXform, CombineKind, CompareOp, CompiledMaterial, FilterType, GeomSpace,
-    GeometricKind, ImageKind, ImageTexture, Instruction, LogicalOp, MaskOp, MergeOp, NoiseKind,
-    NoiseOutput, Operand, ParamRef, TriplanarFilter, UdimTiles, UnaryOp, Value, ValueType,
-    WorleyStyle,
+    ClosureNode, ColorXform, CombineKind, CompareOp, CompiledMaterial, FilterType, FlakeOutput,
+    GeomSpace, GeometricKind, ImageKind, ImageTexture, Instruction, LogicalOp, MaskOp, MergeOp,
+    NoiseKind, NoiseOutput, Operand, ParamRef, TriplanarFilter, UdimTiles, UnaryOp, Value,
+    ValueType, WorleyStyle,
 };
 
 #[derive(Debug)]
@@ -282,6 +282,7 @@ fn instr_dst(instr: &Instruction) -> Option<u16> {
         | Noise { dst, .. }
         | Worley { dst, .. }
         | Cellnoise { dst, .. }
+        | Flake { dst, .. }
         | RandomFloat { dst, .. }
         | RandomColor { dst, .. }
         | Ramplr { dst, .. }
@@ -350,6 +351,7 @@ fn instr_pool_range(instr: &Instruction) -> Option<(u32, usize)> {
         HextiledNormalMap { operands_start, .. } => Some((*operands_start, 14)),
         Noise { operands_start, .. } => Some((*operands_start, 7)),
         Worley { operands_start, .. } => Some((*operands_start, 2)),
+        Flake { operands_start, .. } => Some((*operands_start, 7)),
         RandomFloat { operands_start, .. } => Some((*operands_start, 4)),
         RandomColor { operands_start, .. } => Some((*operands_start, 8)),
         DeonHairAbsorptionFromMelanin { operands_start, .. } => Some((*operands_start, 4)),
@@ -376,7 +378,8 @@ fn instr_visit_inline_operands(instr: &Instruction, mut f: impl FnMut(u16)) {
         | LoadConst { .. }
         | LoadGeom { .. }
         | LoadMat3Const { .. }
-        | LoadMat4Const { .. } => {}
+        | LoadMat4Const { .. }
+        | Flake { .. } => {}
         Arith { a, b, .. }
         | Logical { a, b, .. }
         | DotProduct { a, b, .. }
@@ -706,6 +709,7 @@ fn rewrite_instruction_inline(instr: &mut Instruction, mapping: &[u16]) {
         | Noise { dst, .. }
         | Worley { dst, .. }
         | Cellnoise { dst, .. }
+        | Flake { dst, .. }
         | RandomFloat { dst, .. }
         | RandomColor { dst, .. }
         | Ramplr { dst, .. }
@@ -752,7 +756,8 @@ fn rewrite_instruction_inline(instr: &mut Instruction, mapping: &[u16]) {
         | LoadConst { .. }
         | LoadGeom { .. }
         | LoadMat3Const { .. }
-        | LoadMat4Const { .. } => {}
+        | LoadMat4Const { .. }
+        | Flake { .. } => {}
         Arith { a, b, .. }
         | Logical { a, b, .. }
         | DotProduct { a, b, .. }
@@ -1099,6 +1104,7 @@ fn closure_for_each_local(node: &ClosureNode, mut f: impl FnMut(u32)) {
             ior,
             extinction,
             roughness,
+            retroreflective: _,
             thinfilm_thickness,
             thinfilm_ior,
             normal,
@@ -1417,6 +1423,7 @@ fn closure_rewrite_locals(node: &mut ClosureNode, mapping: &[u16]) {
             ior,
             extinction,
             roughness,
+            retroreflective: _,
             thinfilm_thickness,
             thinfilm_ior,
             normal,
@@ -1628,6 +1635,7 @@ fn inline_closure_constant_params(nodes: &mut [ClosureNode], constants: &[Option
                 ior,
                 extinction,
                 roughness,
+                retroreflective: _,
                 thinfilm_thickness,
                 thinfilm_ior,
                 normal,
@@ -4200,11 +4208,6 @@ impl<'a> Builder<'a> {
                 );
                 let retroreflective =
                     Self::input_static_bool(node, category, "retroreflective")?.unwrap_or(false);
-                if retroreflective {
-                    return Err(CompileError::Unsupported(
-                        "dielectric_bsdf.retroreflective=true is not implemented".into(),
-                    ));
-                }
                 let scatter_mode = match Self::input_static_string(node, category, "scatter_mode")? {
                     None | Some("R") => ScatterMode::Reflection,
                     Some("T") => ScatterMode::Transmission,
@@ -4231,6 +4234,7 @@ impl<'a> Builder<'a> {
                     tint,
                     ior,
                     roughness,
+                    retroreflective,
                     scatter_mode,
                     thinfilm_thickness,
                     thinfilm_ior,
@@ -4265,11 +4269,6 @@ impl<'a> Builder<'a> {
                 );
                 let retroreflective =
                     Self::input_static_bool(node, category, "retroreflective")?.unwrap_or(false);
-                if retroreflective {
-                    return Err(CompileError::Unsupported(
-                        "conductor_bsdf.retroreflective=true is not implemented".into(),
-                    ));
-                }
                 let thinfilm_thickness = p_float(
                     self.input_value_param(node, "thinfilm_thickness", Some(ValueType::Float))?,
                     0.0,
@@ -4285,6 +4284,7 @@ impl<'a> Builder<'a> {
                     ior,
                     extinction,
                     roughness,
+                    retroreflective,
                     thinfilm_thickness,
                     thinfilm_ior,
                     normal,
@@ -4326,11 +4326,6 @@ impl<'a> Builder<'a> {
                 );
                 let retroreflective =
                     Self::input_static_bool(node, category, "retroreflective")?.unwrap_or(false);
-                if retroreflective {
-                    return Err(CompileError::Unsupported(
-                        "generalized_schlick_bsdf.retroreflective=true is not implemented".into(),
-                    ));
-                }
                 let scatter_mode = match Self::input_static_string(node, category, "scatter_mode")? {
                     None | Some("R") => ScatterMode::Reflection,
                     Some("T") => ScatterMode::Transmission,
@@ -4359,6 +4354,7 @@ impl<'a> Builder<'a> {
                     color90,
                     exponent,
                     roughness,
+                    retroreflective,
                     scatter_mode,
                     thinfilm_thickness,
                     thinfilm_ior,
@@ -5706,6 +5702,51 @@ impl<'a> Builder<'a> {
                     Some(FlatInput::Value(v)) => mtlx_value_type(v).unwrap_or(ValueType::Color3),
                     _ => ValueType::Color3,
                 };
+                if matches!(in_ty, ValueType::Matrix33 | ValueType::Matrix44) {
+                    let dim4 = in_ty == ValueType::Matrix44;
+                    let expected_out = if dim4 {
+                        ValueType::Vector4
+                    } else {
+                        ValueType::Vector3
+                    };
+                    if out_ty != expected_out {
+                        return Err(CompileError::Unsupported(format!(
+                            "extract output type {:?} is incompatible with {:?}",
+                            out_ty, in_ty
+                        )));
+                    }
+                    let matrix =
+                        self.input_value_param(node, "in", Some(in_ty))?
+                            .unwrap_or(if dim4 {
+                                ParamRef::Matrix44(Mat4::IDENTITY)
+                            } else {
+                                ParamRef::Matrix33(Mat3::IDENTITY)
+                            });
+                    let index = self
+                        .input_value_param(node, "index", Some(ValueType::Integer))?
+                        .unwrap_or(ParamRef::Integer(0));
+                    let ParamRef::Integer(index) = index else {
+                        return Err(CompileError::Unsupported(
+                            "extract.index for matrix input must be a static integer".into(),
+                        ));
+                    };
+                    let max_index = if dim4 { 3 } else { 2 };
+                    if !(0..=max_index).contains(&index) {
+                        return Err(CompileError::Unsupported(format!(
+                            "extract.index `{}` out of range 0..={}",
+                            index, max_index
+                        )));
+                    }
+                    let src = self.param_to_operand(&matrix);
+                    let dst = self.alloc_vreg();
+                    self.instructions.push(Instruction::ExtractRowVector {
+                        dst: dst as u16,
+                        dim4,
+                        src,
+                        index: index as u8,
+                    });
+                    return Ok(dst);
+                }
                 let v = self
                     .input_value_param(node, "in", Some(in_ty))?
                     .unwrap_or(zero_param(Some(in_ty)));
@@ -6019,6 +6060,89 @@ impl<'a> Builder<'a> {
                     dim3,
                     output,
                     style,
+                    operands_start,
+                });
+                Ok(dst)
+            }
+            "flake2d" | "flake3d" => {
+                let dim3 = category == "flake3d";
+                let output = match _output {
+                    Some("id") => FlakeOutput::Id,
+                    Some("rand") => FlakeOutput::Rand,
+                    Some("presence") => FlakeOutput::Presence,
+                    Some("flakenormal") => FlakeOutput::Normal,
+                    Some(name) => {
+                        return Err(CompileError::Unsupported(format!(
+                            "{} output `{}` is not defined",
+                            category, name
+                        )));
+                    }
+                    None => {
+                        return Err(CompileError::Unsupported(format!(
+                            "{} requires an output name",
+                            category
+                        )));
+                    }
+                };
+                let size = self
+                    .input_value_param(node, "size", Some(ValueType::Float))?
+                    .unwrap_or(ParamRef::Float(0.01));
+                let roughness = self
+                    .input_value_param(node, "roughness", Some(ValueType::Float))?
+                    .unwrap_or(ParamRef::Float(0.1));
+                let coverage = self
+                    .input_value_param(node, "coverage", Some(ValueType::Float))?
+                    .unwrap_or(ParamRef::Float(0.5));
+                let coord = if dim3 {
+                    self.input_value_param(node, "position", Some(ValueType::Vector3))?
+                        .unwrap_or_else(|| {
+                            let idx = self.ensure_geometric_local(&FgKind::Position);
+                            ParamRef::Local(idx)
+                        })
+                } else {
+                    self.input_value_param(node, "texcoord", Some(ValueType::Vector2))?
+                        .unwrap_or_else(|| {
+                            let idx = self.ensure_geometric_local(&FgKind::Texcoord);
+                            ParamRef::Local(idx)
+                        })
+                };
+                let normal = self
+                    .input_value_param(node, "normal", Some(ValueType::Vector3))?
+                    .unwrap_or_else(|| {
+                        let idx = self
+                            .ensure_geometric_kind_local(GeometricKind::Normal(GeomSpace::World));
+                        ParamRef::Local(idx)
+                    });
+                let tangent = self
+                    .input_value_param(node, "tangent", Some(ValueType::Vector3))?
+                    .unwrap_or_else(|| {
+                        let idx = self
+                            .ensure_geometric_kind_local(GeometricKind::Tangent(GeomSpace::World));
+                        ParamRef::Local(idx)
+                    });
+                let bitangent = self
+                    .input_value_param(node, "bitangent", Some(ValueType::Vector3))?
+                    .unwrap_or_else(|| {
+                        let idx = self.ensure_geometric_kind_local(GeometricKind::Bitangent(
+                            GeomSpace::World,
+                        ));
+                        ParamRef::Local(idx)
+                    });
+                let ops = [
+                    self.param_to_operand(&size),
+                    self.param_to_operand(&roughness),
+                    self.param_to_operand(&coverage),
+                    self.param_to_operand(&coord),
+                    self.param_to_operand(&normal),
+                    self.param_to_operand(&tangent),
+                    self.param_to_operand(&bitangent),
+                ];
+                let operands_start = self.push_operands(&ops);
+                let dst = self.alloc_vreg();
+                self.instructions.push(Instruction::Flake {
+                    dst: dst as u16,
+                    dim3,
+                    output,
                     operands_start,
                 });
                 Ok(dst)

@@ -21,9 +21,9 @@ use crate::scene::{InstanceIndex, TriangleRef};
 use super::MtlxScratch;
 use super::compiled::{
     AddressMode, ArithOp, BlendOp, ChiangHairRoughnessOutput, ClosureKind, ClosureNode,
-    CombineKind, CompareOp, CompiledMaterial, FilterType, GeomSpace, GeometricKind, ImageKind,
-    ImageTexture, Instruction, LogicalOp, MaskOp, MergeOp, NoiseKind, NoiseOutput, Operand,
-    ParamRef, UdimTile, UdimTiles, UnaryOp, Value, ValueType, WorleyStyle,
+    CombineKind, CompareOp, CompiledMaterial, FilterType, FlakeOutput, GeomSpace, GeometricKind,
+    ImageKind, ImageTexture, Instruction, LogicalOp, MaskOp, MergeOp, NoiseKind, NoiseOutput,
+    Operand, ParamRef, UdimTile, UdimTiles, UnaryOp, Value, ValueType, WorleyStyle,
 };
 
 fn dummy_sv() -> ShadingVertex {
@@ -2065,6 +2065,153 @@ fn spec_extractrowvector_reads_matrix_rows() {
 }
 
 #[test]
+fn spec_extract_matrix_input_compiles_to_row_vector() {
+    let node_input = |name: &str, ty: MtlxType, node: u32, output: Option<&str>| FlatNodeInput {
+        name: name.to_string(),
+        ty,
+        colorspace: None,
+        unit: None,
+        unittype: None,
+        binding: FlatInput::Node {
+            node,
+            output: output.map(str::to_string),
+        },
+    };
+    let value_input = |name: &str, ty: MtlxType, value: MtlxValue| FlatNodeInput {
+        name: name.to_string(),
+        ty,
+        colorspace: None,
+        unit: None,
+        unittype: None,
+        binding: FlatInput::Value(value),
+    };
+    let graph = FlatGraph {
+        nodes: vec![
+            FlatNode {
+                kind: FlatNodeKind::Pattern {
+                    category: "extract".to_string(),
+                },
+                output_type: MtlxType::Vector3,
+                inputs: vec![
+                    value_input(
+                        "in",
+                        MtlxType::Matrix33,
+                        MtlxValue::Matrix33(glam::Mat3::from_cols(
+                            Vec3::new(1.0, 2.0, 3.0),
+                            Vec3::new(4.0, 5.0, 6.0),
+                            Vec3::new(7.0, 8.0, 9.0),
+                        )),
+                    ),
+                    value_input("index", MtlxType::Integer, MtlxValue::Integer(1)),
+                ],
+            },
+            FlatNode {
+                kind: FlatNodeKind::Pattern {
+                    category: "extract".to_string(),
+                },
+                output_type: MtlxType::Float,
+                inputs: vec![
+                    node_input("in", MtlxType::Vector3, 0, None),
+                    value_input("index", MtlxType::Integer, MtlxValue::Integer(2)),
+                ],
+            },
+            FlatNode {
+                kind: FlatNodeKind::SurfaceUnlit,
+                output_type: MtlxType::Surfaceshader,
+                inputs: vec![node_input("emission", MtlxType::Float, 1, None)],
+            },
+            FlatNode {
+                kind: FlatNodeKind::SurfaceMaterial,
+                output_type: MtlxType::Material,
+                inputs: vec![node_input(
+                    "surfaceshader",
+                    MtlxType::Surfaceshader,
+                    2,
+                    None,
+                )],
+            },
+        ],
+        root: 3,
+        back_root: None,
+        material_name: "extract_matrix".to_string(),
+    };
+    let compiled = super::compile::compile(
+        &graph,
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+    )
+    .expect("matrix extract should compile");
+    assert!(compiled.instructions.iter().any(|i| matches!(
+        i,
+        Instruction::ExtractRowVector {
+            dim4: false,
+            index: 1,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn spec_flake_outputs_compile_and_evaluate() {
+    let operands = vec![
+        Operand::Const(0),
+        Operand::Const(1),
+        Operand::Const(2),
+        Operand::Const(3),
+        Operand::Const(4),
+        Operand::Const(5),
+        Operand::Const(6),
+    ];
+    let values = vec![
+        Value::Float(0.5),
+        Value::Float(0.2),
+        Value::Float(1.0),
+        Value::Vector2(Vec2::new(0.25, 0.75)),
+        Value::Vector3(Vec3::Z),
+        Value::Vector3(Vec3::X),
+        Value::Vector3(Vec3::Y),
+    ];
+    let regs = run(
+        vec![
+            Instruction::Flake {
+                dst: 0,
+                dim3: false,
+                output: FlakeOutput::Id,
+                operands_start: 0,
+            },
+            Instruction::Flake {
+                dst: 1,
+                dim3: false,
+                output: FlakeOutput::Rand,
+                operands_start: 0,
+            },
+            Instruction::Flake {
+                dst: 2,
+                dim3: false,
+                output: FlakeOutput::Presence,
+                operands_start: 0,
+            },
+            Instruction::Flake {
+                dst: 3,
+                dim3: false,
+                output: FlakeOutput::Normal,
+                operands_start: 0,
+            },
+        ],
+        operands,
+        values,
+        4,
+    );
+
+    assert!(regs[0].as_integer() >= 0);
+    assert!((0.0..=1.0).contains(&regs[1].as_float()));
+    assert!((0.0..=1.0).contains(&regs[2].as_float()));
+    assert!(approx_f(regs[3].as_vector3().length(), 1.0, 1.0e-5));
+}
+
+#[test]
 fn spec_extractrowvector_static_bad_index_errors() {
     let graph = FlatGraph {
         nodes: vec![
@@ -3374,6 +3521,17 @@ fn string_input(name: &str, value: &str) -> FlatNodeInput {
         unit: None,
         unittype: None,
         binding: FlatInput::Value(MtlxValue::String(value.to_string())),
+    }
+}
+
+fn bool_input(name: &str, value: bool) -> FlatNodeInput {
+    FlatNodeInput {
+        name: name.to_string(),
+        ty: MtlxType::Boolean,
+        colorspace: None,
+        unit: None,
+        unittype: None,
+        binding: FlatInput::Value(MtlxValue::Boolean(value)),
     }
 }
 
@@ -8173,6 +8331,7 @@ fn spec_dielectric_bsdf_compile_defaults_match_1394() {
         tint,
         ior,
         roughness,
+        retroreflective: _,
         scatter_mode,
         thinfilm_thickness,
         thinfilm_ior,
@@ -8330,6 +8489,7 @@ fn spec_conductor_bsdf_compile_defaults_match_1394() {
         ior,
         extinction,
         roughness,
+        retroreflective: _,
         thinfilm_thickness,
         thinfilm_ior,
         normal,
@@ -8480,6 +8640,27 @@ fn compile_single_bsdf_node(
         HashMap::new(),
         HashMap::new(),
     )
+}
+
+#[test]
+fn spec_retroreflective_specular_bsdf_inputs_compile() {
+    let compiled = compile_single_bsdf_node(
+        "generalized_schlick_bsdf",
+        vec![bool_input("retroreflective", true)],
+        "retroreflective_generalized_schlick",
+    )
+    .expect("retroreflective generalized_schlick_bsdf should compile");
+
+    let retro = compiled.closure_nodes.iter().any(|node| {
+        matches!(
+            node,
+            ClosureNode::GeneralizedSchlick {
+                retroreflective: true,
+                ..
+            }
+        )
+    });
+    assert!(retro);
 }
 
 fn compile_single_edf_node(
@@ -8695,6 +8876,7 @@ fn spec_generalized_schlick_bsdf_compile_defaults_match_1394() {
         color90,
         exponent,
         roughness,
+        retroreflective: _,
         scatter_mode,
         thinfilm_thickness,
         thinfilm_ior,

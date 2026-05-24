@@ -13,13 +13,14 @@ pub struct ConductorBsdf {
     pub extinction: Vec3,
     pub alpha_x: f32,
     pub alpha_y: f32,
+    pub retroreflective: bool,
     pub thinfilm_thickness: f32,
     pub thinfilm_ior: f32,
 }
 
 impl ConductorBsdf {
     pub fn new(weight: f32, ior: Vec3, extinction: Vec3, roughness: Vec2) -> Self {
-        Self::with_thin_film(weight, ior, extinction, roughness, 0.0, 1.5)
+        Self::with_thin_film(weight, ior, extinction, roughness, false, 0.0, 1.5)
     }
 
     pub fn with_thin_film(
@@ -27,6 +28,7 @@ impl ConductorBsdf {
         ior: Vec3,
         extinction: Vec3,
         roughness: Vec2,
+        retroreflective: bool,
         thinfilm_thickness: f32,
         thinfilm_ior: f32,
     ) -> Self {
@@ -38,6 +40,7 @@ impl ConductorBsdf {
             extinction: extinction.max(Vec3::ZERO),
             alpha_x: ax,
             alpha_y: ay,
+            retroreflective,
             thinfilm_thickness: thinfilm_thickness.max(0.0),
             thinfilm_ior: thinfilm_ior.max(1.0e-3),
         }
@@ -57,18 +60,27 @@ impl ConductorBsdf {
         fresnel_complex(cos_theta, self.ior, self.extinction)
     }
 
+    fn reflection_view(&self, wo: Vec3) -> Vec3 {
+        if self.retroreflective {
+            Vec3::new(-wo.x, -wo.y, wo.z)
+        } else {
+            wo
+        }
+    }
+
     pub fn eval(&self, wo: Vec3, wi: Vec3) -> Vec3 {
         if wo.z <= 0.0 || wi.z <= 0.0 {
             return Vec3::ZERO;
         }
-        let h = (wo + wi).normalize_or_zero();
+        let wo_r = self.reflection_view(wo);
+        let h = (wo_r + wi).normalize_or_zero();
         if h.z <= 0.0 {
             return Vec3::ZERO;
         }
         let d = ggx_d(h, self.alpha_x, self.alpha_y);
-        let g = ggx_g2_height_correlated(wo, wi, self.alpha_x, self.alpha_y);
-        let f = self.fresnel(wo.dot(h).clamp(0.0, 1.0));
-        let denom = (4.0 * wo.z * wi.z).max(1.0e-8);
+        let g = ggx_g2_height_correlated(wo_r, wi, self.alpha_x, self.alpha_y);
+        let f = self.fresnel(wo_r.dot(h).clamp(0.0, 1.0));
+        let denom = (4.0 * wo_r.z * wi.z).max(1.0e-8);
         f * (self.weight * d * g / denom)
     }
 
@@ -76,21 +88,23 @@ impl ConductorBsdf {
         if wo.z <= 0.0 || wi.z <= 0.0 {
             return 0.0;
         }
-        let h = (wo + wi).normalize_or_zero();
+        let wo_r = self.reflection_view(wo);
+        let h = (wo_r + wi).normalize_or_zero();
         if h.z <= 0.0 {
             return 0.0;
         }
-        let cos_oh = wo.dot(h).max(1.0e-8);
-        pdf_wm_vndf(wo, h, self.alpha_x, self.alpha_y) / (4.0 * cos_oh)
+        let cos_oh = wo_r.dot(h).max(1.0e-8);
+        pdf_wm_vndf(wo_r, h, self.alpha_x, self.alpha_y) / (4.0 * cos_oh)
     }
 
     pub fn sample(&self, wo: Vec3, us: Vec2) -> Option<MtlxLobeSample> {
         if wo.z <= 0.0 {
             return None;
         }
-        let h = sample_wm_vndf(wo, self.alpha_x, self.alpha_y, us)?;
-        let cos_oh = wo.dot(h).max(0.0);
-        let wi = -wo + 2.0 * h * cos_oh;
+        let wo_r = self.reflection_view(wo);
+        let h = sample_wm_vndf(wo_r, self.alpha_x, self.alpha_y, us)?;
+        let cos_oh = wo_r.dot(h).max(0.0);
+        let wi = -wo_r + 2.0 * h * cos_oh;
         if wi.z <= 0.0 {
             return None;
         }

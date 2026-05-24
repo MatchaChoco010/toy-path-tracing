@@ -10,17 +10,18 @@ use crate::bsdf::mtlx::{
 use crate::material::ShadingVertex;
 use crate::material::pattern::noise::{
     cellnoise2d, cellnoise2d_vec3, cellnoise3d, cellnoise3d_vec3, fbm2d, fbm2d_vec3, fbm3d,
-    fbm3d_vec3, hsv_to_rgb, perlin2d, perlin2d_vec3, perlin3d, perlin3d_vec3, random_color,
-    random_float, rgb_to_hsv, worley2d, worley2d_solid, worley2d_solid_vec3, worley2d_top2,
-    worley2d_top3, worley3d, worley3d_solid, worley3d_solid_vec3, worley3d_top2, worley3d_top3,
+    fbm3d_vec3, flake3d, hsv_to_rgb, perlin2d, perlin2d_vec3, perlin3d, perlin3d_vec3,
+    random_color, random_float, rgb_to_hsv, worley2d, worley2d_solid, worley2d_solid_vec3,
+    worley2d_top2, worley2d_top3, worley3d, worley3d_solid, worley3d_solid_vec3, worley3d_top2,
+    worley3d_top3,
 };
 use crate::math::OrthonormalBasis;
 use crate::sampler::MaterialSampleRandoms;
 
 use super::compiled::{
     AddressMode, ArithOp, ArtisticIorOutput, ChiangHairRoughnessOutput, ClosureNode, CombineKind,
-    CompareOp, CompiledMaterial, GeometricKind, ImageTexture, Instruction, LogicalOp, MaskOp,
-    NoiseKind, Operand, ParamRef, TriplanarFilter, UnaryOp, Value, ValueType, WorleyStyle,
+    CompareOp, CompiledMaterial, FlakeOutput, GeometricKind, ImageTexture, Instruction, LogicalOp,
+    MaskOp, NoiseKind, Operand, ParamRef, TriplanarFilter, UnaryOp, Value, ValueType, WorleyStyle,
 };
 
 type DalbedoCache<'a> = Option<&'a [Cell<Option<Vec3>>]>;
@@ -1392,6 +1393,37 @@ fn execute_instruction(
                     };
                     Value::Vector4(Vec4::new(v3.x, v3.y, v3.z, w))
                 }
+            };
+            write_reg(regs, *dst, val);
+        }
+        Instruction::Flake {
+            dst,
+            dim3,
+            output,
+            operands_start,
+        } => {
+            let s = *operands_start as usize;
+            let size = read_operand(op_pool[s], regs, value_pool).as_float();
+            let roughness = read_operand(op_pool[s + 1], regs, value_pool).as_float();
+            let coverage = read_operand(op_pool[s + 2], regs, value_pool).as_float();
+            let coord = read_operand(op_pool[s + 3], regs, value_pool);
+            let position = if *dim3 {
+                coord.as_vector3()
+            } else {
+                let uv = coord.as_vector2();
+                Vec3::new(uv.x, uv.y, 0.0)
+            };
+            let normal = read_operand(op_pool[s + 4], regs, value_pool).as_vector3();
+            let tangent = read_operand(op_pool[s + 5], regs, value_pool).as_vector3();
+            let bitangent = read_operand(op_pool[s + 6], regs, value_pool).as_vector3();
+            let flake = flake3d(
+                size, roughness, coverage, position, normal, tangent, bitangent,
+            );
+            let val = match output {
+                FlakeOutput::Id => Value::Integer(flake.id),
+                FlakeOutput::Rand => Value::Float(flake.rand),
+                FlakeOutput::Presence => Value::Float(flake.presence),
+                FlakeOutput::Normal => Value::Vector3(flake.normal),
             };
             write_reg(regs, *dst, val);
         }
@@ -3433,6 +3465,7 @@ fn mtlx_dielectric_directional_albedo(
             tint,
             ior,
             roughness,
+            false,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -3472,6 +3505,7 @@ fn mtlx_generalized_schlick_directional_albedo(
             color90,
             exponent,
             roughness,
+            false,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -3676,6 +3710,7 @@ fn sample_closure_idx(
             tint,
             ior,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -3688,6 +3723,7 @@ fn sample_closure_idx(
                 read_color3(tint, locals),
                 read_float(ior, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -3705,6 +3741,7 @@ fn sample_closure_idx(
             ior,
             extinction,
             roughness,
+            retroreflective,
             thinfilm_thickness,
             thinfilm_ior,
             normal,
@@ -3716,6 +3753,7 @@ fn sample_closure_idx(
                 read_color3(ior, locals),
                 read_color3(extinction, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
             );
@@ -3732,6 +3770,7 @@ fn sample_closure_idx(
             color90,
             exponent,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -3746,6 +3785,7 @@ fn sample_closure_idx(
                 read_color3(color90, locals),
                 read_float(exponent, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4059,6 +4099,7 @@ fn eval_closure_idx(
             tint,
             ior,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4072,6 +4113,7 @@ fn eval_closure_idx(
                 read_color3(tint, locals),
                 read_float(ior, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4084,6 +4126,7 @@ fn eval_closure_idx(
             ior,
             extinction,
             roughness,
+            retroreflective,
             thinfilm_thickness,
             thinfilm_ior,
             normal,
@@ -4096,6 +4139,7 @@ fn eval_closure_idx(
                 read_color3(ior, locals),
                 read_color3(extinction, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
             )
@@ -4108,6 +4152,7 @@ fn eval_closure_idx(
             color90,
             exponent,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4123,6 +4168,7 @@ fn eval_closure_idx(
                 read_color3(color90, locals),
                 read_float(exponent, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4344,6 +4390,7 @@ fn pdf_closure_idx(
         ClosureNode::Dielectric {
             ior,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4358,6 +4405,7 @@ fn pdf_closure_idx(
                 Vec3::ONE,
                 read_float(ior, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4383,6 +4431,7 @@ fn pdf_closure_idx(
             color90,
             exponent,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4398,6 +4447,7 @@ fn pdf_closure_idx(
                 read_color3(color90, locals),
                 read_float(exponent, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4622,6 +4672,7 @@ fn eval_pdf_closure_idx(
             tint,
             ior,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4635,6 +4686,7 @@ fn eval_pdf_closure_idx(
                 read_color3(tint, locals),
                 read_float(ior, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4647,6 +4699,7 @@ fn eval_pdf_closure_idx(
             ior,
             extinction,
             roughness,
+            retroreflective,
             thinfilm_thickness,
             thinfilm_ior,
             normal,
@@ -4660,10 +4713,19 @@ fn eval_pdf_closure_idx(
                 read_color3(ior, locals),
                 read_color3(extinction, locals),
                 rough,
+                *retroreflective,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
             );
-            let pdf_bsdf = ConductorBsdf::new(1.0, Vec3::ONE, Vec3::ZERO, rough);
+            let pdf_bsdf = ConductorBsdf::with_thin_film(
+                1.0,
+                Vec3::ONE,
+                Vec3::ZERO,
+                rough,
+                *retroreflective,
+                0.0,
+                1.5,
+            );
             (bsdf.eval(wo_use, wi_use), pdf_bsdf.pdf(wo_use, wi_use))
         }
         ClosureNode::GeneralizedSchlick {
@@ -4673,6 +4735,7 @@ fn eval_pdf_closure_idx(
             color90,
             exponent,
             roughness,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4688,6 +4751,7 @@ fn eval_pdf_closure_idx(
                 read_color3(color90, locals),
                 read_float(exponent, locals),
                 read_vec2(roughness, locals),
+                *retroreflective,
                 *scatter_mode,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
@@ -4923,6 +4987,7 @@ fn light_tree_summary_idx(
             tint,
             ior,
             roughness,
+            retroreflective: _,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -4967,6 +5032,7 @@ fn light_tree_summary_idx(
             ior,
             extinction,
             roughness,
+            retroreflective,
             thinfilm_thickness,
             thinfilm_ior,
             normal,
@@ -4979,6 +5045,7 @@ fn light_tree_summary_idx(
                 read_color3(ior, locals),
                 read_color3(extinction, locals),
                 rough,
+                *retroreflective,
                 read_float(thinfilm_thickness, locals),
                 read_float(thinfilm_ior, locals),
             );
@@ -4996,6 +5063,7 @@ fn light_tree_summary_idx(
             color90,
             exponent,
             roughness,
+            retroreflective: _,
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
@@ -5209,19 +5277,24 @@ fn directional_albedo_idx_inner(
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
+            normal,
+            tangent,
             ..
-        } => mtlx_dielectric_directional_albedo(
-            compiled,
-            wo,
-            read_float(weight, locals),
-            read_color3(tint, locals),
-            read_float(ior, locals),
-            read_vec2(roughness, locals),
-            *scatter_mode,
-            read_float(thinfilm_thickness, locals),
-            read_float(thinfilm_ior, locals),
-            compiled.thin_walled || sv.front_face,
-        ),
+        } => {
+            let (_, wo_use) = override_frame_for_wo(sv, locals, normal, tangent, wo);
+            mtlx_dielectric_directional_albedo(
+                compiled,
+                wo_use,
+                read_float(weight, locals),
+                read_color3(tint, locals),
+                read_float(ior, locals),
+                read_vec2(roughness, locals),
+                *scatter_mode,
+                read_float(thinfilm_thickness, locals),
+                read_float(thinfilm_ior, locals),
+                compiled.thin_walled || sv.front_face,
+            )
+        }
         ClosureNode::GeneralizedSchlick {
             weight,
             color0,
@@ -5232,34 +5305,42 @@ fn directional_albedo_idx_inner(
             scatter_mode,
             thinfilm_thickness,
             thinfilm_ior,
+            normal,
+            tangent,
             ..
-        } => mtlx_generalized_schlick_directional_albedo(
-            compiled,
-            wo,
-            read_float(weight, locals),
-            read_color3(color0, locals),
-            read_color3(color82, locals),
-            read_color3(color90, locals),
-            read_float(exponent, locals),
-            read_vec2(roughness, locals),
-            *scatter_mode,
-            read_float(thinfilm_thickness, locals),
-            read_float(thinfilm_ior, locals),
-            compiled.thin_walled || sv.front_face,
-        ),
+        } => {
+            let (_, wo_use) = override_frame_for_wo(sv, locals, normal, tangent, wo);
+            mtlx_generalized_schlick_directional_albedo(
+                compiled,
+                wo_use,
+                read_float(weight, locals),
+                read_color3(color0, locals),
+                read_color3(color82, locals),
+                read_color3(color90, locals),
+                read_float(exponent, locals),
+                read_vec2(roughness, locals),
+                *scatter_mode,
+                read_float(thinfilm_thickness, locals),
+                read_float(thinfilm_ior, locals),
+                compiled.thin_walled || sv.front_face,
+            )
+        }
         ClosureNode::Sheen {
             weight,
             color,
             roughness,
             mode,
-            ..
-        } => SheenBsdfMtlx::new(
-            read_float(weight, locals),
-            read_color3(color, locals),
-            read_float(roughness, locals),
-            *mode,
-        )
-        .directional_albedo_with_lut(wo, Some(sheen_lut(compiled))),
+            normal,
+        } => {
+            let (_, wo_use) = override_frame_for_wo(sv, locals, normal, &None, wo);
+            SheenBsdfMtlx::new(
+                read_float(weight, locals),
+                read_color3(color, locals),
+                read_float(roughness, locals),
+                *mode,
+            )
+            .directional_albedo_with_lut(wo_use, Some(sheen_lut(compiled)))
+        }
         ClosureNode::ThinFilm { .. } => Vec3::ZERO,
         ClosureNode::Mix { bg, fg, mix, kind } => {
             let m = read_float(mix, locals);

@@ -19,6 +19,7 @@ pub struct DielectricBsdf {
     pub ior: f32,
     pub alpha_x: f32,
     pub alpha_y: f32,
+    pub retroreflective: bool,
     pub scatter_mode: ScatterMode,
     pub thinfilm_thickness: f32,
     pub thinfilm_ior: f32,
@@ -33,7 +34,17 @@ impl DielectricBsdf {
         roughness: Vec2,
         scatter_mode: ScatterMode,
     ) -> Self {
-        Self::with_thin_film(weight, tint, ior, roughness, scatter_mode, 0.0, 1.5, true)
+        Self::with_thin_film(
+            weight,
+            tint,
+            ior,
+            roughness,
+            false,
+            scatter_mode,
+            0.0,
+            1.5,
+            true,
+        )
     }
 
     pub fn with_thin_film(
@@ -41,6 +52,7 @@ impl DielectricBsdf {
         tint: Vec3,
         ior: f32,
         roughness: Vec2,
+        retroreflective: bool,
         scatter_mode: ScatterMode,
         thinfilm_thickness: f32,
         thinfilm_ior: f32,
@@ -54,6 +66,7 @@ impl DielectricBsdf {
             ior: ior.max(0.0),
             alpha_x: ax,
             alpha_y: ay,
+            retroreflective,
             scatter_mode,
             thinfilm_thickness: thinfilm_thickness.max(0.0),
             thinfilm_ior: thinfilm_ior.max(1.0e-3),
@@ -91,6 +104,14 @@ impl DielectricBsdf {
         Vec3::splat(self.fresnel(cos_theta))
     }
 
+    fn reflection_view(&self, wo: Vec3) -> Vec3 {
+        if self.retroreflective {
+            Vec3::new(-wo.x, -wo.y, wo.z)
+        } else {
+            wo
+        }
+    }
+
     pub fn eval(&self, wo: Vec3, wi: Vec3) -> Vec3 {
         if wo.z <= 0.0 {
             return Vec3::ZERO;
@@ -102,19 +123,20 @@ impl DielectricBsdf {
             _ => {}
         }
         if reflect {
-            let h = (wo + wi).normalize_or_zero();
+            let wo_r = self.reflection_view(wo);
+            let h = (wo_r + wi).normalize_or_zero();
             if h.z <= 0.0 {
                 return Vec3::ZERO;
             }
             let d = ggx_d(h, self.alpha_x, self.alpha_y);
-            let g = ggx_g2_height_correlated(wo, wi, self.alpha_x, self.alpha_y);
-            let cos_oh = wo.dot(h).clamp(0.0, 1.0);
+            let g = ggx_g2_height_correlated(wo_r, wi, self.alpha_x, self.alpha_y);
+            let cos_oh = wo_r.dot(h).clamp(0.0, 1.0);
             let f_rgb = if self.ior > 0.0 {
                 self.fresnel_rgb(cos_oh)
             } else {
                 Vec3::ONE
             };
-            let denom = (4.0 * wo.z * wi.z).max(1.0e-8);
+            let denom = (4.0 * wo_r.z * wi.z).max(1.0e-8);
             self.tint * self.weight * f_rgb * (d * g / denom)
         } else {
             let (eta_o, eta_i) = self.eta_outside_inside();
@@ -153,11 +175,12 @@ impl DielectricBsdf {
             _ => {}
         }
         if reflect {
-            let h = (wo + wi).normalize_or_zero();
+            let wo_r = self.reflection_view(wo);
+            let h = (wo_r + wi).normalize_or_zero();
             if h.z <= 0.0 {
                 return 0.0;
             }
-            let cos_oh = wo.dot(h).max(1.0e-8);
+            let cos_oh = wo_r.dot(h).max(1.0e-8);
             let p_branch = match self.scatter_mode {
                 ScatterMode::Both => {
                     let f_rgb = self.fresnel_rgb(cos_oh.clamp(0.0, 1.0));
@@ -165,7 +188,7 @@ impl DielectricBsdf {
                 }
                 _ => 1.0,
             };
-            p_branch * pdf_wm_vndf(wo, h, self.alpha_x, self.alpha_y) / (4.0 * cos_oh)
+            p_branch * pdf_wm_vndf(wo_r, h, self.alpha_x, self.alpha_y) / (4.0 * cos_oh)
         } else {
             let (eta_o, eta_i) = self.eta_outside_inside();
             let h_unnorm = -(wo * eta_o + wi * eta_i);
@@ -193,8 +216,9 @@ impl DielectricBsdf {
         if wo.z <= 0.0 {
             return None;
         }
-        let h = sample_wm_vndf(wo, self.alpha_x, self.alpha_y, us)?;
-        let cos_oh = wo.dot(h).max(0.0);
+        let wo_r = self.reflection_view(wo);
+        let h_reflect = sample_wm_vndf(wo_r, self.alpha_x, self.alpha_y, us)?;
+        let cos_oh = wo_r.dot(h_reflect).max(0.0);
         let want_reflect = match self.scatter_mode {
             ScatterMode::Reflection => true,
             ScatterMode::Transmission => false,
@@ -205,7 +229,7 @@ impl DielectricBsdf {
             }
         };
         if want_reflect {
-            let wi = -wo + 2.0 * h * cos_oh;
+            let wi = -wo_r + 2.0 * h_reflect * cos_oh;
             if wi.z <= 0.0 {
                 return None;
             }
@@ -222,6 +246,7 @@ impl DielectricBsdf {
                 eta: 1.0,
             })
         } else {
+            let h = sample_wm_vndf(wo, self.alpha_x, self.alpha_y, us)?;
             let (eta_o, eta_i) = self.eta_outside_inside();
             let eta = eta_o / eta_i;
             let cos_oh = wo.dot(h);
@@ -324,6 +349,7 @@ mod tests {
             Vec3::ONE,
             2.4,
             Vec2::splat(0.001),
+            false,
             ScatterMode::Transmission,
             0.0,
             1.5,
@@ -356,6 +382,7 @@ mod tests {
             Vec3::ONE,
             2.4,
             Vec2::splat(0.001),
+            false,
             ScatterMode::Transmission,
             0.0,
             1.5,
