@@ -63,6 +63,8 @@ mod scene_62;
 mod scene_63;
 mod scene_64;
 mod scene_65;
+mod scene_66;
+mod scene_67;
 mod scene_7;
 mod scene_8;
 mod scene_9;
@@ -145,6 +147,8 @@ pub fn load_scene(
         63 => scene_63::create_scene_63(ocio),
         64 => scene_64::create_scene_64(ocio),
         65 => scene_65::create_scene_65(ocio),
+        66 => scene_66::create_scene_66(ocio),
+        67 => scene_67::create_scene_67(ocio),
         _ => scene_0::create_scene_0(ocio),
     }
 }
