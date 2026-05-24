@@ -302,6 +302,144 @@ pub fn cellnoise3d_vec3(p: Vec3) -> Vec3 {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlakeResult {
+    pub id: i32,
+    pub rand: f32,
+    pub presence: f32,
+    pub normal: Vec3,
+}
+
+pub fn flake3d(
+    size: f32,
+    roughness: f32,
+    coverage: f32,
+    position: Vec3,
+    normal: Vec3,
+    tangent: Vec3,
+    bitangent: Vec3,
+) -> FlakeResult {
+    let probability = flake_density_to_probability(coverage.clamp(0.0, 1.0));
+    let flake_diameter = 1.5 / 3.0_f32.sqrt();
+    let size = size.abs().max(1.0e-6);
+
+    let p = position / size;
+    let base_p = p.floor();
+    let mut flake_priority = 0.0;
+    let mut flake_cell = Vec3::ZERO;
+
+    for i in -1..=1 {
+        for j in -1..=1 {
+            for k in -1..=1 {
+                let cell_pos = base_p + Vec3::new(i as f32, j as f32, k as f32);
+                let mut pp = p - cell_pos - Vec3::splat(0.5);
+                if pp.dot(pp) >= flake_diameter * flake_diameter * 3.0 {
+                    continue;
+                }
+                if cellnoise3d(cell_pos) > probability {
+                    continue;
+                }
+                let priority = cellnoise4d(cell_pos, 3.0);
+                if priority < flake_priority {
+                    continue;
+                }
+                pp = rotate_flake(pp, cellnoise3d_vec3(cell_pos));
+                if pp.x.abs() <= flake_diameter
+                    && pp.y.abs() <= flake_diameter
+                    && pp.z.abs() <= flake_diameter
+                {
+                    flake_priority = priority;
+                    flake_cell = cell_pos;
+                }
+            }
+        }
+    }
+
+    if flake_priority <= 0.0 {
+        return FlakeResult {
+            id: 0,
+            rand: 0.0,
+            presence: 0.0,
+            normal,
+        };
+    }
+
+    let flake_noise = cellnoise4d_vec3(flake_cell, 2.0);
+    let xi0 = flake_noise.x;
+    let xi1 = flake_noise.y.clamp(0.0, 1.0 - 1.0e-6);
+    let rand = flake_noise.z;
+    let id = (rand * 16_777_215.0) as i32;
+
+    let phi = std::f32::consts::TAU * xi0;
+    let tan_theta = roughness.max(0.0).powi(2) * xi1.sqrt() / (1.0 - xi1).sqrt();
+    let sin_theta = tan_theta / (1.0 + tan_theta * tan_theta).sqrt();
+    let cos_theta = (1.0 - sin_theta * sin_theta).sqrt();
+    let flake_normal =
+        tangent * phi.cos() * sin_theta + bitangent * phi.sin() * sin_theta + normal * cos_theta;
+
+    FlakeResult {
+        id,
+        rand,
+        presence: flake_priority,
+        normal: flake_normal.normalize_or_zero(),
+    }
+}
+
+fn cellnoise4d(p: Vec3, w: f32) -> f32 {
+    bits_to_01(hash_int4(
+        p.x.floor() as i32,
+        p.y.floor() as i32,
+        p.z.floor() as i32,
+        w.floor() as i32,
+    ))
+}
+
+fn cellnoise4d_vec3(p: Vec3, w: f32) -> Vec3 {
+    let ix = p.x.floor() as i32;
+    let iy = p.y.floor() as i32;
+    let iz = p.z.floor() as i32;
+    let iw = w.floor() as i32;
+    let s = seed_for_len(5);
+    let (mut a, b, c) = bjmix(
+        s.wrapping_add(ix as u32),
+        s.wrapping_add(iy as u32),
+        s.wrapping_add(iz as u32),
+    );
+    a = a.wrapping_add(iw as u32);
+    Vec3::new(
+        bits_to_01(bjfinal(a, b, c)),
+        bits_to_01(bjfinal(a, b.wrapping_add(1), c)),
+        bits_to_01(bjfinal(a, b.wrapping_add(2), c)),
+    )
+}
+
+fn rotate_flake(p: Vec3, i: Vec3) -> Vec3 {
+    let theta = std::f32::consts::TAU * i.x;
+    let phi = std::f32::consts::TAU * i.y;
+    let z = i.z * 2.0;
+
+    let r = z.sqrt();
+    let vx = phi.sin() * r;
+    let vy = phi.cos() * r;
+    let vz = (2.0 - z).sqrt();
+
+    let (s_theta, c_theta) = theta.sin_cos();
+    let sx = vx * c_theta - vy * s_theta;
+    let sy = vx * s_theta + vy * c_theta;
+
+    Vec3::new(
+        (vx * sx - c_theta) * p.x + (vy * sx + s_theta) * p.y + (vz * sx) * p.z,
+        (vx * sy - s_theta) * p.x + (vy * sy - c_theta) * p.y + (vz * sy) * p.z,
+        (vx * vz) * p.x + (vy * vz) * p.y + (1.0 - z) * p.z,
+    )
+}
+
+fn flake_density_to_probability(x: f32) -> f32 {
+    let xx = x * x;
+    (-26.197_718 * xx + 26.396_639 * x)
+        / (85.538_57 * xx * x - 102.350_69 * xx - 101.426_346 * x + 118.450_82)
+}
+
 pub fn fbm2d(p: Vec2, octaves: u32, lacunarity: f32, diminish: f32) -> f32 {
     let mut sum = 0.0;
     let mut amp = 1.0;

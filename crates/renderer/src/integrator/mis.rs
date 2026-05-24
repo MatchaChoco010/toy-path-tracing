@@ -328,6 +328,7 @@ mod tests {
                     tint: ParamRef::Color3(Vec3::ONE),
                     ior: ParamRef::Float(1.5),
                     roughness: ParamRef::Vector2(Vec2::splat(0.2)),
+                    retroreflective: false,
                     scatter_mode: ScatterMode::Transmission,
                     thinfilm_thickness: ParamRef::Float(0.0),
                     thinfilm_ior: ParamRef::Float(1.0),

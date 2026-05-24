@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<materialx version="1.39" colorspace="lin_rec709">
+  <standard_surface name="surface_cone_orange" type="surfaceshader">
+    <input name="base" type="float" value="0.9" />
+    <input name="base_color" type="color3" value="1.0, 0.28, 0.02" />
+    <input name="metalness" type="float" value="0.0" />
+    <input name="specular" type="float" value="0.35" />
+    <input name="specular_color" type="color3" value="1.0, 0.85, 0.65" />
+    <input name="specular_roughness" type="float" value="0.45" />
+    <input name="coat" type="float" value="0.15" />
+    <input name="coat_roughness" type="float" value="0.25" />
+  </standard_surface>
+  <surfacematerial name="ConeOrangePlastic" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_cone_orange" />
+  </surfacematerial>
+
+  <oren_nayar_diffuse_bsdf name="reflector_diffuse" type="BSDF">
+    <input name="weight" type="float" value="0.85" />
+    <input name="color" type="color3" value="0.94, 0.88, 0.66" />
+    <input name="roughness" type="float" value="0.38" />
+  </oren_nayar_diffuse_bsdf>
+  <generalized_schlick_bsdf name="reflector_specular" type="BSDF">
+    <input name="weight" type="float" value="0.75" />
+    <input name="color0" type="color3" value="0.08, 0.075, 0.055" />
+    <input name="color82" type="color3" value="0.35, 0.32, 0.22" />
+    <input name="color90" type="color3" value="1.0, 0.95, 0.78" />
+    <input name="exponent" type="float" value="5.0" />
+    <input name="roughness" type="vector2" value="0.08, 0.08" />
+    <input name="retroreflective" type="boolean" value="false" />
+  </generalized_schlick_bsdf>
+  <layer name="reflector_bsdf" type="BSDF">
+    <input name="top" type="BSDF" nodename="reflector_specular" />
+    <input name="base" type="BSDF" nodename="reflector_diffuse" />
+  </layer>
+  <surface name="surface_reflector_plastic" type="surfaceshader">
+    <input name="bsdf" type="BSDF" nodename="reflector_bsdf" />
+    <input name="opacity" type="float" value="1.0" />
+  </surface>
+  <surfacematerial name="ConeWhitePlastic" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_reflector_plastic" />
+  </surfacematerial>
+
+  <oren_nayar_diffuse_bsdf name="retro_diffuse" type="BSDF">
+    <input name="weight" type="float" value="0.85" />
+    <input name="color" type="color3" value="0.94, 0.88, 0.66" />
+    <input name="roughness" type="float" value="0.38" />
+  </oren_nayar_diffuse_bsdf>
+  <generalized_schlick_bsdf name="retro_specular" type="BSDF">
+    <input name="weight" type="float" value="0.75" />
+    <input name="color0" type="color3" value="0.08, 0.075, 0.055" />
+    <input name="color82" type="color3" value="0.35, 0.32, 0.22" />
+    <input name="color90" type="color3" value="1.0, 0.95, 0.78" />
+    <input name="exponent" type="float" value="5.0" />
+    <input name="roughness" type="vector2" value="0.08, 0.08" />
+    <input name="retroreflective" type="boolean" value="true" />
+  </generalized_schlick_bsdf>
+  <layer name="retro_bsdf" type="BSDF">
+    <input name="top" type="BSDF" nodename="retro_specular" />
+    <input name="base" type="BSDF" nodename="retro_diffuse" />
+  </layer>
+  <surface name="surface_reflector_retro" type="surfaceshader">
+    <input name="bsdf" type="BSDF" nodename="retro_bsdf" />
+    <input name="opacity" type="float" value="1.0" />
+  </surface>
+  <surfacematerial name="ConeRetroreflectiveWhite" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_reflector_retro" />
+  </surfacematerial>
+</materialx>

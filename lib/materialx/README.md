@@ -2,9 +2,11 @@
 
 A trimmed copy of the MaterialX standard libraries used by this
 project's mtlx loader. See `NOTICE` for details on what is and isn't
-included, and `LICENSE` for the upstream license.
+included, and `LICENSE` for the upstream license. The update tool applies
+the local compatibility patches needed by this evaluator after copying
+the upstream files.
 
-Source: https://github.com/AcademySoftwareFoundation/MaterialX, tag `v1.39.4`.
+Source: https://github.com/AcademySoftwareFoundation/MaterialX, tag `v1.39.5`.
 
 ## Layout
 
@@ -22,24 +24,9 @@ libraries/
 To pull a newer revision of the standard libraries:
 
 ```bash
-TAG=v1.39.4    # or newer
-ROOT=$(git rev-parse --show-toplevel)
-LIB="$ROOT/lib/materialx/libraries"
-
-curl -sSL -o "$ROOT/lib/materialx/LICENSE" \
-  "https://raw.githubusercontent.com/AcademySoftwareFoundation/MaterialX/$TAG/LICENSE"
-
-for path in \
-  stdlib/stdlib_defs.mtlx stdlib/stdlib_ng.mtlx \
-  pbrlib/pbrlib_defs.mtlx pbrlib/pbrlib_ng.mtlx \
-  bxdf/standard_surface.mtlx bxdf/disney_principled.mtlx \
-  bxdf/open_pbr_surface.mtlx bxdf/usd_preview_surface.mtlx \
-  bxdf/gltf_pbr.mtlx \
-  nprlib/nprlib_defs.mtlx nprlib/nprlib_ng.mtlx
-do
-  curl -sSL -o "$LIB/$path" \
-    "https://raw.githubusercontent.com/AcademySoftwareFoundation/MaterialX/$TAG/libraries/$path"
-done
+git -C third_party/MaterialX fetch --tags
+git -C third_party/MaterialX checkout v1.39.5
+cargo run --manifest-path tools/update_materialx_libs/Cargo.toml
 ```
 
 Then update `NOTICE` to record the new tag.

@@ -1,0 +1,164 @@
+<?xml version="1.0"?>
+<materialx version="1.39" colorspace="lin_rec709">
+  <flake3d name="flakes_size_0_005" type="multioutput">
+    <input name="size" type="float" value="0.005" />
+    <input name="roughness" type="float" value="0.2" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_size_0_005" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_size_0_005" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_size_0_005" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_size_0_005" />
+  </surfacematerial>
+
+  <flake3d name="flakes_size_0_01" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.2" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_size_0_01" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_size_0_01" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_size_0_01" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_size_0_01" />
+  </surfacematerial>
+
+  <flake3d name="flakes_size_0_02" type="multioutput">
+    <input name="size" type="float" value="0.02" />
+    <input name="roughness" type="float" value="0.2" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_size_0_02" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_size_0_02" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_size_0_02" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_size_0_02" />
+  </surfacematerial>
+
+  <flake3d name="flakes_rough_005" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.05" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_rough_005" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_rough_005" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_rough_005" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_rough_005" />
+  </surfacematerial>
+
+  <flake3d name="flakes_rough_025" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.25" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_rough_025" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_rough_025" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_rough_025" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_rough_025" />
+  </surfacematerial>
+
+  <flake3d name="flakes_rough_050" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.5" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_rough_050" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_rough_050" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_rough_050" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_rough_050" />
+  </surfacematerial>
+
+  <flake3d name="flakes_coverage_010" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.2" />
+    <input name="coverage" type="float" value="0.1" />
+  </flake3d>
+  <standard_surface name="surface_coverage_010" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_coverage_010" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_coverage_010" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_coverage_010" />
+  </surfacematerial>
+
+  <flake3d name="flakes_coverage_050" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.2" />
+    <input name="coverage" type="float" value="0.5" />
+  </flake3d>
+  <standard_surface name="surface_coverage_050" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_coverage_050" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_coverage_050" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_coverage_050" />
+  </surfacematerial>
+
+  <flake3d name="flakes_coverage_100" type="multioutput">
+    <input name="size" type="float" value="0.01" />
+    <input name="roughness" type="float" value="0.2" />
+    <input name="coverage" type="float" value="1.0" />
+  </flake3d>
+  <standard_surface name="surface_coverage_100" type="surfaceshader">
+    <input name="base" type="float" value="0.1" />
+    <input name="base_color" type="color3" value="0.06, 0.424, 0.679" />
+    <input name="metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" value="0.3" />
+    <input name="coat" type="float" value="0.1" />
+    <input name="coat_roughness" type="float" value="0.05" />
+    <input name="normal" type="vector3" nodename="flakes_coverage_100" output="flakenormal" />
+  </standard_surface>
+  <surfacematerial name="FlakeMetal_coverage_100" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="surface_coverage_100" />
+  </surfacematerial>
+</materialx>

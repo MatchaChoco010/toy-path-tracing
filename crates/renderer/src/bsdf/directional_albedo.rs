@@ -560,6 +560,7 @@ fn estimate_mtlx_dielectric_ggx_directional_albedo(
         Vec3::ONE,
         ior,
         Vec2::splat(alpha),
+        false,
         MtlxScatterMode::Reflection,
         0.0,
         1.5,

@@ -281,6 +281,14 @@ pub enum WorleyStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlakeOutput {
+    Id,
+    Rand,
+    Presence,
+    Normal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriplanarFilter {
     Linear,
     Closest,
@@ -731,6 +739,13 @@ pub enum Instruction {
         output: NoiseOutput,
         coord: Operand,
     },
+    /// Flake node. Operands: `[size, roughness, coverage, coord, normal, tangent, bitangent]`.
+    Flake {
+        dst: u16,
+        dim3: bool,
+        output: FlakeOutput,
+        operands_start: u32,
+    },
     /// `randomfloat`. Operands: `[input, seed, min, max]`.
     RandomFloat {
         dst: u16,
@@ -1001,6 +1016,7 @@ pub enum ClosureNode {
         tint: ParamRef,
         ior: ParamRef,
         roughness: ParamRef,
+        retroreflective: bool,
         scatter_mode: ScatterMode,
         thinfilm_thickness: ParamRef,
         thinfilm_ior: ParamRef,
@@ -1012,6 +1028,7 @@ pub enum ClosureNode {
         ior: ParamRef,
         extinction: ParamRef,
         roughness: ParamRef,
+        retroreflective: bool,
         thinfilm_thickness: ParamRef,
         thinfilm_ior: ParamRef,
         normal: Option<ParamRef>,
@@ -1024,6 +1041,7 @@ pub enum ClosureNode {
         color90: ParamRef,
         exponent: ParamRef,
         roughness: ParamRef,
+        retroreflective: bool,
         scatter_mode: ScatterMode,
         thinfilm_thickness: ParamRef,
         thinfilm_ior: ParamRef,
