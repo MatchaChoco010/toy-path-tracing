@@ -1,4 +1,5 @@
 /target
+/tools/*/target
 /result
 /.claude/settings.local.json
 

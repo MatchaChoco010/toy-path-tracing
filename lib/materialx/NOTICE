@@ -5,7 +5,7 @@ This directory contains a subset of the MaterialX standard libraries vendored
 from the upstream MaterialX project.
 
 Upstream:    https://github.com/AcademySoftwareFoundation/MaterialX
-Tag:         v1.39.4
+Tag:         v1.39.5
 Source path: libraries/{stdlib,pbrlib,bxdf,nprlib}/*.mtlx
 
 License: Apache License, Version 2.0 (see LICENSE in this directory).
@@ -35,6 +35,7 @@ Files intentionally NOT included
   (genglsl/genosl/genmdl/genmsl/), since this project provides its own
   evaluator instead of using MaterialX shader generation.
 
-The mtlx files are vendored verbatim with no modifications. To update,
-download the corresponding files from the MaterialX repository at the
-tag above.
+The mtlx files are copied from the tag above, then a small set of local
+compatibility patches is applied by `tools/update_materialx_libs`. To update,
+check out the tag above in `third_party/MaterialX` and run
+`cargo run --manifest-path tools/update_materialx_libs/Cargo.toml`.

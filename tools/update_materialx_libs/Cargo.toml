@@ -1,0 +1,11 @@
+[package]
+name = "update-materialx-libs"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "update-materialx-libs"
+path = "src/main.rs"

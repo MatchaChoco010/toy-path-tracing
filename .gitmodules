@@ -4,3 +4,6 @@
 [submodule "tools/russimp-sys"]
 	path = tools/russimp-sys
 	url = https://github.com/jkvargas/russimp-sys.git
+[submodule "third_party/MaterialX"]
+	path = third_party/MaterialX
+	url = https://github.com/AcademySoftwareFoundation/MaterialX.git
