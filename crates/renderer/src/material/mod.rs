@@ -494,52 +494,38 @@ mod tests {
     }
 
     #[test]
+    fn non_emissive_materials_report_zero_emission_capability() {
+        let cases: Vec<(Material, &str)> = vec![
+            (
+                Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE)),
+                "lambert",
+            ),
+            (Material::Mirror(MirrorMaterial::new(Vec3::ONE)), "mirror"),
+            (
+                Material::ConductorGgx(ConductorGgxMaterial::new(Vec3::ONE, 0.5, 0.0)),
+                "conductor_ggx",
+            ),
+            (Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false)), "glass"),
+            (
+                Material::DielectricGgx(DielectricGgxMaterial::new(
+                    Vec3::ONE, 1.5, 0.3, 0.0, false,
+                )),
+                "dielectric_ggx",
+            ),
+        ];
+
+        for (material, name) in cases {
+            assert!(!material.may_emit(), "{name} should not emit");
+            assert_eq!(material.max_emission(), 0.0, "{name} max_emission should be zero");
+        }
+    }
+
+    #[test]
     fn emissive_material_reports_emission_capability() {
         let material = Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 3.0));
 
         assert!(material.may_emit());
         assert!((material.max_emission() - 3.0).abs() < 1.0e-3);
-    }
-
-    #[test]
-    fn lambert_material_reports_no_emission_capability() {
-        let material = Material::NormalizedLambert(NormalizedLambertMaterial::new(Vec3::ONE));
-
-        assert!(!material.may_emit());
-        assert_eq!(material.max_emission(), 0.0);
-    }
-
-    #[test]
-    fn mirror_material_reports_no_emission_capability() {
-        let material = Material::Mirror(MirrorMaterial::new(Vec3::ONE));
-
-        assert!(!material.may_emit());
-        assert_eq!(material.max_emission(), 0.0);
-    }
-
-    #[test]
-    fn conductor_material_reports_no_emission_capability() {
-        let material = Material::ConductorGgx(ConductorGgxMaterial::new(Vec3::ONE, 0.5, 0.0));
-
-        assert!(!material.may_emit());
-        assert_eq!(material.max_emission(), 0.0);
-    }
-
-    #[test]
-    fn glass_material_reports_no_emission_capability() {
-        let material = Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false));
-
-        assert!(!material.may_emit());
-        assert_eq!(material.max_emission(), 0.0);
-    }
-
-    #[test]
-    fn dielectric_ggx_material_reports_no_emission_capability() {
-        let material =
-            Material::DielectricGgx(DielectricGgxMaterial::new(Vec3::ONE, 1.5, 0.3, 0.0, false));
-
-        assert!(!material.may_emit());
-        assert_eq!(material.max_emission(), 0.0);
     }
 
     #[test]
