@@ -349,9 +349,7 @@ pub fn merge_cluster_params(
 mod tests {
     use super::*;
 
-    fn close(a: f32, b: f32, eps: f32) -> bool {
-        (a - b).abs() <= eps
-    }
+    use crate::test_utils::approx_f as close;
 
     #[test]
     fn expm1_over_x_handles_zero_and_unity() {

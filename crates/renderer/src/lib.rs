@@ -11,3 +11,6 @@ pub mod sampler;
 pub mod scene;
 pub mod scenes;
 pub mod utils;
+
+#[cfg(test)]
+pub mod test_utils;

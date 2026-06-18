@@ -17,6 +17,7 @@ use crate::scene::mtlx_loader::library::load_standard_library;
 use crate::scene::mtlx_loader::parser::parse_str;
 use crate::scene::mtlx_loader::types::{MtlxType, MtlxValue};
 use crate::scene::{InstanceIndex, TriangleRef};
+use crate::test_utils::{approx_f, approx_v3};
 
 use super::MtlxScratch;
 use super::compiled::{
@@ -846,15 +847,7 @@ fn run_remap(
     regs[0]
 }
 
-fn approx_f(a: f32, b: f32, eps: f32) -> bool {
-    (a - b).abs() <= eps
-}
-
 fn approx_v2(a: Vec2, b: Vec2, eps: f32) -> bool {
-    a.abs_diff_eq(b, eps)
-}
-
-fn approx_v3(a: Vec3, b: Vec3, eps: f32) -> bool {
     a.abs_diff_eq(b, eps)
 }
 
