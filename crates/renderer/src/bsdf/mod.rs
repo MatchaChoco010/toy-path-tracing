@@ -20,9 +20,52 @@ pub(crate) mod thin_film;
 
 use glam::Vec3;
 
+pub fn integrate_hemisphere_vec3(f: impl Fn(Vec3) -> Vec3) -> Vec3 {
+    const Z_SAMPLES: usize = 256;
+    const PHI_SAMPLES: usize = 256;
+    let dz = 1.0 / Z_SAMPLES as f32;
+    let dphi = std::f32::consts::TAU / PHI_SAMPLES as f32;
+    let domega = dz * dphi;
+    let mut integral = Vec3::ZERO;
+
+    for z_index in 0..Z_SAMPLES {
+        let z = (z_index as f32 + 0.5) * dz;
+        let r = (1.0 - z * z).max(0.0).sqrt();
+
+        for phi_index in 0..PHI_SAMPLES {
+            let phi = (phi_index as f32 + 0.5) * dphi;
+            let w = Vec3::new(r * phi.cos(), r * phi.sin(), z);
+            integral += f(w);
+        }
+    }
+
+    integral * domega
+}
+
+pub fn integrate_upper_hemisphere_vec3(f: impl Fn(Vec3) -> Vec3) -> Vec3 {
+    const Z_SAMPLES: usize = 128;
+    const PHI_SAMPLES: usize = 128;
+    let dz = 1.0 / Z_SAMPLES as f32;
+    let dphi = std::f32::consts::TAU / PHI_SAMPLES as f32;
+    let mut sum = Vec3::ZERO;
+
+    for z_index in 0..Z_SAMPLES {
+        let z = (z_index as f32 + 0.5) * dz;
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        for phi_index in 0..PHI_SAMPLES {
+            let phi = (phi_index as f32 + 0.5) * dphi;
+            let wi = Vec3::new(r * phi.cos(), r * phi.sin(), z);
+            sum += f(wi);
+        }
+    }
+
+    sum * dz * dphi
+}
+
 pub use conductor_complex::{
     ConductorComplexGgxBsdf, artist_friendly_complex_ior, fresnel_complex,
 };
+
 pub use conductor_ggx::ConductorGgxBsdf;
 pub use conductor_ggx_cui_2023::ConductorGgxCui2023Bsdf;
 pub use dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
