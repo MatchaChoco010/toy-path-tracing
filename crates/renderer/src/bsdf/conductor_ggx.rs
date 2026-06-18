@@ -294,39 +294,7 @@ fn compute_f_ms(f_avg: Vec3, e_avg: f32) -> Vec3 {
 mod tests {
     use glam::{Vec2, Vec3};
 
-    use crate::bsdf::{BsdfFlags, ConductorGgxBsdf};
-    use crate::math::schlick_fresnel;
-
-    const HEMISPHERE_Z_SAMPLES: usize = 256;
-    const HEMISPHERE_PHI_SAMPLES: usize = 256;
-
-    fn integrate_hemisphere_vec3(f: impl Fn(Vec3) -> Vec3) -> Vec3 {
-        let dz = 1.0 / HEMISPHERE_Z_SAMPLES as f32;
-        let dphi = std::f32::consts::TAU / HEMISPHERE_PHI_SAMPLES as f32;
-        let domega = dz * dphi;
-        let mut integral = Vec3::ZERO;
-
-        for z_index in 0..HEMISPHERE_Z_SAMPLES {
-            let z = (z_index as f32 + 0.5) * dz;
-            let r = (1.0 - z * z).max(0.0).sqrt();
-
-            for phi_index in 0..HEMISPHERE_PHI_SAMPLES {
-                let phi = (phi_index as f32 + 0.5) * dphi;
-                let w = Vec3::new(r * phi.cos(), r * phi.sin(), z);
-                integral += f(w);
-            }
-        }
-
-        integral * domega
-    }
-
-    #[test]
-    fn schlick_matches_f0_at_normal_incidence_and_one_at_grazing() {
-        let f0 = Vec3::new(0.2, 0.5, 0.8);
-
-        assert!(schlick_fresnel(f0, 1.0).abs_diff_eq(f0, 1.0e-6));
-        assert!(schlick_fresnel(f0, 0.0).abs_diff_eq(Vec3::ONE, 1.0e-6));
-    }
+    use crate::bsdf::{BsdfFlags, ConductorGgxBsdf, integrate_hemisphere_vec3};
 
     #[test]
     fn smooth_conductor_behaves_like_delta_reflection() {

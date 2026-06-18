@@ -261,13 +261,21 @@ pub(super) fn unoccluded_ray(
 
 #[cfg(test)]
 pub(super) mod test_helpers {
-    use glam::{Vec2, Vec3};
+    use std::sync::Arc;
+
+    use glam::{Mat4, Vec2, Vec3};
 
     use crate::{
-        material::{EmissiveMaterial, Material, MirrorMaterial},
+        bsdf::mtlx::ScatterMode,
+        light::{DirectionalLight, PointLight, SpotLight},
+        material::mtlx::{ClosureNode, CompiledMaterial, ParamRef},
+        material::{
+            EmissiveMaterial, Material, MirrorMaterial, MtlxMaterial, NormalizedLambertMaterial,
+            ShadingVertex,
+        },
+        math::OrthonormalBasis,
         math::ray::Ray,
-        scene::Scene,
-        scene::{Mesh, Vertex},
+        scene::{InstanceIndex, MaterialIndex, Mesh, MeshIndex, Scene, TriangleRef, Vertex},
     };
 
     pub(super) fn mirror_to_light_scene() -> (Scene, Ray, Vec3) {
@@ -300,6 +308,213 @@ pub(super) mod test_helpers {
         let ray = Ray::new(mirror_hit - incoming_direction, incoming_direction);
 
         (scene, ray, mirror_color_linear * light_strength)
+    }
+
+    pub(super) fn unit_mesh(z: f32) -> Mesh {
+        Mesh::new(
+            vec![
+                Vertex {
+                    position: Vec3::new(0.0, 0.0, z),
+                    normal: Vec3::Z,
+                    uv: Vec2::ZERO,
+                },
+                Vertex {
+                    position: Vec3::new(1.0, 0.0, z),
+                    normal: Vec3::Z,
+                    uv: Vec2::X,
+                },
+                Vertex {
+                    position: Vec3::new(0.0, 1.0, z),
+                    normal: Vec3::Z,
+                    uv: Vec2::Y,
+                },
+            ],
+            vec![0, 1, 2],
+        )
+    }
+
+    pub(super) fn triangle_ref(instance_index: usize) -> TriangleRef {
+        TriangleRef {
+            instance_index: InstanceIndex(instance_index),
+            triangle_index: 0,
+        }
+    }
+
+    pub(super) fn transmission_mtlx_material() -> Material {
+        Material::Mtlx(MtlxMaterial::new(Arc::new(CompiledMaterial {
+            instructions: Vec::new(),
+            operand_pool: Vec::new(),
+            value_pool: Vec::new(),
+            color_processors: Vec::new(),
+            opacity_instructions: Vec::new(),
+            opacity_operand_pool: Vec::new(),
+            opacity_closure_nodes: Vec::new(),
+            opacity_num_registers: 0,
+            num_registers: 0,
+            closure_nodes: vec![
+                ClosureNode::Surface {
+                    bsdf: 1,
+                    edf: 2,
+                    opacity: ParamRef::Float(1.0),
+                    thin_walled: false,
+                },
+                ClosureNode::Dielectric {
+                    weight: ParamRef::Float(1.0),
+                    tint: ParamRef::Color3(Vec3::ONE),
+                    ior: ParamRef::Float(1.5),
+                    roughness: ParamRef::Vector2(Vec2::splat(0.2)),
+                    retroreflective: false,
+                    scatter_mode: ScatterMode::Transmission,
+                    thinfilm_thickness: ParamRef::Float(0.0),
+                    thinfilm_ior: ParamRef::Float(1.0),
+                    normal: None,
+                    tangent: None,
+                },
+                ClosureNode::Zero,
+            ],
+            root: 0,
+            passthrough: false,
+            max_emission: 0.0,
+            may_emit: false,
+            has_opacity_test: false,
+            thin_walled: false,
+            sheen_lut: None,
+            mtlx_dielectric_lut: None,
+            mtlx_generalized_schlick_lut: None,
+        })))
+    }
+
+    pub(super) fn standalone_shading_vertex_for_transmission() -> ShadingVertex {
+        ShadingVertex {
+            triangle: triangle_ref(0),
+            p: Vec3::new(0.25, 0.25, 0.0),
+            uv: Vec2::ZERO,
+            dudx: 0.0,
+            dvdx: 0.0,
+            dudy: 0.0,
+            dvdy: 0.0,
+            ng: Vec3::Z,
+            ns: Vec3::Z,
+            wo: Vec3::Z,
+            dpdu: Vec3::X,
+            dpdv: Vec3::Y,
+            dpdx: Vec3::ZERO,
+            dpdy: Vec3::ZERO,
+            dndu: Vec3::ZERO,
+            dndv: Vec3::ZERO,
+            frame: OrthonormalBasis::from_normal(Vec3::Z),
+            front_face: true,
+            path_throughput: Vec3::ONE,
+            wavelength_lock: None,
+            object_to_world: Mat4::IDENTITY,
+            world_to_object: Mat4::IDENTITY,
+            object_normal_to_world: glam::Mat3::IDENTITY,
+            mtlx_regs: None,
+            mtlx_dalbedo: None,
+            mtlx_precomputed_for: None,
+        }
+    }
+
+    pub(super) fn light_below_scene() -> Scene {
+        let mut scene = Scene::new();
+        let light_mesh = scene.add_mesh(unit_mesh(-1.0));
+        let light_material =
+            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 4.0)));
+        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
+        scene.build_qbvh();
+        scene.build_light_tree();
+        scene
+    }
+
+    pub(super) fn add_floor(scene: &mut Scene, albedo: f32) -> (MeshIndex, MaterialIndex) {
+        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let floor_material = scene.add_material(Material::NormalizedLambert(
+            NormalizedLambertMaterial::new(Vec3::splat(albedo)),
+        ));
+        (floor_mesh, floor_material)
+    }
+
+    pub(super) fn add_area_light(scene: &mut Scene, strength: f32) -> (MeshIndex, MaterialIndex) {
+        let light_mesh = scene.add_mesh(unit_mesh(1.0));
+        let light_material = scene.add_material(Material::Emissive(EmissiveMaterial::new(
+            Vec3::ONE,
+            strength,
+        )));
+        (light_mesh, light_material)
+    }
+
+    pub(super) fn floor_with_area_light_scene(albedo: f32, strength: f32) -> Scene {
+        let mut scene = Scene::new();
+        let (floor_mesh, floor_material) = add_floor(&mut scene, albedo);
+        let (light_mesh, light_material) = add_area_light(&mut scene, strength);
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
+        scene.build_qbvh();
+        scene.build_light_tree();
+        scene
+    }
+
+    pub(super) fn floor_with_point_light_scene(albedo: f32, power: f32) -> Scene {
+        let mut scene = Scene::new();
+        let (floor_mesh, floor_material) = add_floor(&mut scene, albedo);
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_point_light(PointLight::new(
+            Vec3::new(0.25, 0.25, 2.0),
+            Vec3::ONE,
+            power,
+        ));
+        scene.build_qbvh();
+        scene.build_light_tree();
+        scene
+    }
+
+    pub(super) fn floor_with_directional_light_scene(albedo: f32, irradiance: f32) -> Scene {
+        let mut scene = Scene::new();
+        let (floor_mesh, floor_material) = add_floor(&mut scene, albedo);
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_directional_light(DirectionalLight::new(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::ONE,
+            irradiance,
+        ));
+        scene.build_qbvh();
+        scene.build_light_tree();
+        scene
+    }
+
+    pub(super) fn floor_with_spot_light_scene(
+        albedo: f32,
+        power: f32,
+        inner: f32,
+        outer: f32,
+        direction: Vec3,
+    ) -> Scene {
+        let mut scene = Scene::new();
+        let (floor_mesh, floor_material) = add_floor(&mut scene, albedo);
+        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
+        scene.add_spot_light(SpotLight::new(
+            Vec3::new(0.25, 0.25, 2.0),
+            direction,
+            Vec3::ONE,
+            power,
+            inner,
+            outer,
+        ));
+        scene.build_qbvh();
+        scene.build_light_tree();
+        scene
+    }
+
+    pub(super) fn sample_floor_vtx(scene: &Scene, wo: Vec3) -> ShadingVertex {
+        scene.shading_vertex_from_triangle_sample(triangle_ref(0), Vec3::new(0.5, 0.25, 0.25), wo)
+    }
+
+    pub(super) fn sample_area_light_vtx(scene: &Scene) -> ShadingVertex {
+        scene.shading_vertex_from_triangle_sample(
+            triangle_ref(1),
+            Vec3::new(0.5, 0.25, 0.25),
+            Vec3::Z,
+        )
     }
 
     fn mirror_triangle_mesh() -> Mesh {

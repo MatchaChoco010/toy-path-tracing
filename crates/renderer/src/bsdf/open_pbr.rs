@@ -2175,25 +2175,7 @@ mod tests {
         ((1.0 + eps) / (1.0 - eps).max(1.0e-6)).max(1.0e-4)
     }
 
-    fn integrate_upper_hemisphere_vec3(f: impl Fn(Vec3) -> Vec3) -> Vec3 {
-        const Z_SAMPLES: usize = 128;
-        const PHI_SAMPLES: usize = 128;
-        let dz = 1.0 / Z_SAMPLES as f32;
-        let dphi = std::f32::consts::TAU / PHI_SAMPLES as f32;
-        let mut sum = Vec3::ZERO;
-
-        for z_index in 0..Z_SAMPLES {
-            let z = (z_index as f32 + 0.5) * dz;
-            let r = (1.0 - z * z).max(0.0).sqrt();
-            for phi_index in 0..PHI_SAMPLES {
-                let phi = (phi_index as f32 + 0.5) * dphi;
-                let wi = Vec3::new(r * phi.cos(), r * phi.sin(), z);
-                sum += f(wi);
-            }
-        }
-
-        sum * dz * dphi
-    }
+    use crate::bsdf::integrate_upper_hemisphere_vec3;
 
     #[test]
     fn default_diffuse_dominant_evaluates_finite() {

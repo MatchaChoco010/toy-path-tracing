@@ -252,144 +252,28 @@ fn emitted_radiance_from_bsdf_sample_infinite(
 mod tests {
     use std::f32::consts::PI;
 
-    use glam::{Mat4, Vec2, Vec3};
+    use glam::{Vec2, Vec3};
 
-    use crate::{bsdf::mtlx::ScatterMode, math::OrthonormalBasis};
     use crate::{
-        light::{DirectionalLight, EnvironmentLight, PointLight, SpotLight},
-        material::MtlxMaterial,
-        material::mtlx::{ClosureNode, CompiledMaterial, ParamRef},
+        light::EnvironmentLight,
         material::{
             EmissiveMaterial, Material, MirrorMaterial, MtlxScratch, NormalizedLambertMaterial,
-            ShadingVertex,
         },
         math::ray::Ray,
-        scene::{InstanceIndex, Scene, TriangleRef},
-        scene::{Mesh, Vertex},
+        scene::Scene,
     };
-    use std::sync::Arc;
 
-    use super::super::test_helpers::mirror_to_light_scene;
+    use super::super::test_helpers::{
+        floor_with_area_light_scene, floor_with_directional_light_scene,
+        floor_with_point_light_scene, floor_with_spot_light_scene, light_below_scene,
+        mirror_to_light_scene, sample_area_light_vtx, sample_floor_vtx,
+        standalone_shading_vertex_for_transmission, transmission_mtlx_material, triangle_ref,
+        unit_mesh,
+    };
     use super::{
         direct_light_mis_contribution, emitted_radiance_from_bsdf_sample_area,
         emitted_radiance_from_bsdf_sample_infinite, should_sample_direct_light, trace_radiance,
     };
-
-    fn unit_mesh(z: f32) -> Mesh {
-        Mesh::new(
-            vec![
-                Vertex {
-                    position: Vec3::new(0.0, 0.0, z),
-                    normal: Vec3::Z,
-                    uv: Vec2::ZERO,
-                },
-                Vertex {
-                    position: Vec3::new(1.0, 0.0, z),
-                    normal: Vec3::Z,
-                    uv: Vec2::X,
-                },
-                Vertex {
-                    position: Vec3::new(0.0, 1.0, z),
-                    normal: Vec3::Z,
-                    uv: Vec2::Y,
-                },
-            ],
-            vec![0, 1, 2],
-        )
-    }
-
-    fn triangle_ref(instance_index: usize) -> TriangleRef {
-        TriangleRef {
-            instance_index: InstanceIndex(instance_index),
-            triangle_index: 0,
-        }
-    }
-
-    fn transmission_mtlx_material() -> Material {
-        Material::Mtlx(MtlxMaterial::new(Arc::new(CompiledMaterial {
-            instructions: Vec::new(),
-            operand_pool: Vec::new(),
-            value_pool: Vec::new(),
-            color_processors: Vec::new(),
-            opacity_instructions: Vec::new(),
-            opacity_operand_pool: Vec::new(),
-            opacity_closure_nodes: Vec::new(),
-            opacity_num_registers: 0,
-            num_registers: 0,
-            closure_nodes: vec![
-                ClosureNode::Surface {
-                    bsdf: 1,
-                    edf: 2,
-                    opacity: ParamRef::Float(1.0),
-                    thin_walled: false,
-                },
-                ClosureNode::Dielectric {
-                    weight: ParamRef::Float(1.0),
-                    tint: ParamRef::Color3(Vec3::ONE),
-                    ior: ParamRef::Float(1.5),
-                    roughness: ParamRef::Vector2(Vec2::splat(0.2)),
-                    retroreflective: false,
-                    scatter_mode: ScatterMode::Transmission,
-                    thinfilm_thickness: ParamRef::Float(0.0),
-                    thinfilm_ior: ParamRef::Float(1.0),
-                    normal: None,
-                    tangent: None,
-                },
-                ClosureNode::Zero,
-            ],
-            root: 0,
-            passthrough: false,
-            max_emission: 0.0,
-            may_emit: false,
-            has_opacity_test: false,
-            thin_walled: false,
-            sheen_lut: None,
-            mtlx_dielectric_lut: None,
-            mtlx_generalized_schlick_lut: None,
-        })))
-    }
-
-    fn standalone_shading_vertex_for_transmission() -> ShadingVertex {
-        ShadingVertex {
-            triangle: triangle_ref(0),
-            p: Vec3::new(0.25, 0.25, 0.0),
-            uv: Vec2::ZERO,
-            dudx: 0.0,
-            dvdx: 0.0,
-            dudy: 0.0,
-            dvdy: 0.0,
-            ng: Vec3::Z,
-            ns: Vec3::Z,
-            wo: Vec3::Z,
-            dpdu: Vec3::X,
-            dpdv: Vec3::Y,
-            dpdx: Vec3::ZERO,
-            dpdy: Vec3::ZERO,
-            dndu: Vec3::ZERO,
-            dndv: Vec3::ZERO,
-            frame: OrthonormalBasis::from_normal(Vec3::Z),
-            front_face: true,
-            path_throughput: Vec3::ONE,
-            wavelength_lock: None,
-            object_to_world: Mat4::IDENTITY,
-            world_to_object: Mat4::IDENTITY,
-            object_normal_to_world: glam::Mat3::IDENTITY,
-            mtlx_regs: None,
-            mtlx_dalbedo: None,
-            mtlx_precomputed_for: None,
-        }
-    }
-
-    fn light_below_scene() -> Scene {
-        let mut scene = Scene::new();
-        let light_mesh = scene.add_mesh(unit_mesh(-1.0));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 4.0)));
-        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_qbvh();
-        scene.build_light_tree();
-        scene
-    }
 
     #[test]
     fn direct_light_sampling_skips_only_pure_emitters() {
@@ -495,25 +379,9 @@ mod tests {
 
     #[test]
     fn direct_radiance_applies_balance_heuristic_for_light_sampling() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let light_mesh = scene.add_mesh(unit_mesh(1.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
-        );
-        let material = scene.instance_material(InstanceIndex(0));
+        let scene = floor_with_area_light_scene(0.8, 10.0);
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
         // Single area light -> light sampler pmf = 1.
         let radiance = direct_light_mis_contribution(
             &scene,
@@ -533,35 +401,14 @@ mod tests {
 
     #[test]
     fn emitted_radiance_applies_balance_heuristic_for_bsdf_sampling() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let light_mesh = scene.add_mesh(unit_mesh(1.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
-        );
-        let lvtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(1),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::Z,
-        );
-        let material = scene.instance_material(InstanceIndex(0));
-        let light_material = scene.instance_material(InstanceIndex(1));
+        let scene = floor_with_area_light_scene(0.8, 10.0);
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let mut lvtx = sample_area_light_vtx(&scene);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
+        let light_material = scene.instance_material(triangle_ref(1).instance_index);
         let scratch = MtlxScratch::default();
         let bsdf_pdf = material.pdf(&vtx, &scratch, Vec3::Z);
         let throughput = Vec3::splat(0.8);
-        let mut lvtx = lvtx;
         let radiance = emitted_radiance_from_bsdf_sample_area(
             &scene,
             throughput,
@@ -580,34 +427,13 @@ mod tests {
 
     #[test]
     fn emitted_radiance_from_delta_bsdf_sample_uses_full_weight() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let light_mesh = scene.add_mesh(unit_mesh(1.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 10.0)));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
-        );
-        let lvtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(1),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::Z,
-        );
-        let shading_material = scene.instance_material(InstanceIndex(0));
-        let light_material = scene.instance_material(InstanceIndex(1));
+        let scene = floor_with_area_light_scene(0.8, 10.0);
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let mut lvtx = sample_area_light_vtx(&scene);
+        let shading_material = scene.instance_material(triangle_ref(0).instance_index);
+        let light_material = scene.instance_material(triangle_ref(1).instance_index);
         let throughput = Vec3::splat(0.8);
 
-        let mut lvtx = lvtx;
         let radiance = emitted_radiance_from_bsdf_sample_area(
             &scene,
             throughput,
@@ -671,27 +497,9 @@ mod tests {
 
     #[test]
     fn direct_radiance_uses_full_weight_for_point_light() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        // Power chosen so Li at r=2 equals 1: P / (4π·r²) = 1  =>  P = 16π.
-        scene.add_point_light(PointLight::new(
-            Vec3::new(0.25, 0.25, 2.0),
-            Vec3::ONE,
-            16.0 * PI,
-        ));
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
-        );
-        let material = scene.instance_material(InstanceIndex(0));
+        let scene = floor_with_point_light_scene(0.8, 16.0 * PI);
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
         let radiance = direct_light_mis_contribution(
             &scene,
             material,
@@ -710,31 +518,17 @@ mod tests {
 
     #[test]
     fn direct_radiance_returns_zero_when_point_light_is_occluded() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
+        let mut scene = floor_with_point_light_scene(0.8, 16.0 * PI);
         let blocker_mesh = scene.add_mesh(unit_mesh(1.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
         let blocker_material = scene.add_material(Material::NormalizedLambert(
             NormalizedLambertMaterial::new(Vec3::splat(0.5)),
         ));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_instance(blocker_mesh, blocker_material, Mat4::IDENTITY);
-        scene.add_point_light(PointLight::new(
-            Vec3::new(0.25, 0.25, 2.0),
-            Vec3::ONE,
-            16.0 * PI,
-        ));
+        scene.add_instance(blocker_mesh, blocker_material, glam::Mat4::IDENTITY);
         scene.build_qbvh();
         scene.build_light_tree();
 
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
-        );
-        let material = scene.instance_material(InstanceIndex(0));
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
         let radiance = direct_light_mis_contribution(
             &scene,
             material,
@@ -751,26 +545,9 @@ mod tests {
 
     #[test]
     fn direct_radiance_uses_full_weight_for_directional_light() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_directional_light(DirectionalLight::new(
-            Vec3::new(0.0, 0.0, -1.0),
-            Vec3::ONE,
-            2.0,
-        ));
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
-        );
-        let material = scene.instance_material(InstanceIndex(0));
+        let scene = floor_with_directional_light_scene(0.8, 2.0);
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
         let radiance = direct_light_mis_contribution(
             &scene,
             material,
@@ -789,30 +566,15 @@ mod tests {
 
     #[test]
     fn direct_radiance_uses_full_weight_for_spot_light_with_falloff() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        // P=16π so Li at r=2 on axis equals 1.
-        scene.add_spot_light(SpotLight::new(
-            Vec3::new(0.25, 0.25, 2.0),
-            Vec3::NEG_Z,
-            Vec3::ONE,
+        let scene = floor_with_spot_light_scene(
+            0.8,
             16.0 * PI,
-            (30.0_f32).to_radians(),
-            (20.0_f32).to_radians(),
-        ));
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
+            30f32.to_radians(),
+            20f32.to_radians(),
             Vec3::NEG_Z,
         );
-        let material = scene.instance_material(InstanceIndex(0));
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
         let radiance = direct_light_mis_contribution(
             &scene,
             material,
@@ -830,30 +592,15 @@ mod tests {
 
     #[test]
     fn direct_radiance_returns_zero_when_shading_point_is_outside_spot_cone() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(0.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.8)),
-        ));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        // Spot pointing +X (away from the floor below it).
-        scene.add_spot_light(SpotLight::new(
-            Vec3::new(0.25, 0.25, 2.0),
-            Vec3::X,
-            Vec3::ONE,
+        let scene = floor_with_spot_light_scene(
+            0.8,
             16.0 * PI,
-            (10.0_f32).to_radians(),
-            (5.0_f32).to_radians(),
-        ));
-        scene.build_qbvh();
-        scene.build_light_tree();
-
-        let vtx = scene.shading_vertex_from_triangle_sample(
-            triangle_ref(0),
-            Vec3::new(0.5, 0.25, 0.25),
-            Vec3::NEG_Z,
+            10f32.to_radians(),
+            5f32.to_radians(),
+            Vec3::X,
         );
-        let material = scene.instance_material(InstanceIndex(0));
+        let vtx = sample_floor_vtx(&scene, Vec3::NEG_Z);
+        let material = scene.instance_material(triangle_ref(0).instance_index);
         let radiance = direct_light_mis_contribution(
             &scene,
             material,
@@ -870,16 +617,7 @@ mod tests {
 
     #[test]
     fn trace_radiance_mixes_area_light_and_environment_without_panics() {
-        let mut scene = Scene::new();
-        let floor_mesh = scene.add_mesh(unit_mesh(-1.0));
-        let light_mesh = scene.add_mesh(unit_mesh(2.0));
-        let floor_material = scene.add_material(Material::NormalizedLambert(
-            NormalizedLambertMaterial::new(Vec3::splat(0.6)),
-        ));
-        let light_material =
-            scene.add_material(Material::Emissive(EmissiveMaterial::new(Vec3::ONE, 2.0)));
-        scene.add_instance(floor_mesh, floor_material, Mat4::IDENTITY);
-        scene.add_instance(light_mesh, light_material, Mat4::IDENTITY);
+        let mut scene = floor_with_area_light_scene(0.6, 2.0);
 
         let env_radiance = Vec3::splat(0.2);
         let pixels = vec![env_radiance; 16 * 8];
