@@ -10,7 +10,11 @@ use crate::{
     sampler::MaterialSampleRandoms,
 };
 
-use super::dispersion::{cauchy_ior, sample_dispersion_wavelength_weighted};
+use super::dispersion::{
+    CAMERA_LAMBDA_STEP_NM, CAMERA_SPECTRAL_INTERVAL_COUNT, camera_rgb_basis_at,
+    camera_spectral_interval_midpoint_nm, camera_wavelength_sampling_pdf, cauchy_ior,
+    sample_camera_channel_wavelength, sample_dispersion_wavelength_weighted,
+};
 use super::eon::EonBsdf;
 use super::smith_ggx::{
     EFFECTIVELY_SMOOTH_ALPHA, MIN_ALPHA, ggx_d, ggx_g2_height_correlated, is_upper_hemisphere,
@@ -20,7 +24,7 @@ use super::smith_ggx::{
 use super::thin_film::{eval_thin_film_conductor, eval_thin_film_dielectric};
 use super::{
     BsdfFlags, BsdfSample, ConductorGgxEnergyCompensationLut, DielectricGgxDirectionalAlbedoLut,
-    DielectricGgxEnergyCompensationLut,
+    DielectricGgxEnergyCompensationLut, TransportMode,
 };
 
 const COS_82: f32 = 1.0 / 7.0;
@@ -217,11 +221,16 @@ impl OpenPbrBsdf {
         }
     }
 
-    pub fn eval(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    pub fn eval(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         if !is_upper_hemisphere(wo) {
             return Vec3::ZERO;
         }
-        let weights = self.layer_weights(wo, Some(wi));
+        let layer_wo = if mode == TransportMode::Importance {
+            wi
+        } else {
+            wo
+        };
+        let weights = self.layer_weights(layer_wo, Some(wi));
         let mut total = Vec3::ZERO;
 
         if weights.coat_amp > 0.0 && !self.coat_is_smooth() {
@@ -235,7 +244,7 @@ impl OpenPbrBsdf {
             total += weights.spec_brdf * self.eval_spec_brdf(wo, wi);
         }
         if weights.spec_btdf.length_squared() > 0.0 && !self.spec_btdf_is_smooth() {
-            total += weights.spec_btdf * self.eval_spec_btdf(wo, wi);
+            total += weights.spec_btdf * self.eval_spec_btdf(wo, wi, mode);
         }
         if weights.fuzz.length_squared() > 0.0 {
             total += weights.fuzz * self.eval_fuzz(wo, wi);
@@ -283,7 +292,12 @@ impl OpenPbrBsdf {
         pdf
     }
 
-    pub fn sample(&self, wo: Vec3, randoms: &MaterialSampleRandoms) -> Option<BsdfSample> {
+    pub fn sample(
+        &self,
+        wo: Vec3,
+        randoms: &MaterialSampleRandoms,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) {
             return None;
         }
@@ -299,13 +313,20 @@ impl OpenPbrBsdf {
 
         let us = randoms.u_dir;
         match chosen {
-            ChosenLobe::Coat => self.sample_coat(wo, us, p_lobe),
-            ChosenLobe::Metal => self.sample_metal(wo, us, p_lobe),
-            ChosenLobe::SpecBrdf => self.sample_spec_brdf(wo, us, p_lobe),
-            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, randoms.u_extra0),
-            ChosenLobe::Fuzz => self.sample_fuzz(wo, us),
-            ChosenLobe::DiffBrdf => self.sample_diff_brdf(wo, us),
-            ChosenLobe::DiffBtdf => self.sample_diff_btdf(wo, us),
+            ChosenLobe::Coat => self.sample_coat(wo, us, p_lobe, mode),
+            ChosenLobe::Metal => self.sample_metal(wo, us, p_lobe, mode),
+            ChosenLobe::SpecBrdf => self.sample_spec_brdf(wo, us, p_lobe, mode),
+            ChosenLobe::SpecBtdf => self.sample_spec_btdf(
+                wo,
+                us,
+                p_lobe,
+                randoms.u_extra0,
+                Vec3::new(randoms.u_extra1, randoms.u_extra2, randoms.u_extra3),
+                mode,
+            ),
+            ChosenLobe::Fuzz => self.sample_fuzz(wo, us, mode),
+            ChosenLobe::DiffBrdf => self.sample_diff_brdf(wo, us, mode),
+            ChosenLobe::DiffBtdf => self.sample_diff_btdf(wo, us, mode),
         }
     }
 
@@ -655,6 +676,7 @@ impl OpenPbrBsdf {
         alpha_x: f32,
         alpha_y: f32,
         eta: f32,
+        mode: TransportMode,
     ) -> f32 {
         if wo.z <= 0.0 || wi.z >= 0.0 {
             return 0.0;
@@ -668,7 +690,7 @@ impl OpenPbrBsdf {
         let e_i = self
             .dielectric_ec_lut
             .lookup_e(cos_i, ms.roughness_eq, ms.eta_rel);
-        let radiance_scale = ms.eta_o * ms.eta_o;
+        let radiance_scale = mode.transmission_scale(ms.eta_rel);
         (1.0 - ms.ratio_r) * (1.0 - e_o) * (1.0 - e_i) * radiance_scale
             / (PI * ms.one_minus_e_avg_t)
     }
@@ -999,18 +1021,18 @@ impl OpenPbrBsdf {
         (weights.ss * pdf_ss + weights.ms * pdf_ms) / weights.total
     }
 
-    fn eval_spec_btdf(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    fn eval_spec_btdf(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         if self.p.thin_walled {
             return self.eval_thin_wall_spec_btdf(wo, wi);
         }
         if wo.z <= 0.0 || wi.z >= 0.0 {
             return Vec3::ZERO;
         }
-        if self.dispersion_rgb_sharing_active() && self.p.wavelength_lock.is_none() {
-            return self.eval_spec_btdf_rgb_shared(wo, wi);
+        if self.camera_dispersion_active() && self.p.wavelength_lock.is_none() {
+            return self.eval_spec_btdf_camera_integrated(wo, wi, mode);
         }
         let eta_rel = self.transmission_eta_rel();
-        let Some(value) = self.eval_spec_btdf_scalar_with_eta(wo, wi, eta_rel) else {
+        let Some(value) = self.eval_spec_btdf_scalar_with_eta(wo, wi, eta_rel, mode) else {
             return Vec3::ZERO;
         };
         let eta_physical = self.transmission_eta_used();
@@ -1023,6 +1045,7 @@ impl OpenPbrBsdf {
             self.p.transmission_alpha_x,
             self.p.transmission_alpha_y,
             eta_fresnel,
+            mode,
         ));
         ss + ms
     }
@@ -1053,6 +1076,7 @@ impl OpenPbrBsdf {
         wo: Vec3,
         wi: Vec3,
         eta_rel: f32,
+        mode: TransportMode,
     ) -> Option<SpecBtdfEval> {
         let wm_unnorm = eta_rel * wo + wi;
         if wm_unnorm.length_squared() < 1.0e-12 {
@@ -1081,7 +1105,7 @@ impl OpenPbrBsdf {
         if d <= 0.0 || g <= 0.0 {
             return None;
         }
-        let radiance_scale = 1.0 / (eta_rel * eta_rel);
+        let radiance_scale = mode.transmission_scale(eta_rel);
         let scalar = d * g * (cos_wi_wm * cos_wo_wm).abs();
         let denom = den * den * wo.z.abs() * wi.z.abs();
         if denom <= 0.0 {
@@ -1144,8 +1168,8 @@ impl OpenPbrBsdf {
         if wo.z <= 0.0 || wi.z >= 0.0 {
             return 0.0;
         }
-        if self.dispersion_rgb_sharing_active() && self.p.wavelength_lock.is_none() {
-            return self.pdf_specular_btdf_rgb_mixture(wo, wi);
+        if self.camera_dispersion_active() && self.p.wavelength_lock.is_none() {
+            return self.pdf_specular_btdf_camera_mixture(wo, wi);
         }
         let eta_rel = self.transmission_eta_rel();
         self.pdf_specular_btdf_with_eta(wo, wi, eta_rel, self.transmission_eta_used())
@@ -1200,7 +1224,7 @@ impl OpenPbrBsdf {
         match self.p.wavelength_lock {
             Some(lambda) if self.p.transmission_dispersion_abbe > 0.0 => cauchy_ior(
                 lambda,
-                self.p.specular_eta,
+                self.p.transmission_eta,
                 self.p.transmission_dispersion_abbe,
             ),
             _ => self.p.transmission_eta,
@@ -1223,13 +1247,71 @@ impl OpenPbrBsdf {
         if self.p.front_face { 1.0 / eta } else { eta }
     }
 
-    fn dispersion_rgb_sharing_active(&self) -> bool {
+    fn camera_dispersion_active(&self) -> bool {
         self.p.transmission_dispersion_abbe > 0.0
             && self.p.front_face
             && !self.spec_btdf_is_smooth()
     }
 
-    fn dispersion_channels(&self) -> [DispersionChannel; 3] {
+    fn eval_spec_btdf_camera_integrated(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
+        let mut value = Vec3::ZERO;
+        for i in 0..CAMERA_SPECTRAL_INTERVAL_COUNT {
+            let lambda = camera_spectral_interval_midpoint_nm(i);
+            let eta = cauchy_ior(
+                lambda,
+                self.p.transmission_eta,
+                self.p.transmission_dispersion_abbe,
+            );
+            let eta_fresnel = cauchy_ior(
+                lambda,
+                self.p.specular_eta,
+                self.p.transmission_dispersion_abbe,
+            );
+            let eta_rel = if self.p.front_face { 1.0 / eta } else { eta };
+            let ss = self
+                .eval_spec_btdf_scalar_with_eta(wo, wi, eta_rel, mode)
+                .map(|eval| {
+                    let f_rgb = self.spec_btdf_fresnel_with_eta(eval.cos_wo_wm, eta, eta_fresnel);
+                    (Vec3::ONE - f_rgb).max(Vec3::ZERO) * eval.scalar
+                })
+                .unwrap_or(Vec3::ZERO);
+            let ms = Vec3::splat(self.eval_dielectric_transmission_ms(
+                wo,
+                wi,
+                self.p.transmission_alpha_x,
+                self.p.transmission_alpha_y,
+                eta_fresnel,
+                mode,
+            ));
+            value += camera_rgb_basis_at(lambda) * (ss + ms) * CAMERA_LAMBDA_STEP_NM;
+        }
+        value
+    }
+
+    fn pdf_specular_btdf_camera_mixture(&self, wo: Vec3, wi: Vec3) -> f32 {
+        let mut pdf = 0.0;
+        for i in 0..CAMERA_SPECTRAL_INTERVAL_COUNT {
+            let lambda = camera_spectral_interval_midpoint_nm(i);
+            let eta = cauchy_ior(
+                lambda,
+                self.p.transmission_eta,
+                self.p.transmission_dispersion_abbe,
+            );
+            let eta_fresnel = cauchy_ior(
+                lambda,
+                self.p.specular_eta,
+                self.p.transmission_dispersion_abbe,
+            );
+            let eta_rel = if self.p.front_face { 1.0 / eta } else { eta };
+            let p_lambda = camera_wavelength_sampling_pdf(lambda, self.p.path_throughput);
+            pdf += p_lambda
+                * self.pdf_specular_btdf_with_eta(wo, wi, eta_rel, eta_fresnel)
+                * CAMERA_LAMBDA_STEP_NM;
+        }
+        pdf
+    }
+
+    fn sampled_dispersion_channels(&self, u_rgb: Vec3) -> [DispersionChannel; 3] {
         let throughput = self.p.path_throughput.max(Vec3::ZERO);
         let weights = if throughput.max_element() > 0.0 {
             throughput
@@ -1239,25 +1321,28 @@ impl OpenPbrBsdf {
         let sum = (weights.x + weights.y + weights.z).max(1.0e-8);
         [
             DispersionChannel {
-                lambda_nm: 656.27,
+                lambda_nm: sample_camera_channel_wavelength(0, u_rgb.x),
                 color: Vec3::X,
                 probability: weights.x / sum,
             },
             DispersionChannel {
-                lambda_nm: 587.56,
+                lambda_nm: sample_camera_channel_wavelength(1, u_rgb.y),
                 color: Vec3::Y,
                 probability: weights.y / sum,
             },
             DispersionChannel {
-                lambda_nm: 486.13,
+                lambda_nm: sample_camera_channel_wavelength(2, u_rgb.z),
                 color: Vec3::Z,
                 probability: weights.z / sum,
             },
         ]
     }
 
-    fn pick_dispersion_channel(&self, u: f32) -> DispersionChannel {
-        let channels = self.dispersion_channels();
+    fn pick_dispersion_channel(
+        &self,
+        channels: [DispersionChannel; 3],
+        u: f32,
+    ) -> DispersionChannel {
         let mut u = u.clamp(0.0, 1.0);
         for channel in channels {
             if u <= channel.probability {
@@ -1268,9 +1353,15 @@ impl OpenPbrBsdf {
         channels[2]
     }
 
-    fn eval_spec_btdf_rgb_shared(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    fn eval_spec_btdf_sampled_channels(
+        &self,
+        wo: Vec3,
+        wi: Vec3,
+        channels: &[DispersionChannel; 3],
+        mode: TransportMode,
+    ) -> Vec3 {
         let mut value = Vec3::ZERO;
-        for channel in self.dispersion_channels() {
+        for channel in channels {
             if channel.probability <= 0.0 {
                 continue;
             }
@@ -1286,7 +1377,7 @@ impl OpenPbrBsdf {
             );
             let eta_rel = if self.p.front_face { 1.0 / eta } else { eta };
             let ss = self
-                .eval_spec_btdf_scalar_with_eta(wo, wi, eta_rel)
+                .eval_spec_btdf_scalar_with_eta(wo, wi, eta_rel, mode)
                 .map(|eval| {
                     let f = self.spec_btdf_fresnel_with_eta(eval.cos_wo_wm, eta, eta_fresnel);
                     (1.0 - f.dot(channel.color)).max(0.0) * eval.scalar
@@ -1298,15 +1389,21 @@ impl OpenPbrBsdf {
                 self.p.transmission_alpha_x,
                 self.p.transmission_alpha_y,
                 eta_fresnel,
+                mode,
             );
             value += channel.color * (ss + ms);
         }
         value
     }
 
-    fn pdf_specular_btdf_rgb_mixture(&self, wo: Vec3, wi: Vec3) -> f32 {
+    fn pdf_specular_btdf_sampled_channel_mixture(
+        &self,
+        wo: Vec3,
+        wi: Vec3,
+        channels: &[DispersionChannel; 3],
+    ) -> f32 {
         let mut pdf = 0.0;
-        for channel in self.dispersion_channels() {
+        for channel in channels {
             if channel.probability <= 0.0 {
                 continue;
             }
@@ -1367,7 +1464,13 @@ impl OpenPbrBsdf {
         EonBsdf::new(Vec3::ONE, self.p.diffuse_roughness).pdf(wo, wi_flipped)
     }
 
-    fn sample_coat(&self, wo: Vec3, us: Vec2, p_lobe: f32) -> Option<BsdfSample> {
+    fn sample_coat(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         let (wo_c, _) = self.to_coat(wo, Vec3::Z);
         if wo_c.z <= 0.0 {
             return None;
@@ -1381,6 +1484,7 @@ impl OpenPbrBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -1403,6 +1507,7 @@ impl OpenPbrBsdf {
                 wi,
                 BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
                 1.0,
+                mode,
             );
         }
         let u = if ss_probability > 0.0 {
@@ -1421,10 +1526,16 @@ impl OpenPbrBsdf {
             return None;
         }
         let wi = self.coat_to_base(wi_c);
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
-    fn sample_metal(&self, wo: Vec3, us: Vec2, p_lobe: f32) -> Option<BsdfSample> {
+    fn sample_metal(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if self.metal_is_smooth() {
             let wi = Vec3::new(-wo.x, -wo.y, wo.z);
             let f = self.metal_fresnel(wi.z.abs());
@@ -1434,6 +1545,7 @@ impl OpenPbrBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -1453,6 +1565,7 @@ impl OpenPbrBsdf {
                 wi,
                 BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
                 1.0,
+                mode,
             );
         }
         let u = if ss_probability > 0.0 {
@@ -1470,10 +1583,16 @@ impl OpenPbrBsdf {
         if wi.z <= 0.0 {
             return None;
         }
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
-    fn sample_spec_brdf(&self, wo: Vec3, us: Vec2, p_lobe: f32) -> Option<BsdfSample> {
+    fn sample_spec_brdf(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if self.spec_brdf_is_smooth() {
             let wi = Vec3::new(-wo.x, -wo.y, wo.z);
             let f = if self.p.thin_walled {
@@ -1487,6 +1606,7 @@ impl OpenPbrBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -1504,6 +1624,7 @@ impl OpenPbrBsdf {
                 wi,
                 BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
                 1.0,
+                mode,
             );
         }
         let ms = self.dielectric_ms_params(
@@ -1525,6 +1646,7 @@ impl OpenPbrBsdf {
                 wi,
                 BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
                 1.0,
+                mode,
             );
         }
         let u = if ss_probability > 0.0 {
@@ -1542,10 +1664,18 @@ impl OpenPbrBsdf {
         if wi.z <= 0.0 {
             return None;
         }
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
-    fn sample_spec_btdf(&self, wo: Vec3, us: Vec2, p_lobe: f32, u_aux: f32) -> Option<BsdfSample> {
+    fn sample_spec_btdf(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        u_aux: f32,
+        u_rgb: Vec3,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if self.p.thin_walled {
             let (_, t) = self.thin_wall_coefficients(wo.z.abs());
             if self.spec_btdf_is_smooth() {
@@ -1556,6 +1686,7 @@ impl OpenPbrBsdf {
                     weight,
                     wi,
                     pdf: p_lobe,
+                    pdf_rev: 0.0,
                     flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
                     eta: 1.0,
                     wavelength_lock: None,
@@ -1580,14 +1711,15 @@ impl OpenPbrBsdf {
                 weight,
                 wi,
                 pdf: pdf_total,
+                pdf_rev: self.pdf(wi, wo),
                 flags: BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
                 eta: 1.0,
                 wavelength_lock: None,
             });
         }
 
-        if self.dispersion_rgb_sharing_active() && self.p.wavelength_lock.is_none() {
-            return self.sample_spec_btdf_rgb_shared(wo, us, p_lobe, u_aux);
+        if self.camera_dispersion_active() && self.p.wavelength_lock.is_none() {
+            return self.sample_spec_btdf_camera_channels(wo, us, p_lobe, u_aux, u_rgb, mode);
         }
 
         let dispersion_active = self.p.transmission_dispersion_abbe > 0.0;
@@ -1631,13 +1763,14 @@ impl OpenPbrBsdf {
         if self.spec_btdf_is_smooth() {
             let wi = refract(wo, eta_rel)?;
             let f = self.base_dielectric_fresnel(wo.z.abs(), eta_used, eta_fresnel);
-            let scale = 1.0 / (eta_rel * eta_rel);
+            let scale = mode.transmission_scale(eta_rel);
             let base_weight = self.layer_weights(wo, Some(wi)).spec_btdf;
             let weight = (base_weight * dispersion_basis * (1.0 - f) * scale) / p_lobe;
             return Some(BsdfSample {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
                 eta: eta_rel,
                 wavelength_lock: fresh_lock,
@@ -1665,6 +1798,7 @@ impl OpenPbrBsdf {
                 BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
                 eta_rel,
                 fresh_lock,
+                mode,
             );
         }
         let u = if ss_probability > 0.0 {
@@ -1697,17 +1831,21 @@ impl OpenPbrBsdf {
             BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
             eta_rel,
             fresh_lock,
+            mode,
         )
     }
 
-    fn sample_spec_btdf_rgb_shared(
+    fn sample_spec_btdf_camera_channels(
         &self,
         wo: Vec3,
         us: Vec2,
         p_lobe: f32,
-        u_channel: f32,
+        u_pick: f32,
+        u_rgb: Vec3,
+        mode: TransportMode,
     ) -> Option<BsdfSample> {
-        let channel = self.pick_dispersion_channel(u_channel);
+        let channels = self.sampled_dispersion_channels(u_rgb);
+        let channel = self.pick_dispersion_channel(channels, u_pick);
         if channel.probability <= 0.0 {
             return None;
         }
@@ -1768,77 +1906,53 @@ impl OpenPbrBsdf {
             return None;
         }
         let base_weight = self.layer_weights(wo, Some(wi)).spec_btdf;
-        let pdf_lobe_value = self.pdf_specular_btdf_rgb_mixture(wo, wi);
+        let pdf_lobe_value = self.pdf_specular_btdf_sampled_channel_mixture(wo, wi, &channels);
         let pdf_total = p_lobe * pdf_lobe_value;
         if pdf_total <= 0.0 {
             return None;
         }
 
-        let mut f_rgb = Vec3::ZERO;
-        for eval_channel in self.dispersion_channels() {
-            if eval_channel.probability <= 0.0 {
-                continue;
-            }
-            let eta = cauchy_ior(
-                eval_channel.lambda_nm,
-                self.p.transmission_eta,
-                self.p.transmission_dispersion_abbe,
-            );
-            let eta_fresnel = cauchy_ior(
-                eval_channel.lambda_nm,
-                self.p.specular_eta,
-                self.p.transmission_dispersion_abbe,
-            );
-            let eta_rel_channel = if self.p.front_face { 1.0 / eta } else { eta };
-            let ss = self
-                .eval_spec_btdf_scalar_with_eta(wo, wi, eta_rel_channel)
-                .map(|eval| {
-                    let f = self.spec_btdf_fresnel_with_eta(eval.cos_wo_wm, eta, eta_fresnel);
-                    (1.0 - f.dot(eval_channel.color)).max(0.0) * eval.scalar
-                })
-                .unwrap_or(0.0);
-            let ms = self.eval_dielectric_transmission_ms(
-                wo,
-                wi,
-                self.p.transmission_alpha_x,
-                self.p.transmission_alpha_y,
-                eta_fresnel,
-            );
-            f_rgb += eval_channel.color * (ss + ms);
-        }
+        let f_rgb = self.eval_spec_btdf_sampled_channels(wo, wi, &channels, mode);
         let weight = base_weight * f_rgb * (wi.z.abs() / pdf_total);
 
         Some(BsdfSample {
             weight,
             wi,
             pdf: pdf_total,
+            pdf_rev: self.pdf(wi, wo),
             flags: BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
             eta: eta_rel,
             wavelength_lock: Some(channel.lambda_nm),
         })
     }
 
-    fn sample_fuzz(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_fuzz(&self, wo: Vec3, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         let wo_f = self.to_fuzz(wo, Vec3::Z).0;
         let wi_f = OpenPbrFuzzBsdf::new(self.p.fuzz_roughness).sample(wo_f, us)?;
         let wi = self.fuzz_to_base(wi_f);
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
-    fn sample_diff_brdf(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_diff_brdf(&self, wo: Vec3, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         let bsdf = EonBsdf::new(Vec3::ONE, self.p.diffuse_roughness);
         let s = bsdf.sample(wo, us)?;
-        self.finalize_rough_sample(wo, s.wi, s.flags, s.eta)
+        self.finalize_rough_sample(wo, s.wi, s.flags, s.eta, mode)
     }
 
-    fn sample_diff_btdf(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_diff_btdf(&self, wo: Vec3, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         if !self.p.thin_walled {
             return None;
         }
         let bsdf = EonBsdf::new(Vec3::ONE, self.p.diffuse_roughness);
         let s = bsdf.sample(wo, us)?;
         let wi = Vec3::new(s.wi.x, s.wi.y, -s.wi.z);
-        self.finalize_rough_sample(wo, wi, BsdfFlags::DIFFUSE | BsdfFlags::TRANSMISSION, 1.0)
+        self.finalize_rough_sample(
+            wo,
+            wi,
+            BsdfFlags::DIFFUSE | BsdfFlags::TRANSMISSION,
+            1.0,
+            mode,
+        )
     }
 
     fn finalize_rough_sample(
@@ -1847,8 +1961,9 @@ impl OpenPbrBsdf {
         wi: Vec3,
         flags: BsdfFlags,
         eta: f32,
+        mode: TransportMode,
     ) -> Option<BsdfSample> {
-        self.finalize_rough_sample_with_wavelength(wo, wi, flags, eta, None)
+        self.finalize_rough_sample_with_wavelength(wo, wi, flags, eta, None, mode)
     }
 
     fn finalize_rough_sample_with_wavelength(
@@ -1858,12 +1973,13 @@ impl OpenPbrBsdf {
         flags: BsdfFlags,
         eta: f32,
         wavelength_lock: Option<f32>,
+        mode: TransportMode,
     ) -> Option<BsdfSample> {
         let pdf = self.pdf(wo, wi);
         if pdf <= 0.0 {
             return None;
         }
-        let f = self.eval(wo, wi);
+        let f = self.eval(wo, wi, mode);
         if f.length_squared() == 0.0 {
             return None;
         }
@@ -1875,6 +1991,7 @@ impl OpenPbrBsdf {
             weight: f * (cos / pdf),
             wi,
             pdf,
+            pdf_rev: self.pdf(wi, wo),
             flags,
             wavelength_lock,
             eta,
@@ -2076,7 +2193,7 @@ mod tests {
     use crate::{
         bsdf::{
             BsdfFlags, ConductorGgxEnergyCompensationLut, DielectricGgxDirectionalAlbedoLut,
-            DielectricGgxEnergyCompensationLut, artist_friendly_complex_ior,
+            DielectricGgxEnergyCompensationLut, TransportMode, artist_friendly_complex_ior,
         },
         math::refract,
     };
@@ -2180,7 +2297,11 @@ mod tests {
     #[test]
     fn default_diffuse_dominant_evaluates_finite() {
         let bsdf = test_bsdf(default_params());
-        let f = bsdf.eval(Vec3::Z, Vec3::new(0.2, 0.3, 0.9327379).normalize());
+        let f = bsdf.eval(
+            Vec3::Z,
+            Vec3::new(0.2, 0.3, 0.9327379).normalize(),
+            TransportMode::Radiance,
+        );
         assert!(f.is_finite());
     }
 
@@ -2202,7 +2323,9 @@ mod tests {
             params.specular_alpha_y = alpha;
             let bsdf = test_bsdf_with_real_luts(params.clone());
             let wo = Vec3::new(0.25, -0.15, 0.956_556).normalize();
-            let energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+            let energy = integrate_upper_hemisphere_vec3(|wi| {
+                bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z
+            });
 
             assert!(energy.is_finite());
             assert!(
@@ -2231,7 +2354,9 @@ mod tests {
             params.specular_alpha_y = alpha;
             let bsdf = test_bsdf_with_real_luts(params.clone());
             let wo = Vec3::new(0.25, -0.15, 0.956_556).normalize();
-            let energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+            let energy = integrate_upper_hemisphere_vec3(|wi| {
+                bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z
+            });
 
             assert!(energy.is_finite());
             assert!(
@@ -2257,12 +2382,14 @@ mod tests {
         params.specular_alpha_y = 0.88_f32 * 0.88;
         let bsdf = test_bsdf_with_real_luts(params.clone());
         let wo = Vec3::new(0.25, -0.15, 0.956_556).normalize();
-        let spec_energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+        let spec_energy =
+            integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z);
 
         params.base = 1.0;
         params.base_color = Vec3::new(0.28, 0.04, 0.1);
         let bsdf = test_bsdf_with_real_luts(params);
-        let total_energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+        let total_energy =
+            integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z);
 
         assert!(
             (0.005..=0.06).contains(&spec_energy.x)
@@ -2292,7 +2419,8 @@ mod tests {
 
         let bsdf = test_bsdf_with_real_luts_for_spec_eta(params);
         let wo = Vec3::new(0.25, -0.15, 0.956_556).normalize();
-        let spec_energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+        let spec_energy =
+            integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z);
 
         assert!(
             spec_energy.max_element() <= 0.004,
@@ -2336,7 +2464,8 @@ mod tests {
 
         let bsdf = test_bsdf_with_real_luts_for_spec_eta(params);
         let wo = Vec3::new(0.25, -0.15, 0.956_556).normalize();
-        let spec_energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+        let spec_energy =
+            integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z);
 
         assert!(
             spec_energy.max_element() <= 1.0e-4,
@@ -2360,7 +2489,9 @@ mod tests {
             params.specular_alpha_y = alpha;
             let bsdf = test_bsdf_with_real_luts(params.clone());
             let wo = Vec3::new(0.25, -0.15, 0.956_556).normalize();
-            let energy = integrate_upper_hemisphere_vec3(|wi| bsdf.eval(wo, wi) * wi.z);
+            let energy = integrate_upper_hemisphere_vec3(|wi| {
+                bsdf.eval(wo, wi, TransportMode::Radiance) * wi.z
+            });
 
             assert!(energy.is_finite());
             assert!(
@@ -2380,7 +2511,11 @@ mod tests {
         let mut rng = crate::sampler::AuxRng::from_seed(0);
         let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
         let sample = bsdf
-            .sample(Vec3::new(0.2, -0.1, 0.9746794).normalize(), &randoms)
+            .sample(
+                Vec3::new(0.2, -0.1, 0.9746794).normalize(),
+                &randoms,
+                TransportMode::Radiance,
+            )
             .unwrap();
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
     }
@@ -2437,7 +2572,7 @@ mod tests {
         let mut got = false;
         for _ in 0..32 {
             let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
-            if let Some(sample) = bsdf.sample(wo, &randoms)
+            if let Some(sample) = bsdf.sample(wo, &randoms, TransportMode::Radiance)
                 && sample.flags.contains(BsdfFlags::TRANSMISSION)
             {
                 assert!(sample.wi.abs_diff_eq(-wo, 1.0e-5));
@@ -2449,7 +2584,7 @@ mod tests {
     }
 
     #[test]
-    fn rough_dispersion_sample_shares_rgb_lobes() {
+    fn rough_dispersion_sample_uses_camera_channel_wavelengths() {
         let mut params = default_params();
         params.base = 0.0;
         params.specular = 0.0;
@@ -2460,11 +2595,21 @@ mod tests {
         params.path_throughput = Vec3::new(0.8, 0.5, 0.3);
         let bsdf = test_bsdf(params);
         let sample = bsdf
-            .sample_spec_btdf_rgb_shared(Vec3::Z, glam::Vec2::new(0.37, 0.82), 1.0, 0.41)
+            .sample_spec_btdf(
+                Vec3::Z,
+                glam::Vec2::new(0.37, 0.82),
+                1.0,
+                0.41,
+                Vec3::new(0.17, 0.53, 0.91),
+                TransportMode::Radiance,
+            )
             .expect("rough dispersive BTDF should sample");
 
         assert!(sample.flags.contains(BsdfFlags::TRANSMISSION));
-        assert!(sample.wavelength_lock.is_some());
+        let lambda = sample
+            .wavelength_lock
+            .expect("dispersion should lock wavelength");
+        assert!((400.0..=720.0).contains(&lambda));
         assert!(sample.weight.x > 0.0);
         assert!(sample.weight.y > 0.0);
         assert!(sample.weight.z > 0.0);
@@ -2483,7 +2628,16 @@ mod tests {
         let bsdf = test_bsdf(params);
         let wo = Vec3::new(0.35, 0.0, 0.936_75).normalize();
         let expected = refract(wo, 1.0 / 1.5).unwrap();
-        let sample = bsdf.sample_spec_btdf(wo, Vec2::ZERO, 1.0, 0.5).unwrap();
+        let sample = bsdf
+            .sample_spec_btdf(
+                wo,
+                Vec2::ZERO,
+                1.0,
+                0.5,
+                Vec3::splat(0.5),
+                TransportMode::Radiance,
+            )
+            .unwrap();
         assert!(sample.wi.abs_diff_eq(expected, 1.0e-5));
     }
 }

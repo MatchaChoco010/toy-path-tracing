@@ -12,7 +12,7 @@ use super::smith_ggx::{
     EFFECTIVELY_SMOOTH_ALPHA, MIN_ALPHA, ggx_d, ggx_g1, ggx_g2_height_correlated,
     is_upper_hemisphere, pdf_wm_vndf, reflect_local, reflection_half_vector, sample_wm_vndf,
 };
-use super::{BsdfFlags, BsdfSample};
+use super::{BsdfFlags, BsdfSample, TransportMode};
 
 const DENOM_EPS: f32 = 1.0e-6;
 const MS_DENOM_EPS: f32 = 1.0e-4;
@@ -119,7 +119,7 @@ impl DielectricGgxBsdf {
         }
     }
 
-    pub fn eval(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    pub fn eval(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         if !is_upper_hemisphere(wo) || self.eta <= 0.0 {
             return Vec3::ZERO;
         }
@@ -127,12 +127,12 @@ impl DielectricGgxBsdf {
             return Vec3::ZERO;
         }
 
-        let f_ss = self.eval_single_scattering(wo, wi);
-        let f_ms = self.eval_multi_scattering(wo, wi);
+        let f_ss = self.eval_single_scattering(wo, wi, mode);
+        let f_ms = self.eval_multi_scattering(wo, wi, mode);
         f_ss + f_ms
     }
 
-    fn eval_single_scattering(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    fn eval_single_scattering(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
 
@@ -200,7 +200,7 @@ impl DielectricGgxBsdf {
                 return Vec3::ZERO;
             }
             let f = fresnel_dielectric(cos_wo_wm, eta_i, eta_t);
-            let radiance_scale = 1.0 / (eta_rel * eta_rel);
+            let radiance_scale = mode.transmission_scale(eta_rel);
             let numerator = d * (1.0 - f) * g * (cos_wi_wm * cos_wo_wm).abs();
             let denom = den * den * cos_o * cos_i;
             if denom <= 0.0 {
@@ -296,7 +296,7 @@ impl DielectricGgxBsdf {
         }
     }
 
-    pub fn sample(&self, wo: Vec3, uc: f32, us: Vec2) -> Option<BsdfSample> {
+    pub fn sample(&self, wo: Vec3, uc: f32, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) || self.eta <= 0.0 {
             return None;
         }
@@ -306,17 +306,23 @@ impl DielectricGgxBsdf {
         }
 
         if self.effectively_smooth() {
-            return self.sample_smooth_delta(wo, uc);
+            return self.sample_smooth_delta(wo, uc, mode);
         }
 
         if !self.compensation_active() {
-            return self.sample_rough(wo, uc, us);
+            return self.sample_rough(wo, uc, us, mode);
         }
 
-        self.sample_rough_with_compensation(wo, uc, us)
+        self.sample_rough_with_compensation(wo, uc, us, mode)
     }
 
-    fn sample_rough_with_compensation(&self, wo: Vec3, uc: f32, us: Vec2) -> Option<BsdfSample> {
+    fn sample_rough_with_compensation(
+        &self,
+        wo: Vec3,
+        uc: f32,
+        us: Vec2,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         let ms = self.ms_params(wo);
         let pr_ss = ms.e_avg_o.clamp(0.0, 1.0);
         let pr_ms = (1.0 - pr_ss).max(0.0);
@@ -327,7 +333,7 @@ impl DielectricGgxBsdf {
         if uc < pr_ss {
             // SS branch: re-map uc to [0, 1) for the inner F-based R/T pick.
             let uc_inner = if pr_ss > 0.0 { uc / pr_ss } else { 0.0 };
-            let mut sample = self.sample_rough(wo, uc_inner, us)?;
+            let mut sample = self.sample_rough(wo, uc_inner, us, mode)?;
             // Recompute total pdf and weight using full eval / pdf so that
             // the sample respects the multi-lobe MIS combination.
             let pdf_ss = self.pdf_single_scattering(wo, sample.wi);
@@ -336,9 +342,10 @@ impl DielectricGgxBsdf {
             if pdf_total <= 0.0 {
                 return None;
             }
-            let f_total = self.eval_single_scattering(wo, sample.wi)
-                + self.eval_multi_scattering_with(wo, sample.wi, &ms);
+            let f_total = self.eval_single_scattering(wo, sample.wi, mode)
+                + self.eval_multi_scattering_with(wo, sample.wi, &ms, mode);
             sample.pdf = pdf_total;
+            sample.pdf_rev = self.pdf(sample.wi, wo);
             sample.weight = f_total * (sample.wi.z.abs() / pdf_total);
             Some(sample)
         } else {
@@ -370,13 +377,14 @@ impl DielectricGgxBsdf {
             if pdf_total <= 0.0 {
                 return None;
             }
-            let f_total =
-                self.eval_single_scattering(wo, wi) + self.eval_multi_scattering_with(wo, wi, &ms);
+            let f_total = self.eval_single_scattering(wo, wi, mode)
+                + self.eval_multi_scattering_with(wo, wi, &ms, mode);
             let weight = f_total * (wi.z.abs() / pdf_total);
             Some(BsdfSample {
                 weight,
                 wi,
                 pdf: pdf_total,
+                pdf_rev: self.pdf(wi, wo),
                 flags: ms_flags,
                 eta: eta_returned,
                 wavelength_lock: None,
@@ -432,13 +440,14 @@ impl DielectricGgxBsdf {
             weight,
             wi,
             pdf,
+            pdf_rev: 0.0,
             flags,
             wavelength_lock: None,
             eta: 1.0,
         })
     }
 
-    fn sample_smooth_delta(&self, wo: Vec3, uc: f32) -> Option<BsdfSample> {
+    fn sample_smooth_delta(&self, wo: Vec3, uc: f32, mode: TransportMode) -> Option<BsdfSample> {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
         let reflectance = fresnel_dielectric(wo.z.abs(), eta_i, eta_t);
@@ -468,6 +477,7 @@ impl DielectricGgxBsdf {
                 weight: Vec3::splat(reflectance / pr),
                 wi: reflected_direction(wo),
                 pdf: pr,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -475,19 +485,20 @@ impl DielectricGgxBsdf {
         }
 
         let wi = transmission_direction?;
-        let radiance_scale = 1.0 / (eta_rel * eta_rel);
+        let radiance_scale = mode.transmission_scale(eta_rel);
 
         Some(BsdfSample {
             weight: self.color * (radiance_scale * transmittance / pt),
             wi,
             pdf: pt,
+            pdf_rev: 0.0,
             flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
             eta: eta_rel,
             wavelength_lock: None,
         })
     }
 
-    fn sample_rough(&self, wo: Vec3, uc: f32, us: Vec2) -> Option<BsdfSample> {
+    fn sample_rough(&self, wo: Vec3, uc: f32, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         let (eta_i, eta_t) = self.fresnel_interface();
         let eta_rel = self.eta_rel();
 
@@ -537,6 +548,7 @@ impl DielectricGgxBsdf {
                 weight,
                 wi,
                 pdf,
+                pdf_rev: self.pdf(wi, wo),
                 flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -561,12 +573,13 @@ impl DielectricGgxBsdf {
             if pdf <= 0.0 {
                 return None;
             }
-            let radiance_scale = 1.0 / (eta_rel * eta_rel);
+            let radiance_scale = mode.transmission_scale(eta_rel);
             let weight = self.color * (radiance_scale * (1.0 - f) * g2 / (pt * g1));
             Some(BsdfSample {
                 weight,
                 wi,
                 pdf,
+                pdf_rev: self.pdf(wi, wo),
                 flags: BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
                 eta: eta_rel,
                 wavelength_lock: None,
@@ -632,15 +645,21 @@ impl DielectricGgxBsdf {
         }
     }
 
-    fn eval_multi_scattering(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    fn eval_multi_scattering(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         if !self.compensation_active() {
             return Vec3::ZERO;
         }
         let ms = self.ms_params(wo);
-        self.eval_multi_scattering_with(wo, wi, &ms)
+        self.eval_multi_scattering_with(wo, wi, &ms, mode)
     }
 
-    fn eval_multi_scattering_with(&self, wo: Vec3, wi: Vec3, ms: &MsParams) -> Vec3 {
+    fn eval_multi_scattering_with(
+        &self,
+        wo: Vec3,
+        wi: Vec3,
+        ms: &MsParams,
+        mode: TransportMode,
+    ) -> Vec3 {
         let lut = self
             .energy_compensation_lut
             .as_ref()
@@ -659,7 +678,7 @@ impl DielectricGgxBsdf {
             Vec3::splat(f_ms_r)
         } else {
             let e_i = lut.lookup_e(cos_i, ms.roughness_eq, ms.eta_rel);
-            let radiance_scale = ms.eta_o * ms.eta_o;
+            let radiance_scale = mode.transmission_scale(ms.eta_rel);
             let f_ms_t = (1.0 - ms.ratio_r) * (1.0 - e_o) * (1.0 - e_i) * radiance_scale
                 / (PI * ms.one_minus_e_avg_t);
             self.color * f_ms_t
@@ -723,7 +742,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
-        bsdf::{BsdfFlags, DielectricGgxAllowedPaths, DielectricGgxBsdf},
+        bsdf::{BsdfFlags, DielectricGgxAllowedPaths, DielectricGgxBsdf, TransportMode},
         math::{fresnel_dielectric, refract},
     };
 
@@ -732,14 +751,17 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 1.0e-4, 1.0e-4, false, true);
         let wo = Vec3::Z;
         let sample = bsdf
-            .sample(wo, 0.01, Vec2::splat(0.5))
+            .sample(wo, 0.01, Vec2::splat(0.5), TransportMode::Radiance)
             .expect("expected a delta reflection sample");
 
         assert_eq!(sample.wi, Vec3::Z);
         assert_eq!(sample.weight, Vec3::ONE);
         assert!((sample.pdf - 0.04).abs() < 1.0e-4);
         assert_eq!(sample.flags, BsdfFlags::DELTA | BsdfFlags::REFLECTION);
-        assert_eq!(bsdf.eval(wo, sample.wi), Vec3::ZERO);
+        assert_eq!(
+            bsdf.eval(wo, sample.wi, TransportMode::Radiance),
+            Vec3::ZERO
+        );
         assert_eq!(bsdf.pdf(wo, sample.wi), 0.0);
     }
 
@@ -750,7 +772,7 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(color, eta, 1.0e-4, 1.0e-4, false, true);
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let sample = bsdf
-            .sample(wo, 0.99, Vec2::splat(0.5))
+            .sample(wo, 0.99, Vec2::splat(0.5), TransportMode::Radiance)
             .expect("expected a delta transmission sample");
         let expected_wi = refract(wo, 1.0 / eta).expect("expected refraction");
 
@@ -767,7 +789,7 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(color, eta, 1.0e-4, 1.0e-4, false, false);
         let wo = Vec3::Z;
         let sample = bsdf
-            .sample(wo, 0.99, Vec2::splat(0.5))
+            .sample(wo, 0.99, Vec2::splat(0.5), TransportMode::Radiance)
             .expect("expected a delta transmission sample");
 
         assert!(sample.weight.abs_diff_eq(color / (eta * eta), 1.0e-6));
@@ -780,7 +802,7 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 1.0e-4, 1.0e-4, false, false);
         let wo = Vec3::new(0.8, 0.0, 0.6).normalize();
         let sample = bsdf
-            .sample(wo, 0.9, Vec2::splat(0.5))
+            .sample(wo, 0.9, Vec2::splat(0.5), TransportMode::Radiance)
             .expect("expected total internal reflection");
 
         assert!(sample.wi.abs_diff_eq(Vec3::new(-0.8, 0.0, 0.6), 1.0e-6));
@@ -796,7 +818,7 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(color, eta, 0.1, 0.1, true, true);
         let wo = Vec3::new(0.3, -0.4, 0.8660254).normalize();
         let sample = bsdf
-            .sample(wo, 0.9, Vec2::splat(0.5))
+            .sample(wo, 0.9, Vec2::splat(0.5), TransportMode::Radiance)
             .expect("expected a thin transmission sample");
         let base = fresnel_dielectric(wo.z, 1.0, eta);
         let expected_reflectance = base + (1.0 - base).powi(2) * base / (1.0 - base * base);
@@ -812,7 +834,7 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 0.9, 0.9, true, true);
         let wo = Vec3::new(0.2, -0.1, 0.9746794).normalize();
         let sample = bsdf
-            .sample(wo, 0.5, Vec2::new(0.3, 0.7))
+            .sample(wo, 0.5, Vec2::new(0.3, 0.7), TransportMode::Radiance)
             .expect("expected a thin delta sample");
 
         assert!(sample.flags.contains(BsdfFlags::DELTA));
@@ -826,7 +848,7 @@ mod tests {
 
         // With uc = 0.0 we always pick the reflection branch.
         let sample = bsdf
-            .sample(wo, 0.0, Vec2::new(0.35, 0.72))
+            .sample(wo, 0.0, Vec2::new(0.35, 0.72), TransportMode::Radiance)
             .expect("expected a reflection sample");
 
         assert!(
@@ -837,7 +859,7 @@ mod tests {
         assert!(sample.wi.z > 0.0);
         assert!(sample.pdf > 0.0);
 
-        let f = bsdf.eval(wo, sample.wi);
+        let f = bsdf.eval(wo, sample.wi, TransportMode::Radiance);
         let expected = f * (sample.wi.z.abs() / sample.pdf);
         assert!(sample.weight.abs_diff_eq(expected, 5.0e-4));
     }
@@ -849,7 +871,7 @@ mod tests {
 
         // With uc = 1.0 we always pick the transmission branch.
         let sample = bsdf
-            .sample(wo, 0.999, Vec2::new(0.4, 0.6))
+            .sample(wo, 0.999, Vec2::new(0.4, 0.6), TransportMode::Radiance)
             .expect("expected a transmission sample");
 
         assert!(
@@ -860,7 +882,7 @@ mod tests {
         assert!(sample.wi.z < 0.0);
         assert!(sample.pdf > 0.0);
 
-        let f = bsdf.eval(wo, sample.wi);
+        let f = bsdf.eval(wo, sample.wi, TransportMode::Radiance);
         let expected = f * (sample.wi.z.abs() / sample.pdf);
         assert!(sample.weight.abs_diff_eq(expected, 5.0e-4));
     }
@@ -879,13 +901,17 @@ mod tests {
         let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
         let transmission_wi = Vec3::new(-0.1, 0.2, -0.9746794).normalize();
 
-        assert_eq!(bsdf.eval(wo, transmission_wi), Vec3::ZERO);
+        assert_eq!(
+            bsdf.eval(wo, transmission_wi, TransportMode::Radiance),
+            Vec3::ZERO
+        );
         assert_eq!(bsdf.pdf(wo, transmission_wi), 0.0);
 
         let sample = bsdf
-            .sample(wo, 0.999, Vec2::new(0.35, 0.72))
+            .sample(wo, 0.999, Vec2::new(0.35, 0.72), TransportMode::Radiance)
             .expect("expected a reflection-only sample");
-        let expected = bsdf.eval(wo, sample.wi) * (sample.wi.z / sample.pdf);
+        let expected =
+            bsdf.eval(wo, sample.wi, TransportMode::Radiance) * (sample.wi.z / sample.pdf);
 
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
         assert!(!sample.flags.contains(BsdfFlags::TRANSMISSION));
@@ -907,13 +933,17 @@ mod tests {
         let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
         let reflection_wi = Vec3::new(-0.2, 0.3, 0.9327379).normalize();
 
-        assert_eq!(bsdf.eval(wo, reflection_wi), Vec3::ZERO);
+        assert_eq!(
+            bsdf.eval(wo, reflection_wi, TransportMode::Radiance),
+            Vec3::ZERO
+        );
         assert_eq!(bsdf.pdf(wo, reflection_wi), 0.0);
 
         let sample = bsdf
-            .sample(wo, 0.0, Vec2::new(0.35, 0.72))
+            .sample(wo, 0.0, Vec2::new(0.35, 0.72), TransportMode::Radiance)
             .expect("expected a transmission-only sample");
-        let expected = bsdf.eval(wo, sample.wi) * (sample.wi.z.abs() / sample.pdf);
+        let expected =
+            bsdf.eval(wo, sample.wi, TransportMode::Radiance) * (sample.wi.z.abs() / sample.pdf);
 
         assert!(sample.flags.contains(BsdfFlags::TRANSMISSION));
         assert!(!sample.flags.contains(BsdfFlags::REFLECTION));
@@ -925,10 +955,13 @@ mod tests {
     fn sample_returns_none_for_lower_hemisphere_wo() {
         let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 0.3, 0.3, false, true);
 
-        assert!(bsdf.sample(-Vec3::Z, 0.5, Vec2::splat(0.5)).is_none());
+        assert!(
+            bsdf.sample(-Vec3::Z, 0.5, Vec2::splat(0.5), TransportMode::Radiance)
+                .is_none()
+        );
         assert!(
             DielectricGgxBsdf::new(Vec3::ONE, 0.0, 0.3, 0.3, false, true)
-                .sample(Vec3::Z, 0.5, Vec2::splat(0.5))
+                .sample(Vec3::Z, 0.5, Vec2::splat(0.5), TransportMode::Radiance)
                 .is_none()
         );
     }
@@ -938,7 +971,10 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 0.3, 0.3, false, true);
         // wi == wo.z small positive but non-physical reflection pair; eval uses
         // generalized half vector logic and should not produce energy.
-        assert_eq!(bsdf.eval(Vec3::Z, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(
+            bsdf.eval(Vec3::Z, Vec3::ZERO, TransportMode::Radiance),
+            Vec3::ZERO
+        );
     }
 
     fn van_der_corput(n: u32, base: u32) -> f32 {
@@ -964,7 +1000,7 @@ mod tests {
         for index in 0..n {
             let uc = van_der_corput(index + 1, 5);
             let us = halton2(index);
-            let Some(sample) = bsdf.sample(wo, uc, us) else {
+            let Some(sample) = bsdf.sample(wo, uc, us, TransportMode::Radiance) else {
                 continue;
             };
             if !sample.weight.x.is_finite() {
@@ -1028,7 +1064,7 @@ mod tests {
         let bsdf = DielectricGgxBsdf::new(Vec3::ONE, 1.5, 0.3, 0.3, false, true);
         let wo = Vec3::new(0.2, -0.3, 0.9327379).normalize();
         let wi = Vec3::new(-0.2, 0.3, 0.9327379).normalize();
-        let f = bsdf.eval(wo, wi);
+        let f = bsdf.eval(wo, wi, TransportMode::Radiance);
         let pdf = bsdf.pdf(wo, wi);
         assert!(f.is_finite());
         assert!(pdf.is_finite());
@@ -1057,8 +1093,8 @@ mod tests {
                 for c in 0..3 {
                     let uc = (c as f32 + 0.5) / 3.0;
                     let us = Vec2::new((x as f32 + 0.5) / 3.0, (y as f32 + 0.5) / 3.0);
-                    if let Some(sample) = bsdf.sample(wo, uc, us) {
-                        let f = bsdf.eval(wo, sample.wi);
+                    if let Some(sample) = bsdf.sample(wo, uc, us, TransportMode::Radiance) {
+                        let f = bsdf.eval(wo, sample.wi, TransportMode::Radiance);
                         let expected = f * (sample.wi.z.abs() / sample.pdf);
                         assert!(
                             sample.weight.abs_diff_eq(expected, 8.0e-3),

@@ -3,13 +3,13 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    bsdf::EonBsdf,
+    bsdf::{EonBsdf, TransportMode},
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace,
+    TextureColorSpace, modified_bsdf_eval, modified_bsdf_sample_weight,
     normal_map::load_optional_normal_map,
     texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
@@ -131,6 +131,7 @@ impl EonMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
@@ -145,9 +146,16 @@ impl EonMaterial {
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
         let sample = MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread: DIFFUSE_CONE_SPREAD,
@@ -161,7 +169,13 @@ impl EonMaterial {
         Some(sample)
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -175,7 +189,7 @@ impl EonMaterial {
             self.rho_at(shading_vertex),
             self.roughness_at(shading_vertex),
         );
-        bsdf.eval(wo_local, wi_local)
+        modified_bsdf_eval(shading_vertex, wi, bsdf.eval(wo_local, wi_local), mode)
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -274,6 +288,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
+        bsdf::TransportMode,
         material::{EonMaterial, ShadingVertex, Texture},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
@@ -317,7 +332,12 @@ mod tests {
     fn lambert_reduction_at_zero_roughness_through_material() {
         let material = EonMaterial::new(Vec3::ONE, 0.0);
         let vtx = test_shading_vertex(Vec2::ZERO);
-        let f = material.eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default());
+        let f = material.eval(
+            &vtx,
+            Vec3::Z,
+            &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
+        );
         assert!(f.abs_diff_eq(Vec3::ONE / PI, 1.0e-5));
     }
 
@@ -340,7 +360,12 @@ mod tests {
         let vtx = test_shading_vertex(Vec2::ZERO);
         let bsdf = crate::bsdf::EonBsdf::new(Vec3::new(0.2, 0.4, 0.6), 0.5);
         let expected = bsdf.eval(Vec3::Z, Vec3::Z);
-        let f = material.eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default());
+        let f = material.eval(
+            &vtx,
+            Vec3::Z,
+            &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
+        );
         assert!(f.abs_diff_eq(expected, 1.0e-5));
     }
 
@@ -358,7 +383,8 @@ mod tests {
                     .sample(
                         &vtx,
                         &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
-                        &mut crate::sampler::AuxRng::default()
+                        &mut crate::sampler::AuxRng::default(),
+                        TransportMode::Radiance,
                     )
                     .is_none()
             );

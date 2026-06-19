@@ -3,13 +3,14 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    bsdf::{BsdfFlags, GlassBsdf},
+    bsdf::{BsdfFlags, GlassBsdf, TransportMode},
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace, normal_map::load_optional_normal_map, texture::load_optional_color_texture,
+    TextureColorSpace, modified_bsdf_sample_weight, normal_map::load_optional_normal_map,
+    texture::load_optional_color_texture,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,9 +123,10 @@ impl GlassMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let uc = randoms.u_lobe;
-        let sample = self.sample_impl(shading_vertex, uc)?;
+        let sample = self.sample_impl(shading_vertex, uc, mode)?;
 
         let wi_side = sample.wi.dot(shading_vertex.ng);
         if sample.flags.contains(BsdfFlags::REFLECTION) && wi_side <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -139,7 +141,12 @@ impl GlassMaterial {
         Some(sample)
     }
 
-    fn sample_impl(&self, shading_vertex: &ShadingVertex, uc: f32) -> Option<MaterialSample> {
+    fn sample_impl(
+        &self,
+        shading_vertex: &ShadingVertex,
+        uc: f32,
+        mode: TransportMode,
+    ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
@@ -150,13 +157,20 @@ impl GlassMaterial {
             self.thin,
             shading_vertex.front_face,
         );
-        let sample = bsdf.sample(wo_local, uc)?;
+        let sample = bsdf.sample(wo_local, uc, mode)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
 
         Some(MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread: 0.0,
@@ -164,7 +178,13 @@ impl GlassMaterial {
         })
     }
 
-    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        _shading_vertex: &ShadingVertex,
+        _wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        _mode: TransportMode,
+    ) -> Vec3 {
         Vec3::ZERO
     }
 
@@ -207,6 +227,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
+        bsdf::TransportMode,
         material::{GlassMaterial, ShadingVertex, Texture},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
@@ -264,7 +285,7 @@ mod tests {
         };
         let vtx = test_shading_vertex(Vec2::ZERO);
         let sample = material
-            .sample_impl(&vtx, 1.0)
+            .sample_impl(&vtx, 1.0, TransportMode::Radiance)
             .expect("expected a transmission sample");
         let radiance_scale = 1.0 / (1.0 / material.eta).powi(2);
 

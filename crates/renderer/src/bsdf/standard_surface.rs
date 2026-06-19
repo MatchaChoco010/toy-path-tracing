@@ -17,7 +17,10 @@ use super::smith_ggx::{
     sample_wm_bounded_vndf, sample_wm_vndf,
 };
 use super::thin_film::{eval_thin_film_conductor, eval_thin_film_dielectric};
-use super::{BsdfFlags, BsdfSample, DielectricGgxDirectionalAlbedoLut, SheenDirectionalAlbedoLut};
+use super::{
+    BsdfFlags, BsdfSample, DielectricGgxDirectionalAlbedoLut, SheenDirectionalAlbedoLut,
+    TransportMode,
+};
 
 #[derive(Debug, Clone)]
 pub struct StandardSurfaceBsdfParams {
@@ -113,11 +116,16 @@ impl StandardSurfaceBsdf {
         }
     }
 
-    pub fn eval(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    pub fn eval(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         if !is_upper_hemisphere(wo) {
             return Vec3::ZERO;
         }
-        let weights = self.layer_weights(wo);
+        let layer_wo = if mode == TransportMode::Importance {
+            wi
+        } else {
+            wo
+        };
+        let weights = self.layer_weights(layer_wo);
         let mut total = Vec3::ZERO;
 
         if weights.coat_amp > 0.0 && !self.coat_is_smooth() {
@@ -134,7 +142,7 @@ impl StandardSurfaceBsdf {
             && !self.p.thin_walled
             && !self.spec_btdf_is_smooth()
         {
-            total += weights.spec_btdf * self.eval_spec_btdf(wo, wi);
+            total += weights.spec_btdf * self.eval_spec_btdf(wo, wi, mode);
         }
         if weights.sheen.length_squared() > 0.0 {
             total += weights.sheen * self.eval_sheen(wo, wi);
@@ -182,7 +190,12 @@ impl StandardSurfaceBsdf {
         pdf
     }
 
-    pub fn sample(&self, wo: Vec3, randoms: &MaterialSampleRandoms) -> Option<BsdfSample> {
+    pub fn sample(
+        &self,
+        wo: Vec3,
+        randoms: &MaterialSampleRandoms,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if !is_upper_hemisphere(wo) {
             return None;
         }
@@ -198,13 +211,13 @@ impl StandardSurfaceBsdf {
 
         let us = randoms.u_dir;
         match chosen {
-            ChosenLobe::Coat => self.sample_coat(wo, us, p_lobe),
-            ChosenLobe::Metal => self.sample_metal(wo, us, p_lobe),
-            ChosenLobe::SpecBrdf => self.sample_spec_brdf(wo, us, p_lobe),
-            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, randoms.u_extra0),
-            ChosenLobe::Sheen => self.sample_sheen(wo, us),
-            ChosenLobe::DiffBrdf => self.sample_diff_brdf(wo, us),
-            ChosenLobe::DiffBtdf => self.sample_diff_btdf(wo, us),
+            ChosenLobe::Coat => self.sample_coat(wo, us, p_lobe, mode),
+            ChosenLobe::Metal => self.sample_metal(wo, us, p_lobe, mode),
+            ChosenLobe::SpecBrdf => self.sample_spec_brdf(wo, us, p_lobe, mode),
+            ChosenLobe::SpecBtdf => self.sample_spec_btdf(wo, us, p_lobe, randoms.u_extra0, mode),
+            ChosenLobe::Sheen => self.sample_sheen(wo, us, mode),
+            ChosenLobe::DiffBrdf => self.sample_diff_brdf(wo, us, mode),
+            ChosenLobe::DiffBtdf => self.sample_diff_btdf(wo, us, mode),
         }
     }
 
@@ -465,7 +478,7 @@ impl StandardSurfaceBsdf {
         pdf_wm / denom
     }
 
-    fn eval_spec_btdf(&self, wo: Vec3, wi: Vec3) -> Vec3 {
+    fn eval_spec_btdf(&self, wo: Vec3, wi: Vec3, mode: TransportMode) -> Vec3 {
         if self.p.thin_walled {
             return Vec3::ZERO;
         }
@@ -501,7 +514,7 @@ impl StandardSurfaceBsdf {
             return Vec3::ZERO;
         }
         let f_rgb = self.spec_btdf_fresnel(cos_wo_wm);
-        let radiance_scale = 1.0 / (eta_rel * eta_rel);
+        let radiance_scale = mode.transmission_scale(eta_rel);
         let one_minus_f = (Vec3::ONE - f_rgb).max(Vec3::ZERO);
         let scalar = d * g * (cos_wi_wm * cos_wo_wm).abs();
         let denom = den * den * wo.z.abs() * wi.z.abs();
@@ -636,7 +649,13 @@ impl StandardSurfaceBsdf {
         OrenNayarBsdf::new(Vec3::ONE, self.p.diffuse_roughness).pdf(wo, wi_flipped)
     }
 
-    fn sample_coat(&self, wo: Vec3, us: Vec2, p_lobe: f32) -> Option<BsdfSample> {
+    fn sample_coat(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         let (wo_c, _) = self.to_coat(wo, Vec3::Z);
         if wo_c.z <= 0.0 {
             return None;
@@ -650,6 +669,7 @@ impl StandardSurfaceBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -661,10 +681,16 @@ impl StandardSurfaceBsdf {
             return None;
         }
         let wi = self.coat_to_base(wi_c);
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
-    fn sample_metal(&self, wo: Vec3, us: Vec2, p_lobe: f32) -> Option<BsdfSample> {
+    fn sample_metal(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if self.metal_is_smooth() {
             let wi = Vec3::new(-wo.x, -wo.y, wo.z);
             let f = self.metal_fresnel(wi.z.abs());
@@ -674,6 +700,7 @@ impl StandardSurfaceBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -684,10 +711,16 @@ impl StandardSurfaceBsdf {
         if wi.z <= 0.0 {
             return None;
         }
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
-    fn sample_spec_brdf(&self, wo: Vec3, us: Vec2, p_lobe: f32) -> Option<BsdfSample> {
+    fn sample_spec_brdf(
+        &self,
+        wo: Vec3,
+        us: Vec2,
+        p_lobe: f32,
+        mode: TransportMode,
+    ) -> Option<BsdfSample> {
         if self.spec_brdf_is_smooth() {
             let wi = Vec3::new(-wo.x, -wo.y, wo.z);
             let f = self.spec_brdf_fresnel(wi.z.abs());
@@ -697,6 +730,7 @@ impl StandardSurfaceBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -707,7 +741,7 @@ impl StandardSurfaceBsdf {
         if wi.z <= 0.0 {
             return None;
         }
-        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0)
+        self.finalize_rough_sample(wo, wi, BsdfFlags::GLOSSY | BsdfFlags::REFLECTION, 1.0, mode)
     }
 
     fn sample_spec_btdf(
@@ -716,6 +750,7 @@ impl StandardSurfaceBsdf {
         us: Vec2,
         p_lobe: f32,
         u_lambda: f32,
+        mode: TransportMode,
     ) -> Option<BsdfSample> {
         let weights = self.layer_weights(wo);
         let base_weight = weights.spec_btdf;
@@ -727,6 +762,7 @@ impl StandardSurfaceBsdf {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
                 eta: 1.0,
                 wavelength_lock: None,
@@ -769,12 +805,13 @@ impl StandardSurfaceBsdf {
         if self.spec_btdf_is_smooth() {
             let wi = refract(wo, eta_rel)?;
             let f = fresnel_dielectric(wo.z.abs(), eta_i, eta_t);
-            let scale = 1.0 / (eta_rel * eta_rel);
+            let scale = mode.transmission_scale(eta_rel);
             let weight = (base_weight * dispersion_basis * (1.0 - f) * scale) / p_lobe;
             return Some(BsdfSample {
                 weight,
                 wi,
                 pdf: p_lobe,
+                pdf_rev: 0.0,
                 flags: BsdfFlags::DELTA | BsdfFlags::TRANSMISSION,
                 eta: eta_rel,
                 wavelength_lock: fresh_lock,
@@ -811,7 +848,7 @@ impl StandardSurfaceBsdf {
             self.p.transmission_alpha_y,
         );
         let f = fresnel_dielectric(cos_wo_wm, eta_i, eta_t);
-        let scale = 1.0 / (eta_rel * eta_rel);
+        let scale = mode.transmission_scale(eta_rel);
         let lobe_weight = base_weight * dispersion_basis * (scale * (1.0 - f) * g2 / g1);
 
         let pdf_wm = pdf_wm_vndf(
@@ -841,32 +878,39 @@ impl StandardSurfaceBsdf {
             weight: lobe_weight / p_lobe,
             wi,
             pdf: pdf_total,
+            pdf_rev: self.pdf(wi, wo),
             flags: BsdfFlags::GLOSSY | BsdfFlags::TRANSMISSION,
             eta: eta_rel,
             wavelength_lock: fresh_lock,
         })
     }
 
-    fn sample_sheen(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_sheen(&self, wo: Vec3, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         let bsdf = SheenBsdf::new(Vec3::ONE, self.p.sheen_roughness);
         let s = bsdf.sample(wo, us)?;
-        self.finalize_rough_sample(wo, s.wi, s.flags, s.eta)
+        self.finalize_rough_sample(wo, s.wi, s.flags, s.eta, mode)
     }
 
-    fn sample_diff_brdf(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_diff_brdf(&self, wo: Vec3, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         let bsdf = OrenNayarBsdf::new(Vec3::ONE, self.p.diffuse_roughness);
         let s = bsdf.sample(wo, us)?;
-        self.finalize_rough_sample(wo, s.wi, s.flags, s.eta)
+        self.finalize_rough_sample(wo, s.wi, s.flags, s.eta, mode)
     }
 
-    fn sample_diff_btdf(&self, wo: Vec3, us: Vec2) -> Option<BsdfSample> {
+    fn sample_diff_btdf(&self, wo: Vec3, us: Vec2, mode: TransportMode) -> Option<BsdfSample> {
         if !self.p.thin_walled {
             return None;
         }
         let bsdf = OrenNayarBsdf::new(Vec3::ONE, self.p.diffuse_roughness);
         let s = bsdf.sample(wo, us)?;
         let wi = Vec3::new(s.wi.x, s.wi.y, -s.wi.z);
-        self.finalize_rough_sample(wo, wi, BsdfFlags::DIFFUSE | BsdfFlags::TRANSMISSION, 1.0)
+        self.finalize_rough_sample(
+            wo,
+            wi,
+            BsdfFlags::DIFFUSE | BsdfFlags::TRANSMISSION,
+            1.0,
+            mode,
+        )
     }
 
     fn finalize_rough_sample(
@@ -875,12 +919,13 @@ impl StandardSurfaceBsdf {
         wi: Vec3,
         flags: BsdfFlags,
         eta: f32,
+        mode: TransportMode,
     ) -> Option<BsdfSample> {
         let pdf = self.pdf(wo, wi);
         if pdf <= 0.0 {
             return None;
         }
-        let f = self.eval(wo, wi);
+        let f = self.eval(wo, wi, mode);
         if f.length_squared() == 0.0 {
             return None;
         }
@@ -892,6 +937,7 @@ impl StandardSurfaceBsdf {
             weight: f * (cos / pdf),
             wi,
             pdf,
+            pdf_rev: self.pdf(wi, wo),
             flags,
             wavelength_lock: None,
             eta,
@@ -964,7 +1010,7 @@ mod tests {
     use glam::Vec3;
 
     use crate::bsdf::{
-        BsdfFlags, DielectricGgxDirectionalAlbedoLut, SheenDirectionalAlbedoLut,
+        BsdfFlags, DielectricGgxDirectionalAlbedoLut, SheenDirectionalAlbedoLut, TransportMode,
         artist_friendly_complex_ior,
     };
 
@@ -1023,7 +1069,11 @@ mod tests {
     #[test]
     fn default_diffuse_dominant_evaluates_finite() {
         let bsdf = test_bsdf(default_params());
-        let f = bsdf.eval(Vec3::Z, Vec3::new(0.2, 0.3, 0.9327379).normalize());
+        let f = bsdf.eval(
+            Vec3::Z,
+            Vec3::new(0.2, 0.3, 0.9327379).normalize(),
+            TransportMode::Radiance,
+        );
         assert!(f.is_finite());
     }
 
@@ -1037,7 +1087,11 @@ mod tests {
         let mut rng = crate::sampler::AuxRng::from_seed(0);
         let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
         let sample = bsdf
-            .sample(Vec3::new(0.2, -0.1, 0.9746794).normalize(), &randoms)
+            .sample(
+                Vec3::new(0.2, -0.1, 0.9746794).normalize(),
+                &randoms,
+                TransportMode::Radiance,
+            )
             .unwrap();
         assert!(sample.flags.contains(BsdfFlags::REFLECTION));
     }
@@ -1055,7 +1109,7 @@ mod tests {
         let mut got = false;
         for _ in 0..32 {
             let randoms = crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng);
-            if let Some(sample) = bsdf.sample(wo, &randoms)
+            if let Some(sample) = bsdf.sample(wo, &randoms, TransportMode::Radiance)
                 && sample.flags.contains(BsdfFlags::TRANSMISSION)
             {
                 assert!(sample.wi.abs_diff_eq(-wo, 1.0e-5));

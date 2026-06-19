@@ -51,6 +51,7 @@ impl EonBsdf {
             weight,
             wi,
             pdf,
+            pdf_rev: self.pdf(wi, wo),
             flags: BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION,
             eta: 1.0,
             wavelength_lock: None,

@@ -31,6 +31,7 @@ impl MirrorBsdf {
             weight: self.color,
             wi,
             pdf: 1.0,
+            pdf_rev: 0.0,
             flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
             eta: 1.0,
             wavelength_lock: None,

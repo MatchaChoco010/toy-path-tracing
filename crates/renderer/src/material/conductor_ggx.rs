@@ -3,13 +3,13 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 
 use crate::{
-    bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut},
+    bsdf::{BsdfFlags, ConductorGgxBsdf, ConductorGgxEnergyCompensationLut, TransportMode},
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace,
+    TextureColorSpace, modified_bsdf_eval, modified_bsdf_sample_weight,
     normal_map::load_optional_normal_map,
     texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
@@ -153,9 +153,10 @@ impl ConductorGgxMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let us = randoms.u_dir;
-        let sample = self.sample_impl(shading_vertex, us)?;
+        let sample = self.sample_impl(shading_vertex, us, mode)?;
 
         if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
             return None;
@@ -164,7 +165,12 @@ impl ConductorGgxMaterial {
         Some(sample)
     }
 
-    fn sample_impl(&self, shading_vertex: &ShadingVertex, us: Vec2) -> Option<MaterialSample> {
+    fn sample_impl(
+        &self,
+        shading_vertex: &ShadingVertex,
+        us: Vec2,
+        mode: TransportMode,
+    ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
         }
@@ -185,9 +191,16 @@ impl ConductorGgxMaterial {
         };
 
         Some(MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread,
@@ -195,7 +208,13 @@ impl ConductorGgxMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -207,7 +226,7 @@ impl ConductorGgxMaterial {
         let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
         let bsdf = self.make_bsdf(self.base_color_at(shading_vertex), alpha_x, alpha_y);
-        bsdf.eval(wo_local, wi_local)
+        modified_bsdf_eval(shading_vertex, wi, bsdf.eval(wo_local, wi_local), mode)
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -378,7 +397,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
-        bsdf::BsdfFlags,
+        bsdf::{BsdfFlags, TransportMode},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
     };
@@ -428,7 +447,12 @@ mod tests {
 
         assert!(
             material
-                .eval(&vtx, wi, &mut crate::sampler::AuxRng::default())
+                .eval(
+                    &vtx,
+                    wi,
+                    &mut crate::sampler::AuxRng::default(),
+                    TransportMode::Radiance
+                )
                 .max_element()
                 .is_finite()
         );
@@ -457,6 +481,7 @@ mod tests {
                 &vtx,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a reflection sample");
 
@@ -479,7 +504,8 @@ mod tests {
                 .sample(
                     &vtx,
                     &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
-                    &mut crate::sampler::AuxRng::default()
+                    &mut crate::sampler::AuxRng::default(),
+                    TransportMode::Radiance,
                 )
                 .is_none()
         );

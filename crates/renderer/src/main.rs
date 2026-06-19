@@ -244,6 +244,14 @@ mod tests {
     }
 
     #[test]
+    fn integrator_accepts_bdpt_from_cli() {
+        let args = Args::try_parse_from(["toy-path-tracing", "-i", "bdpt"])
+            .expect("expected valid bdpt integrator");
+
+        assert_eq!(args.integrator, IntegratorKind::Bdpt);
+    }
+
+    #[test]
     fn log_filter_is_optional() {
         let args = Args::try_parse_from(["toy-path-tracing"]).expect("expected valid defaults");
 

@@ -9,6 +9,7 @@ use rayon::prelude::*;
 
 use crate::math::fresnel_dielectric;
 
+use super::TransportMode;
 use super::dielectric_ggx::{DielectricGgxAllowedPaths, DielectricGgxBsdf};
 use super::mtlx::{DielectricBsdf as MtlxDielectricBsdf, ScatterMode as MtlxScatterMode};
 use super::sheen::sheen_directional_albedo_estimate;
@@ -315,7 +316,9 @@ fn estimate_dielectric_ggx_directional_albedo(
     );
     let sum = hemisphere_samples
         .iter()
-        .map(|&wi| bsdf.eval(wo, wi).x * wi.z.max(0.0) / UNIFORM_HEMISPHERE_PDF)
+        .map(|&wi| {
+            bsdf.eval(wo, wi, TransportMode::Radiance).x * wi.z.max(0.0) / UNIFORM_HEMISPHERE_PDF
+        })
         .sum::<f32>();
 
     (sum / DIRECTIONAL_ALBEDO_SAMPLE_COUNT as f32).clamp(0.0, 1.0)
@@ -1004,7 +1007,7 @@ fn estimate_dielectric_ggx_directional_albedo_full_sphere(
         let u = radical_inverse_vdc(index as u32 + 1);
         let v = radical_inverse_base3(index as u32 + 1);
         let us = Vec2::new(u, v);
-        let Some(sample) = bsdf.sample(wo, uc, us) else {
+        let Some(sample) = bsdf.sample(wo, uc, us, TransportMode::Radiance) else {
             continue;
         };
         if !sample.weight.x.is_finite() {

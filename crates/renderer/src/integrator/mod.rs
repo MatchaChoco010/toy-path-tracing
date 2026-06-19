@@ -10,6 +10,7 @@ use crate::{
     scene::{Scene, TriangleRef},
 };
 
+pub mod bdpt;
 pub mod mis;
 pub mod nee;
 pub mod pt;
@@ -19,6 +20,7 @@ pub enum IntegratorKind {
     Mis,
     Pt,
     Nee,
+    Bdpt,
 }
 
 impl IntegratorKind {
@@ -35,6 +37,9 @@ impl IntegratorKind {
             Self::Mis => mis::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch),
             Self::Pt => pt::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch),
             Self::Nee => nee::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch),
+            Self::Bdpt => {
+                bdpt::trace_radiance(scene, initial_ray, sampler, max_depth, mtlx_scratch)
+            }
         };
         mtlx_scratch.restore(cp);
         radiance
@@ -601,6 +606,7 @@ mod tests {
             weight: Vec3::ONE,
             wi: Vec3::Z,
             pdf: 1.0,
+            pdf_rev: 1.0,
             flags: BsdfFlags::DELTA | BsdfFlags::REFLECTION,
             eta: 1.0,
             cone_spread: 0.0,
@@ -642,6 +648,7 @@ mod tests {
             weight: Vec3::ONE,
             wi: Vec3::Z,
             pdf: 1.0,
+            pdf_rev: 1.0,
             flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
             eta: 1.0,
             cone_spread: 0.2,

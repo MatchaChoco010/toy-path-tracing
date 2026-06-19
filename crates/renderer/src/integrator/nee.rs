@@ -1,7 +1,7 @@
 use glam::{Vec2, Vec3};
 
 use crate::{
-    bsdf::BsdfFlags,
+    bsdf::{BsdfFlags, TransportMode},
     light::{LightSampleContext, infinite_light_le, sample_light},
     light_tree,
     material::{Material, MtlxScratch, ShadingVertex},
@@ -66,8 +66,13 @@ pub fn trace_radiance(
                 );
         }
 
-        let Some(sample) = material.sample(&vtx, mtlx_scratch, &randoms.material, &mut aux_rng)
-        else {
+        let Some(sample) = material.sample(
+            &vtx,
+            mtlx_scratch,
+            &randoms.material,
+            &mut aux_rng,
+            TransportMode::Radiance,
+        ) else {
             break;
         };
         let is_delta_sample = sample.flags.contains(BsdfFlags::DELTA);
@@ -128,12 +133,12 @@ pub(super) fn direct_light_nee_contribution(
         return Vec3::ZERO;
     }
 
-    let f = material.eval(vtx, mtlx_scratch, li.wi, aux_rng);
+    let f = material.eval(vtx, mtlx_scratch, li.wi, aux_rng, TransportMode::Radiance);
     if f.length_squared() == 0.0 {
         return Vec3::ZERO;
     }
 
-    let cos_surface = vtx.ns.dot(li.wi).abs();
+    let cos_surface = vtx.ng.dot(li.wi).abs();
     if cos_surface <= 0.0 {
         return Vec3::ZERO;
     }

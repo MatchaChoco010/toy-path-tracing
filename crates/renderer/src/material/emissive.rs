@@ -3,6 +3,7 @@ use std::sync::Arc;
 use glam::Vec3;
 
 use super::{MaterialSample, ScalarTexture, ShadingVertex, Texture};
+use crate::bsdf::TransportMode;
 use crate::sampler::{AuxRng, MaterialSampleRandoms};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,11 +46,18 @@ impl EmissiveMaterial {
         _shading_vertex: &ShadingVertex,
         _randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        _mode: TransportMode,
     ) -> Option<MaterialSample> {
         None
     }
 
-    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        _shading_vertex: &ShadingVertex,
+        _wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        _mode: TransportMode,
+    ) -> Vec3 {
         Vec3::ZERO
     }
 
