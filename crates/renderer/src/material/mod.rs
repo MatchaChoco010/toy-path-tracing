@@ -20,7 +20,7 @@ pub mod texture;
 use glam::{Vec2, Vec3};
 
 use crate::{
-    bsdf::BsdfFlags,
+    bsdf::{BsdfFlags, TransportMode},
     color::{self, OcioColorProcessor},
     light_tree::LightTreePrecompute,
     math::{OrthonormalBasis, sg::SgLobe},
@@ -29,6 +29,54 @@ use crate::{
 };
 
 pub(super) const GEOMETRIC_NORMAL_COS_EPSILON: f32 = 1.0e-6;
+
+pub(super) fn modified_bsdf_eval(
+    shading_vertex: &ShadingVertex,
+    wi: Vec3,
+    f: Vec3,
+    mode: TransportMode,
+) -> Vec3 {
+    if f.length_squared() == 0.0 {
+        return Vec3::ZERO;
+    }
+
+    let correction_direction = match mode {
+        TransportMode::Radiance => wi,
+        TransportMode::Importance => shading_vertex.wo,
+    };
+    let cos_geom = correction_direction.dot(shading_vertex.ng).abs();
+    if cos_geom <= GEOMETRIC_NORMAL_COS_EPSILON {
+        return Vec3::ZERO;
+    }
+
+    f * (correction_direction.dot(shading_vertex.ns).abs() / cos_geom)
+}
+
+pub(super) fn modified_bsdf_sample_weight(
+    shading_vertex: &ShadingVertex,
+    wi: Vec3,
+    weight: Vec3,
+    flags: BsdfFlags,
+    mode: TransportMode,
+) -> Vec3 {
+    if mode == TransportMode::Radiance
+        || flags.contains(BsdfFlags::DELTA)
+        || weight.length_squared() == 0.0
+    {
+        return weight;
+    }
+
+    let cos_wo_geom = shading_vertex.wo.dot(shading_vertex.ng).abs();
+    let cos_wo_shading = shading_vertex.wo.dot(shading_vertex.ns).abs();
+    let cos_wi_geom = wi.dot(shading_vertex.ng).abs();
+    let cos_wi_shading = wi.dot(shading_vertex.ns).abs();
+    if cos_wo_geom <= GEOMETRIC_NORMAL_COS_EPSILON || cos_wi_shading <= GEOMETRIC_NORMAL_COS_EPSILON
+    {
+        return Vec3::ZERO;
+    }
+
+    weight * (cos_wo_shading / cos_wo_geom) * (cos_wi_geom / cos_wi_shading)
+}
 
 pub use conductor_ggx::ConductorGgxMaterial;
 pub use conductor_ggx_cui_2023::ConductorGgxCui2023Material;
@@ -104,6 +152,7 @@ pub struct MaterialSample {
     pub weight: Vec3,
     pub wi: Vec3,
     pub pdf: f32,
+    pub pdf_rev: f32,
     pub flags: BsdfFlags,
     pub eta: f32,
     pub cone_spread: f32,
@@ -205,24 +254,33 @@ impl Material {
         scratch: &MtlxScratch,
         randoms: &MaterialSampleRandoms,
         aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         match self {
-            Self::NormalizedLambert(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::OrenNayar(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::Eon(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::Mirror(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::ConductorGgx(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::ConductorGgxCui2023(material) => {
-                material.sample(shading_vertex, randoms, aux_rng)
+            Self::NormalizedLambert(material) => {
+                material.sample(shading_vertex, randoms, aux_rng, mode)
             }
-            Self::DielectricGgx(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::Glass(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::SimplePBR(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::DisneyBrdf(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::StandardSurface(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::OpenPbr(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::Emissive(material) => material.sample(shading_vertex, randoms, aux_rng),
-            Self::Mtlx(material) => material.sample(shading_vertex, scratch, randoms, aux_rng),
+            Self::OrenNayar(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::Eon(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::Mirror(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::ConductorGgx(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::ConductorGgxCui2023(material) => {
+                material.sample(shading_vertex, randoms, aux_rng, mode)
+            }
+            Self::DielectricGgx(material) => {
+                material.sample(shading_vertex, randoms, aux_rng, mode)
+            }
+            Self::Glass(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::SimplePBR(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::DisneyBrdf(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::StandardSurface(material) => {
+                material.sample(shading_vertex, randoms, aux_rng, mode)
+            }
+            Self::OpenPbr(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::Emissive(material) => material.sample(shading_vertex, randoms, aux_rng, mode),
+            Self::Mtlx(material) => {
+                material.sample(shading_vertex, scratch, randoms, aux_rng, mode)
+            }
         }
     }
 
@@ -251,22 +309,23 @@ impl Material {
         scratch: &MtlxScratch,
         wi: Vec3,
         aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Vec3 {
         match self {
-            Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::OrenNayar(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::Eon(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::Mirror(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::ConductorGgx(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::ConductorGgxCui2023(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::DielectricGgx(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::Glass(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::SimplePBR(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::StandardSurface(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::OpenPbr(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::Emissive(material) => material.eval(shading_vertex, wi, aux_rng),
-            Self::Mtlx(material) => material.eval(shading_vertex, scratch, wi, aux_rng),
+            Self::NormalizedLambert(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::OrenNayar(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::Eon(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::Mirror(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::ConductorGgx(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::ConductorGgxCui2023(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::DielectricGgx(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::Glass(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::SimplePBR(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::DisneyBrdf(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::StandardSurface(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::OpenPbr(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::Emissive(material) => material.eval(shading_vertex, wi, aux_rng, mode),
+            Self::Mtlx(material) => material.eval(shading_vertex, scratch, wi, aux_rng, mode),
         }
     }
 
@@ -295,11 +354,12 @@ impl Material {
         scratch: &MtlxScratch,
         wi: Vec3,
         aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> (Vec3, f32) {
         match self {
-            Self::Mtlx(material) => material.eval_pdf(shading_vertex, scratch, wi),
+            Self::Mtlx(material) => material.eval_pdf(shading_vertex, scratch, wi, mode),
             _ => {
-                let f = self.eval(shading_vertex, scratch, wi, aux_rng);
+                let f = self.eval(shading_vertex, scratch, wi, aux_rng, mode);
                 if f.length_squared() == 0.0 {
                     (f, 0.0)
                 } else {
@@ -449,7 +509,7 @@ mod tests {
     use glam::Vec3;
 
     use crate::{
-        bsdf::BsdfFlags,
+        bsdf::{BsdfFlags, TransportMode},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
     };
@@ -505,10 +565,17 @@ mod tests {
                 Material::ConductorGgx(ConductorGgxMaterial::new(Vec3::ONE, 0.5, 0.0)),
                 "conductor_ggx",
             ),
-            (Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false)), "glass"),
+            (
+                Material::Glass(GlassMaterial::new(1.5, Vec3::ONE, false)),
+                "glass",
+            ),
             (
                 Material::DielectricGgx(DielectricGgxMaterial::new(
-                    Vec3::ONE, 1.5, 0.3, 0.0, false,
+                    Vec3::ONE,
+                    1.5,
+                    0.3,
+                    0.0,
+                    false,
                 )),
                 "dielectric_ggx",
             ),
@@ -516,7 +583,11 @@ mod tests {
 
         for (material, name) in cases {
             assert!(!material.may_emit(), "{name} should not emit");
-            assert_eq!(material.max_emission(), 0.0, "{name} max_emission should be zero");
+            assert_eq!(
+                material.max_emission(),
+                0.0,
+                "{name} max_emission should be zero"
+            );
         }
     }
 
@@ -538,7 +609,8 @@ mod tests {
                 &shading_vertex,
                 &scratch,
                 Vec3::Z,
-                &mut crate::sampler::AuxRng::default()
+                &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             ),
             Vec3::ZERO
         );
@@ -554,6 +626,7 @@ mod tests {
             &scratch,
             Vec3::Z,
             &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
         );
 
         assert!(f.abs_diff_eq(Vec3::ONE / std::f32::consts::PI, 1.0e-3));
@@ -584,6 +657,7 @@ mod tests {
                 &scratch,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a valid sample");
 
@@ -604,6 +678,7 @@ mod tests {
                 &scratch,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a valid sample");
 
@@ -631,6 +706,7 @@ mod tests {
                 &scratch,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a valid sample");
 
@@ -650,7 +726,8 @@ mod tests {
                 &shading_vertex,
                 &scratch,
                 Vec3::Z,
-                &mut crate::sampler::AuxRng::default()
+                &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             ),
             Vec3::ZERO
         );
@@ -672,6 +749,7 @@ mod tests {
                     &scratch,
                     &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                     &mut crate::sampler::AuxRng::default(),
+                    TransportMode::Radiance,
                 )?;
                 s.flags.contains(BsdfFlags::TRANSMISSION).then_some(s)
             })
@@ -692,7 +770,8 @@ mod tests {
                 &shading_vertex,
                 &scratch,
                 Vec3::Z,
-                &mut crate::sampler::AuxRng::default()
+                &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             ),
             Vec3::ZERO
         );

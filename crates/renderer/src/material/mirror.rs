@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    bsdf::MirrorBsdf,
+    bsdf::{MirrorBsdf, TransportMode},
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
@@ -114,6 +114,7 @@ impl MirrorMaterial {
         shading_vertex: &ShadingVertex,
         _randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        _mode: TransportMode,
     ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
@@ -127,6 +128,7 @@ impl MirrorMaterial {
             weight: sample.weight,
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread: 0.0,
@@ -140,7 +142,13 @@ impl MirrorMaterial {
         Some(sample)
     }
 
-    pub fn eval(&self, _shading_vertex: &ShadingVertex, _wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        _shading_vertex: &ShadingVertex,
+        _wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        _mode: TransportMode,
+    ) -> Vec3 {
         Vec3::ZERO
     }
 
@@ -183,6 +191,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
+        bsdf::TransportMode,
         material::{MirrorMaterial, ShadingVertex, Texture},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
@@ -243,6 +252,7 @@ mod tests {
                 &vtx,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a valid mirror sample");
 
@@ -263,7 +273,8 @@ mod tests {
                 .sample(
                     &vtx,
                     &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
-                    &mut crate::sampler::AuxRng::default()
+                    &mut crate::sampler::AuxRng::default(),
+                    TransportMode::Radiance,
                 )
                 .is_none()
         );

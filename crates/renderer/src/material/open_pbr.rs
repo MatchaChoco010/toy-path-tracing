@@ -5,7 +5,7 @@ use glam::Vec3;
 use crate::{
     bsdf::{
         BsdfFlags, ConductorGgxEnergyCompensationLut, DielectricGgxDirectionalAlbedoLut,
-        DielectricGgxEnergyCompensationLut, OpenPbrBsdf, OpenPbrBsdfParams,
+        DielectricGgxEnergyCompensationLut, OpenPbrBsdf, OpenPbrBsdfParams, TransportMode,
         artist_friendly_complex_ior,
     },
     math::{OrthonormalBasis, fresnel_dielectric, sg},
@@ -14,6 +14,7 @@ use crate::{
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
+    modified_bsdf_eval, modified_bsdf_sample_weight,
 };
 
 const MIN_ALPHA: f32 = 1.0e-4;
@@ -490,6 +491,7 @@ impl OpenPbrMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -502,7 +504,7 @@ impl OpenPbrMaterial {
             return None;
         }
         let bsdf = self.make_bsdf(shading_vertex);
-        let sample = bsdf.sample(wo_local, randoms)?;
+        let sample = bsdf.sample(wo_local, randoms, mode)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
         let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
             let fuzz_roughness = self.fuzz_roughness_at(shading_vertex);
@@ -528,9 +530,16 @@ impl OpenPbrMaterial {
             return None;
         }
         Some(MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread,
@@ -538,7 +547,13 @@ impl OpenPbrMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -550,7 +565,13 @@ impl OpenPbrMaterial {
         if wo_local.z <= 0.0 {
             return Vec3::ZERO;
         }
-        self.make_bsdf(shading_vertex).eval(wo_local, wi_local)
+        modified_bsdf_eval(
+            shading_vertex,
+            wi,
+            self.make_bsdf(shading_vertex)
+                .eval(wo_local, wi_local, mode),
+            mode,
+        )
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -895,7 +916,7 @@ mod tests {
     use crate::{
         bsdf::{
             ConductorGgxEnergyCompensationLut, DielectricGgxDirectionalAlbedoLut,
-            DielectricGgxEnergyCompensationLut,
+            DielectricGgxEnergyCompensationLut, TransportMode,
         },
         material::ShadingVertex,
         math::OrthonormalBasis,
@@ -994,6 +1015,7 @@ mod tests {
             &v,
             Vec3::new(0.2, 0.3, 0.9327379).normalize(),
             &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
         );
         assert!(f.is_finite());
     }

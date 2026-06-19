@@ -152,6 +152,7 @@ impl DisneyBrdfBsdf {
             weight: f * (cos_i / pdf),
             wi,
             pdf,
+            pdf_rev: self.pdf(wi, wo),
             flags: BsdfFlags::GLOSSY | BsdfFlags::DIFFUSE | BsdfFlags::REFLECTION,
             eta: 1.0,
             wavelength_lock: None,

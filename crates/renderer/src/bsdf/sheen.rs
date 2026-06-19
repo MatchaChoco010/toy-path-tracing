@@ -59,6 +59,7 @@ impl SheenBsdf {
             weight,
             wi,
             pdf,
+            pdf_rev: self.pdf(wi, wo),
             flags: BsdfFlags::GLOSSY | BsdfFlags::REFLECTION,
             eta: 1.0,
             wavelength_lock: None,

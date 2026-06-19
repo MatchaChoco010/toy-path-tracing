@@ -1,6 +1,7 @@
 use glam::Vec3;
 
 use crate::{
+    bsdf::TransportMode,
     light::infinite_light_le,
     material::MtlxScratch,
     math::ray::Ray,
@@ -51,6 +52,7 @@ pub fn trace_radiance(
             mtlx_scratch,
             &randoms.material,
             &mut aux_rng,
+            TransportMode::Radiance,
         ) else {
             break;
         };

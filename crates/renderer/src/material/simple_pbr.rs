@@ -5,14 +5,15 @@ use glam::{Vec2, Vec3};
 use crate::{
     bsdf::{
         BsdfFlags, ConductorGgxBsdf, DielectricGgxAllowedPaths, DielectricGgxBsdf,
-        DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, sanitize_dielectric_eta,
+        DielectricGgxDirectionalAlbedoLut, NormalizedLambertBsdf, TransportMode,
+        sanitize_dielectric_eta,
     },
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace,
+    TextureColorSpace, modified_bsdf_eval, modified_bsdf_sample_weight,
     normal_map::load_optional_normal_map,
     texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
@@ -165,6 +166,7 @@ impl SimplePbrMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let sample = self.sample_impl(
             shading_vertex,
@@ -172,6 +174,7 @@ impl SimplePbrMaterial {
             randoms.u_layer,
             randoms.u_dir,
             aux_rng,
+            mode,
         )?;
 
         if sample.wi.dot(shading_vertex.ng) <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -188,6 +191,7 @@ impl SimplePbrMaterial {
         u_layer: f32,
         us: Vec2,
         aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -221,7 +225,7 @@ impl SimplePbrMaterial {
                     DielectricGgxAllowedPaths::Reflection,
                 );
                 (
-                    bsdf.sample(wo_local, u_layer, us)?,
+                    bsdf.sample(wo_local, u_layer, us, mode)?,
                     (1.0 - params.metallic) * coating_weight,
                 )
             } else {
@@ -249,6 +253,7 @@ impl SimplePbrMaterial {
                 weight: sample.weight / selected_probability,
                 wi,
                 pdf: selected_probability * sample.pdf,
+                pdf_rev: selected_probability * sample.pdf_rev,
                 flags: sample.flags,
                 eta: sample.eta,
                 cone_spread,
@@ -261,7 +266,7 @@ impl SimplePbrMaterial {
             return None;
         }
 
-        let f = self.eval(shading_vertex, wi, aux_rng);
+        let f = self.eval_unmodified(shading_vertex, wi, aux_rng, mode);
         if f.length_squared() == 0.0 {
             return None;
         }
@@ -272,9 +277,16 @@ impl SimplePbrMaterial {
         }
 
         Some(MaterialSample {
-            weight: f * (cos_i / pdf),
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                f * (cos_i / pdf),
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf,
+            pdf_rev: self.pdf_reverse(shading_vertex, wi),
             flags: sample.flags,
             eta: sample.eta,
             cone_spread,
@@ -282,7 +294,28 @@ impl SimplePbrMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
+        modified_bsdf_eval(
+            shading_vertex,
+            wi,
+            self.eval_unmodified(shading_vertex, wi, aux_rng, mode),
+            mode,
+        )
+    }
+
+    fn eval_unmodified(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -314,8 +347,25 @@ impl SimplePbrMaterial {
 
         params.metallic * conductor.eval(wo_local, wi_local)
             + (1.0 - params.metallic)
-                * (coating_weight * coating.eval(wo_local, wi_local)
+                * (coating_weight * coating.eval(wo_local, wi_local, mode)
                     + diffuse_weight * diffuse.eval(wo_local, wi_local))
+    }
+
+    fn pdf_reverse(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
+        if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
+            return 0.0;
+        }
+
+        let wo_local = shading_vertex
+            .frame
+            .world_to_local(shading_vertex.wo)
+            .normalize_or_zero();
+        let wi_local = shading_vertex.frame.world_to_local(wi).normalize_or_zero();
+        if wo_local.z <= 0.0 || wi_local.z <= 0.0 {
+            return 0.0;
+        }
+
+        self.pdf_local(shading_vertex, wi_local, wo_local)
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -332,6 +382,10 @@ impl SimplePbrMaterial {
             return 0.0;
         }
 
+        self.pdf_local(shading_vertex, wo_local, wi_local)
+    }
+
+    fn pdf_local(&self, shading_vertex: &ShadingVertex, wo_local: Vec3, wi_local: Vec3) -> f32 {
         let params = self.params_at(shading_vertex);
         let conductor = ConductorGgxBsdf::new(params.base_color, params.alpha_x, params.alpha_y);
         let coating = DielectricGgxBsdf::new_with_allowed_paths(
@@ -570,7 +624,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
-        bsdf::{BsdfFlags, DielectricGgxDirectionalAlbedoLut},
+        bsdf::{BsdfFlags, DielectricGgxDirectionalAlbedoLut, TransportMode},
         material::ShadingVertex,
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
@@ -630,9 +684,15 @@ mod tests {
                 0.9,
                 Vec2::new(0.37, 0.82),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a diffuse layer sample");
-        let f = material.eval(&vtx, sample.wi, &mut crate::sampler::AuxRng::default());
+        let f = material.eval(
+            &vtx,
+            sample.wi,
+            &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
+        );
         let wi_local = vtx.frame.world_to_local(sample.wi).normalize_or_zero();
         let expected = f * (wi_local.z.max(0.0) / sample.pdf);
 
@@ -651,6 +711,7 @@ mod tests {
                 0.9,
                 Vec2::new(0.25, 0.75),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a metal sample");
 

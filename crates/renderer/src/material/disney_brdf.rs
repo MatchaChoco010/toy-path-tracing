@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    bsdf::{BsdfFlags, DisneyBrdfBsdf},
+    bsdf::{BsdfFlags, DisneyBrdfBsdf, TransportMode},
     light_tree::{
         DiffuseLobePrecompute, LightTreePrecompute, diffuse_importance, glossy_importance,
         make_glossy_lobe, merge_glossy_roughness,
@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace,
+    TextureColorSpace, modified_bsdf_eval, modified_bsdf_sample_weight,
     normal_map::load_optional_normal_map,
     texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
@@ -229,6 +229,7 @@ impl DisneyBrdfMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -256,9 +257,16 @@ impl DisneyBrdfMaterial {
         };
 
         Some(MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread,
@@ -266,7 +274,13 @@ impl DisneyBrdfMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -278,7 +292,12 @@ impl DisneyBrdfMaterial {
         if wo_local.z <= 0.0 || wi_local.z <= 0.0 {
             return Vec3::ZERO;
         }
-        self.make_bsdf(shading_vertex).eval(wo_local, wi_local)
+        modified_bsdf_eval(
+            shading_vertex,
+            wi,
+            self.make_bsdf(shading_vertex).eval(wo_local, wi_local),
+            mode,
+        )
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -460,6 +479,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
+        bsdf::TransportMode,
         material::ShadingVertex,
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
@@ -505,7 +525,12 @@ mod tests {
     fn default_material_evaluates_to_finite_positive_response_for_normal_incidence() {
         let material = DisneyBrdfMaterial::new(Vec3::new(0.82, 0.67, 0.16));
         let vtx = test_shading_vertex(Vec3::Z);
-        let f = material.eval(&vtx, Vec3::Z, &mut crate::sampler::AuxRng::default());
+        let f = material.eval(
+            &vtx,
+            Vec3::Z,
+            &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
+        );
         assert!(f.is_finite());
         assert!(f.x > 0.0 && f.y > 0.0 && f.z > 0.0);
     }
@@ -517,7 +542,12 @@ mod tests {
             .with_roughness(0.3);
         let vtx = test_shading_vertex(Vec3::new(0.3, -0.4, 0.866_025_4).normalize());
         let wi = Vec3::new(-vtx.wo.x, -vtx.wo.y, vtx.wo.z).normalize();
-        let f = material.eval(&vtx, wi, &mut crate::sampler::AuxRng::default());
+        let f = material.eval(
+            &vtx,
+            wi,
+            &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
+        );
         assert!(f.is_finite());
         assert!(f.length() > 0.0);
     }

@@ -85,6 +85,28 @@ pub use oren_nayar::OrenNayarBsdf;
 pub use sheen::{SheenBsdf, sheen_directional_albedo_estimate};
 pub use standard_surface::{StandardSurfaceBsdf, StandardSurfaceBsdfParams};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportMode {
+    Radiance,
+    Importance,
+}
+
+impl TransportMode {
+    pub fn reverse(self) -> Self {
+        match self {
+            Self::Radiance => Self::Importance,
+            Self::Importance => Self::Radiance,
+        }
+    }
+
+    pub fn transmission_scale(self, eta_rel: f32) -> f32 {
+        match self {
+            Self::Radiance => 1.0 / (eta_rel * eta_rel),
+            Self::Importance => 1.0,
+        }
+    }
+}
+
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct BsdfFlags: u32 {
@@ -102,6 +124,7 @@ pub struct BsdfSample {
     pub weight: Vec3,
     pub wi: Vec3,
     pub pdf: f32,
+    pub pdf_rev: f32,
     pub flags: BsdfFlags,
     pub eta: f32,
     pub wavelength_lock: Option<f32>,

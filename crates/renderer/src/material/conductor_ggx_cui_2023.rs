@@ -3,13 +3,13 @@ use std::{path::Path, sync::Arc};
 use glam::Vec3;
 
 use crate::{
-    bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf},
+    bsdf::{BsdfFlags, ConductorGgxCui2023Bsdf, TransportMode},
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace,
+    TextureColorSpace, modified_bsdf_eval, modified_bsdf_sample_weight,
     normal_map::load_optional_normal_map,
     texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
@@ -135,6 +135,7 @@ impl ConductorGgxCui2023Material {
         shading_vertex: &ShadingVertex,
         _randoms: &MaterialSampleRandoms,
         aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 {
             return None;
@@ -162,9 +163,16 @@ impl ConductorGgxCui2023Material {
         };
 
         Some(MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread,
@@ -172,7 +180,13 @@ impl ConductorGgxCui2023Material {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         if shading_vertex.wo.dot(shading_vertex.ng) <= 0.0 || wi.dot(shading_vertex.ng) <= 0.0 {
             return Vec3::ZERO;
         }
@@ -185,7 +199,12 @@ impl ConductorGgxCui2023Material {
         let (alpha_x, alpha_y) = self.alpha_xy_at(shading_vertex);
         let bsdf =
             ConductorGgxCui2023Bsdf::new(self.base_color_at(shading_vertex), alpha_x, alpha_y);
-        bsdf.eval(wo_local, wi_local, aux_rng)
+        modified_bsdf_eval(
+            shading_vertex,
+            wi,
+            bsdf.eval(wo_local, wi_local, aux_rng),
+            mode,
+        )
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {

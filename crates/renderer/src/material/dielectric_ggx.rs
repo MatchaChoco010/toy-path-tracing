@@ -3,13 +3,13 @@ use std::{path::Path, sync::Arc};
 use glam::{Vec2, Vec3};
 
 use crate::{
-    bsdf::{BsdfFlags, DielectricGgxBsdf, DielectricGgxEnergyCompensationLut},
+    bsdf::{BsdfFlags, DielectricGgxBsdf, DielectricGgxEnergyCompensationLut, TransportMode},
     sampler::{AuxRng, MaterialSampleRandoms},
 };
 
 use super::{
     GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, NormalMap, ScalarTexture, ShadingVertex, Texture,
-    TextureColorSpace,
+    TextureColorSpace, modified_bsdf_eval, modified_bsdf_sample_weight,
     normal_map::load_optional_normal_map,
     texture::{load_optional_color_texture, load_optional_scalar_texture},
 };
@@ -161,10 +161,11 @@ impl DielectricGgxMaterial {
         shading_vertex: &ShadingVertex,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let uc = randoms.u_lobe;
         let us = randoms.u_dir;
-        let sample = self.sample_impl(shading_vertex, uc, us)?;
+        let sample = self.sample_impl(shading_vertex, uc, us, mode)?;
 
         let wi_side = sample.wi.dot(shading_vertex.ng);
         if sample.flags.contains(BsdfFlags::REFLECTION) && wi_side <= GEOMETRIC_NORMAL_COS_EPSILON {
@@ -184,6 +185,7 @@ impl DielectricGgxMaterial {
         shading_vertex: &ShadingVertex,
         uc: f32,
         us: Vec2,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let wo_local = shading_vertex
             .frame
@@ -197,7 +199,7 @@ impl DielectricGgxMaterial {
             alpha_y,
             shading_vertex.front_face,
         );
-        let sample = bsdf.sample(wo_local, uc, us)?;
+        let sample = bsdf.sample(wo_local, uc, us, mode)?;
         let wi = shading_vertex.frame.local_to_world(sample.wi);
         let cone_spread = if sample.flags.contains(BsdfFlags::GLOSSY) {
             2.0 * roughness.clamp(0.0, 1.0)
@@ -206,9 +208,16 @@ impl DielectricGgxMaterial {
         };
 
         Some(MaterialSample {
-            weight: sample.weight,
+            weight: modified_bsdf_sample_weight(
+                shading_vertex,
+                wi,
+                sample.weight,
+                sample.flags,
+                mode,
+            ),
             wi,
             pdf: sample.pdf,
+            pdf_rev: sample.pdf_rev,
             flags: sample.flags,
             eta: sample.eta,
             cone_spread,
@@ -216,7 +225,13 @@ impl DielectricGgxMaterial {
         })
     }
 
-    pub fn eval(&self, shading_vertex: &ShadingVertex, wi: Vec3, _aux_rng: &mut AuxRng) -> Vec3 {
+    pub fn eval(
+        &self,
+        shading_vertex: &ShadingVertex,
+        wi: Vec3,
+        _aux_rng: &mut AuxRng,
+        mode: TransportMode,
+    ) -> Vec3 {
         let wo_local = shading_vertex
             .frame
             .world_to_local(shading_vertex.wo)
@@ -244,7 +259,12 @@ impl DielectricGgxMaterial {
             alpha_y,
             shading_vertex.front_face,
         );
-        bsdf.eval(wo_local, wi_local)
+        modified_bsdf_eval(
+            shading_vertex,
+            wi,
+            bsdf.eval(wo_local, wi_local, mode),
+            mode,
+        )
     }
 
     pub fn pdf(&self, shading_vertex: &ShadingVertex, wi: Vec3) -> f32 {
@@ -474,7 +494,7 @@ mod tests {
     use glam::{Vec2, Vec3};
 
     use crate::{
-        bsdf::BsdfFlags,
+        bsdf::{BsdfFlags, TransportMode},
         material::{ScalarTexture, ShadingVertex, Texture},
         math::OrthonormalBasis,
         scene::{InstanceIndex, TriangleRef},
@@ -551,6 +571,7 @@ mod tests {
                 &vtx,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             ) {
                 if sample.flags.contains(BsdfFlags::REFLECTION) {
                     saw_reflection = true;
@@ -583,6 +604,7 @@ mod tests {
                 &vtx,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("expected a back-face sample");
         assert!(

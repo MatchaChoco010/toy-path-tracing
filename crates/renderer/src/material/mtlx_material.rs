@@ -4,14 +4,17 @@ use glam::Vec3;
 
 use crate::bsdf::{
     MtlxDielectricGgxDirectionalAlbedoLut, MtlxGeneralizedSchlickGgxDirectionalAlbedoLut,
-    SheenDirectionalAlbedoLut,
+    SheenDirectionalAlbedoLut, TransportMode,
 };
 use crate::light_tree::LightTreePrecompute;
 use crate::math::sg::SgLobe;
 use crate::sampler::{AuxRng, MaterialSampleRandoms};
 
 use super::mtlx::{self, CompiledMaterial, MtlxScratch};
-use super::{GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, ShadingVertex};
+use super::{
+    GEOMETRIC_NORMAL_COS_EPSILON, MaterialSample, ShadingVertex, modified_bsdf_eval,
+    modified_bsdf_sample_weight,
+};
 
 const DIFFUSE_CONE_SPREAD: f32 = 0.5;
 
@@ -122,6 +125,7 @@ impl MtlxMaterial {
         scratch: &MtlxScratch,
         randoms: &MaterialSampleRandoms,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Option<MaterialSample> {
         let active = self.active(sv);
         let thin_walled = active.thin_walled;
@@ -163,6 +167,11 @@ impl MtlxMaterial {
         if pdf <= 1.0e-6 {
             return None;
         }
+        let pdf_rev = if thin_walled && is_transmission {
+            0.0
+        } else {
+            mtlx::runtime::pdf_closure_cached(active, regs, sv, wi_local, wo_local, dalbedo_cache)
+        };
         let weight = if thin_walled && is_transmission {
             f
         } else {
@@ -176,9 +185,10 @@ impl MtlxMaterial {
         };
 
         Some(MaterialSample {
-            weight,
+            weight: modified_bsdf_sample_weight(sv, wi, weight, flags, mode),
             wi,
             pdf,
+            pdf_rev,
             flags,
             eta,
             cone_spread: DIFFUSE_CONE_SPREAD,
@@ -192,6 +202,7 @@ impl MtlxMaterial {
         scratch: &MtlxScratch,
         wi: Vec3,
         _aux_rng: &mut AuxRng,
+        mode: TransportMode,
     ) -> Vec3 {
         if sv.wo.dot(sv.ng) <= 0.0 {
             return Vec3::ZERO;
@@ -206,14 +217,27 @@ impl MtlxMaterial {
         let wo_local = sv.frame.world_to_local(sv.wo).normalize_or_zero();
         let wi_local = sv.frame.world_to_local(wi).normalize_or_zero();
         let regs = scratch.regs_slice(sv.mtlx_regs.expect("precompute_shading not called"));
-        mtlx::runtime::eval_closure_cached(
+        let f = mtlx::runtime::eval_closure_cached(
             active,
             regs,
             sv,
             wo_local,
             wi_local,
             Self::dalbedo_cache(sv, scratch),
-        )
+        );
+        let f = if mode == TransportMode::Importance {
+            mtlx::runtime::eval_closure_cached(
+                active,
+                regs,
+                sv,
+                wi_local,
+                wo_local,
+                Self::dalbedo_cache(sv, scratch),
+            )
+        } else {
+            f
+        };
+        modified_bsdf_eval(sv, wi, f, mode)
     }
 
     pub fn pdf(&self, sv: &ShadingVertex, scratch: &MtlxScratch, wi: Vec3) -> f32 {
@@ -240,7 +264,13 @@ impl MtlxMaterial {
         )
     }
 
-    pub fn eval_pdf(&self, sv: &ShadingVertex, scratch: &MtlxScratch, wi: Vec3) -> (Vec3, f32) {
+    pub fn eval_pdf(
+        &self,
+        sv: &ShadingVertex,
+        scratch: &MtlxScratch,
+        wi: Vec3,
+        mode: TransportMode,
+    ) -> (Vec3, f32) {
         if sv.wo.dot(sv.ng) <= 0.0 {
             return (Vec3::ZERO, 0.0);
         }
@@ -254,14 +284,27 @@ impl MtlxMaterial {
         let wo_local = sv.frame.world_to_local(sv.wo).normalize_or_zero();
         let wi_local = sv.frame.world_to_local(wi).normalize_or_zero();
         let regs = scratch.regs_slice(sv.mtlx_regs.expect("precompute_shading not called"));
-        mtlx::runtime::eval_pdf_closure_cached(
+        let (f, pdf) = mtlx::runtime::eval_pdf_closure_cached(
             active,
             regs,
             sv,
             wo_local,
             wi_local,
             Self::dalbedo_cache(sv, scratch),
-        )
+        );
+        let f = if mode == TransportMode::Importance {
+            mtlx::runtime::eval_closure_cached(
+                active,
+                regs,
+                sv,
+                wi_local,
+                wo_local,
+                Self::dalbedo_cache(sv, scratch),
+            )
+        } else {
+            f
+        };
+        (modified_bsdf_eval(sv, wi, f, mode), pdf)
     }
 
     pub fn le(&self, sv: &ShadingVertex, scratch: &MtlxScratch) -> Option<Vec3> {
@@ -353,7 +396,7 @@ impl MtlxMaterial {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bsdf::mtlx::ScatterMode;
+    use crate::bsdf::{TransportMode, mtlx::ScatterMode};
     use crate::material::Material;
     use crate::material::mtlx::compiled::{ClosureNode, CompiledMaterial, ParamRef};
     use crate::math::OrthonormalBasis;
@@ -606,6 +649,7 @@ mod tests {
             &direct_scratch,
             Vec3::Z,
             &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
         );
         sv.mtlx_regs = None;
         sv.mtlx_precomputed_for = None;
@@ -615,6 +659,7 @@ mod tests {
             &layered_scratch,
             Vec3::Z,
             &mut crate::sampler::AuxRng::default(),
+            TransportMode::Radiance,
         );
 
         assert!(layered_f.abs_diff_eq(direct_f, 1.0e-6));
@@ -690,7 +735,8 @@ mod tests {
                 &sv,
                 &scratch,
                 -Vec3::Z,
-                &mut crate::sampler::AuxRng::default()
+                &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             ),
             Vec3::ZERO
         );
@@ -702,6 +748,7 @@ mod tests {
                 &scratch,
                 &crate::sampler::MaterialSampleRandoms::from_aux_rng(&mut rng),
                 &mut crate::sampler::AuxRng::default(),
+                TransportMode::Radiance,
             )
             .expect("thin-walled transmission should sample");
         assert!(sample.flags.contains(crate::bsdf::BsdfFlags::DELTA));
@@ -743,6 +790,7 @@ mod tests {
                     scratch,
                     &randoms,
                     &mut crate::sampler::AuxRng::default(),
+                    TransportMode::Radiance,
                 ) {
                     total += 1;
                     if s.flags.contains(BsdfFlags::GLOSSY)
