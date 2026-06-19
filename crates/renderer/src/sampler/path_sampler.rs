@@ -9,6 +9,8 @@ pub struct MaterialSampleRandoms {
     pub u_dir: Vec2,
     pub u_extra0: f32,
     pub u_extra1: f32,
+    pub u_extra2: f32,
+    pub u_extra3: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,6 +45,8 @@ impl MaterialSampleRandoms {
             u_dir: Vec2::new(rng.next_f32(), rng.next_f32()),
             u_extra0: rng.next_f32(),
             u_extra1: rng.next_f32(),
+            u_extra2: rng.next_f32(),
+            u_extra3: rng.next_f32(),
         }
     }
 }
@@ -67,8 +71,10 @@ const MATERIAL_LAYER_OFFSET: u32 = 6;
 const MATERIAL_DIR_OFFSET: u32 = 7;
 const MATERIAL_EXTRA0_OFFSET: u32 = 9;
 const MATERIAL_EXTRA1_OFFSET: u32 = 10;
-const RUSSIAN_ROULETTE_OFFSET: u32 = 11;
-const AUX_RNG_SEED_OFFSET: u32 = 12;
+const MATERIAL_EXTRA2_OFFSET: u32 = 11;
+const MATERIAL_EXTRA3_OFFSET: u32 = 12;
+const RUSSIAN_ROULETTE_OFFSET: u32 = 13;
+const AUX_RNG_SEED_OFFSET: u32 = 14;
 const SCRAMBLE_SEED: u32 = 0;
 
 impl PathSampler {
@@ -103,6 +109,8 @@ impl PathSampler {
                 u_dir: self.sample_2d(base + MATERIAL_DIR_OFFSET),
                 u_extra0: self.sample_1d(base + MATERIAL_EXTRA0_OFFSET),
                 u_extra1: self.sample_1d(base + MATERIAL_EXTRA1_OFFSET),
+                u_extra2: self.sample_1d(base + MATERIAL_EXTRA2_OFFSET),
+                u_extra3: self.sample_1d(base + MATERIAL_EXTRA3_OFFSET),
             },
             u_rr: self.sample_1d(base + RUSSIAN_ROULETTE_OFFSET),
             aux_rng_seed: self.aux_rng_seed(base + AUX_RNG_SEED_OFFSET),
